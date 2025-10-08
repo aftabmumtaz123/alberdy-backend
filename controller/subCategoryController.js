@@ -1,5 +1,5 @@
 const Category = require('../model/Category'); // Standardized path
-const Subcategory = require('../model/Subcategory');
+const Subcategory = require('../model/subCategory');
 const mongoose = require('mongoose');
 const fs = require('fs');
 
