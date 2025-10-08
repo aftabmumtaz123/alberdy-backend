@@ -1,6 +1,6 @@
 
-const Category = require('../model/Category'); // Updated path to match project
-const Subcategory = require('../model/Subcategory')
+const Category = require('../model/Category'); 
+const Subcategory = require('../model/subCategory')
 
 
 
