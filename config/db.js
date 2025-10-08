@@ -2,12 +2,12 @@ const express = require('express');
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 
-dotenv.config(); // must come before using process.env
+dotenv.config(); // Load .env before using process.env
 
 const app = express();
 app.use(express.json());
 
-const mongoURI = process.env.MONGODB_URL;
+const mongoURI = process.env.MONGODB_URL; // ✅ Correct variable name
 console.log("Mongo URI from env:", mongoURI); // Debugging
 
 mongoose.connect(mongoURI)
