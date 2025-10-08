@@ -2,7 +2,7 @@
 const mongoose = require('mongoose');
 require('dotenv').config();
 
-const connection = async () => {
+const connectDB = async () => {
   try {
     const mongoURI = process.env.MONGODB_URL;
     console.log("🔗 Connecting to MongoDB...");
@@ -20,4 +20,4 @@ const connection = async () => {
   }
 };
 
-module.exports = connection;
+module.exports = connectDB; // ✅ Export a function
