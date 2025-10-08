@@ -12,7 +12,6 @@ const brandSchema = new mongoose.Schema({
 });
 
 // Index for faster lookups
-brandSchema.index({ status: 1 });
 brandSchema.index({ brandCode: 1 });
 
 module.exports = mongoose.model('Brand', brandSchema);
