@@ -6,138 +6,138 @@ const mongoose = require('mongoose');
 
 
 
-// exports.createAppConfiguration = async (req, res) => {
-//   try {
-//     // Debug: Log the incoming request body and file
-//     console.log('req.body:', req.body);
-//     console.log('req.file:', req.file);
+exports.createAppConfiguration = async (req, res) => {
+  try {
+    // Debug: Log the incoming request body and file
+    console.log('req.body:', req.body);
+    console.log('req.file:', req.file);
 
-//     // Check if req.body is undefined
-//     if (!req.body) {
-//       return res.status(400).json({
-//         success: false,
-//         message: 'Request body is missing',
-//       });
-//     }
+    // Check if req.body is undefined
+    if (!req.body) {
+      return res.status(400).json({
+        success: false,
+        message: 'Request body is missing',
+      });
+    }
 
-//     const {
-//       appName,
-//       primaryColor,
-//       secondaryColor,
-//       facebook,
-//       aboutUs,
-//       contactEmails,
-//       supportPhones,
-//       instagram,
-//       youtube,
-//       linkedin,
-//       street_address,
-//       zip_code
-//     } = req.body;
-//     const appLogo = req.file ? req.file.path : ''; // Use appLogo to match schema
+    const {
+      appName,
+      primaryColor,
+      secondaryColor,
+      facebook,
+      aboutUs,
+      contactEmails,
+      supportPhones,
+      instagram,
+      youtube,
+      linkedin,
+      street_address,
+      zip_code
+    } = req.body;
+    const appLogo = req.file ? req.file.path : ''; // Use appLogo to match schema
 
-//     // Validate required fields
-//     if (!appName || !primaryColor || !secondaryColor) {
-//       return res.status(400).json({
-//         success: false,
-//         message: 'appName, primaryColor, and secondaryColor are required',
-//       });
-//     }
+    // Validate required fields
+    if (!appName || !primaryColor || !secondaryColor) {
+      return res.status(400).json({
+        success: false,
+        message: 'appName, primaryColor, and secondaryColor are required',
+      });
+    }
 
-//     // Validate color formats (hex or rgb)
-//     const validateColor = (color) => /^#([0-9A-F]{3}|[0-9A-F]{6})|rgb\(\d{1,3}%?,\s*\d{1,3}%?,\s*\d{1,3}%?\)$/.test(color.toLowerCase());
-//     if (!validateColor(primaryColor)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: 'Invalid primaryColor format (e.g., #FF0000 or rgba(43, 32, 32, 1))',
-//       });
-//     }
-//     if (!validateColor(secondaryColor)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: 'Invalid secondaryColor format (e.g., #123456 or rgba(49, 38, 48, 1))',
-//       });
-//     }
+    // Validate color formats (hex or rgb)
+    const validateColor = (color) => /^#([0-9A-F]{3}|[0-9A-F]{6})|rgb\(\d{1,3}%?,\s*\d{1,3}%?,\s*\d{1,3}%?\)$/.test(color.toLowerCase());
+    if (!validateColor(primaryColor)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid primaryColor format (e.g., #FF0000 or rgba(43, 32, 32, 1))',
+      });
+    }
+    if (!validateColor(secondaryColor)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid secondaryColor format (e.g., #123456 or rgba(49, 38, 48, 1))',
+      });
+    }
 
-//     // Validate social fields as URLs if provided
-//     const validateUrl = (url) => url ? /^https?:\/\/.+/.test(url) : true;
-//     if (!validateUrl(facebook) || !validateUrl(instagram) || !validateUrl(youtube) || !validateUrl(linkedin)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: 'Social links must be valid URLs if provided',
-//       });
-//     }
+    // Validate social fields as URLs if provided
+    const validateUrl = (url) => url ? /^https?:\/\/.+/.test(url) : true;
+    if (!validateUrl(facebook) || !validateUrl(instagram) || !validateUrl(youtube) || !validateUrl(linkedin)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Social links must be valid URLs if provided',
+      });
+    }
 
-//     // Validate arrays if provided
-//     if (contactEmails && !Array.isArray(contactEmails)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: 'contactEmails must be an array',
-//       });
-//     }
-//     if (supportPhones && !Array.isArray(supportPhones)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: 'supportPhones must be an array',
-//       });
-//     }
+    // Validate arrays if provided
+    if (contactEmails && !Array.isArray(contactEmails)) {
+      return res.status(400).json({
+        success: false,
+        message: 'contactEmails must be an array',
+      });
+    }
+    if (supportPhones && !Array.isArray(supportPhones)) {
+      return res.status(400).json({
+        success: false,
+        message: 'supportPhones must be an array',
+      });
+    }
 
-//     // Check for duplicate appName
-//     const existingConfig = await Configuration.findOne({ appName });
-//     if (existingConfig) {
-//       return res.status(400).json({
-//         success: false,
-//         message: 'Configuration with this appName already exists',
-//       });
-//     }
+    // Check for duplicate appName
+    const existingConfig = await Configuration.findOne({ appName });
+    if (existingConfig) {
+      return res.status(400).json({
+        success: false,
+        message: 'Configuration with this appName already exists',
+      });
+    }
 
-//     // Create configuration with defaults
-//     const configuration = await Configuration.create({
-//       appName,
-//       appLogo,
-//       primaryColor,
-//       secondaryColor,
-//       aboutUs: aboutUs || '',
-//       contactEmails: contactEmails || [],
-//       supportPhones: supportPhones || [],
-//       facebook: facebook || '',
-//       instagram: instagram || '',
-//       youtube: youtube || '',
-//       linkedin: linkedin || '',
-//       street_address: street_address || '',
-//       zip_code: zip_code || ''
-//     });
+    // Create configuration with defaults
+    const configuration = await Configuration.create({
+      appName,
+      appLogo,
+      primaryColor,
+      secondaryColor,
+      aboutUs: aboutUs || '',
+      contactEmails: contactEmails || [],
+      supportPhones: supportPhones || [],
+      facebook: facebook || '',
+      instagram: instagram || '',
+      youtube: youtube || '',
+      linkedin: linkedin || '',
+      street_address: street_address || '',
+      zip_code: zip_code || ''
+    });
 
-//     res.status(201).json({
-//       success: true,
-//       message: 'Configuration created successfully',
-//       configuration,
-//     });
-//   } catch (error) {
-//     // Handle Cloudinary file cleanup on error with error catching
-//     if (req.file && req.file.filename) {
-//       await cloudinary.uploader.destroy(req.file.filename).catch(err => console.error('Cloudinary cleanup failed:', err));
-//     }
+    res.status(201).json({
+      success: true,
+      message: 'Configuration created successfully',
+      configuration,
+    });
+  } catch (error) {
+    // Handle Cloudinary file cleanup on error with error catching
+    if (req.file && req.file.filename) {
+      await cloudinary.uploader.destroy(req.file.filename).catch(err => console.error('Cloudinary cleanup failed:', err));
+    }
 
-//     if (error.name === 'ValidationError') {
-//       return res.status(400).json({
-//         success: false,
-//         message: error.message,
-//       });
-//     } else if (error.name === 'MongoError' && error.code === 11000) {
-//       return res.status(400).json({
-//         success: false,
-//         message: 'Duplicate key error (e.g., appName already exists)',
-//       });
-//     } else {
-//       console.error('Error creating configuration:', error);
-//       return res.status(500).json({
-//         success: false,
-//         message: 'Internal server error',
-//       });
-//     }
-//   }
-// };
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    } else if (error.name === 'MongoError' && error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Duplicate key error (e.g., appName already exists)',
+      });
+    } else {
+      console.error('Error creating configuration:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error',
+      });
+    }
+  }
+};
 
 exports.getAppConfigurationById = async (req, res) => {
   try {
