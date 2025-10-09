@@ -2,10 +2,22 @@
 const express = require('express');
 const router = express.Router();
 const Order = require('../model/Order');
-const auth = require('../middleware/auth'); // Assume middleware that sets req.user.id from JWT
 const Product = require('../model/Product'); // To validate stock (optional)
 const User = require('../model/User'); // To populate customer info
 const mongoose = require('mongoose');
+
+
+// Auth and role middleware
+const authMiddleware = require('../middleware/auth');
+const requireRole = (roles) => (req, res, next) => {
+  if (!req.user || !roles.includes(req.user.role)) {
+    return res.status(403).json({ success: false, msg: 'Access denied' });
+  }
+  next();
+};
+
+
+
 
 // Helper function to generate sequential order number (e.g., #ORD-001 to match UI)
 const generateOrderNumber = async () => {
@@ -24,7 +36,7 @@ const generateOrderNumber = async () => {
 };
 
 // POST /api/orders - Create a new order from cart/checkout (without transactions for standalone MongoDB)
-router.post('/', auth, async (req, res) => {
+router.post('/', authMi, async (req, res) => {
   try {
     const { items, subtotal, tax, discount, total, paymentMethod, shippingAddress, notes } = req.body;
 
