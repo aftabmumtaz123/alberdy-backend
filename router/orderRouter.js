@@ -36,7 +36,7 @@ const generateOrderNumber = async () => {
 };
 
 // POST /api/orders - Create a new order from cart/checkout (without transactions for standalone MongoDB)
-router.post('/', authMi, async (req, res) => {
+router.post('/', authMiddleware,  requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { items, subtotal, tax, discount, total, paymentMethod, shippingAddress, notes } = req.body;
 
@@ -130,7 +130,7 @@ router.post('/', authMi, async (req, res) => {
 });
 
 // GET /api/orders - Fetch user's orders (list with pagination)
-router.get('/', auth, async (req, res) => {
+router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -161,7 +161,7 @@ router.get('/', auth, async (req, res) => {
 });
 
 // GET /api/orders/:id - Fetch single order details (matches UI)
-router.get('/:id', auth, async (req, res) => {
+router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -200,7 +200,7 @@ router.get('/:id', auth, async (req, res) => {
 });
 
 // PUT /api/orders/:id - Full update order (e.g., address, notes, delivery info; restrict fields post-creation)
-router.put('/:id', auth, async (req, res) => {
+router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { id } = req.params;
     const { shippingAddress, notes, paymentStatus, deliveryAssigned, deliveryDate } = req.body;
@@ -259,7 +259,7 @@ router.put('/:id', auth, async (req, res) => {
 });
 
 // PUT /api/orders/:id/status - Update order status (e.g., to confirmed, shipped, delivered, cancelled)
-router.put('/:id/status', auth, async (req, res) => {
+router.put('/:id/status', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -303,7 +303,7 @@ router.put('/:id/status', auth, async (req, res) => {
   }
 });
 
-router.delete('/:id', auth, async (req, res) => {
+router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']),  async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -333,5 +333,5 @@ router.delete('/:id', auth, async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting order.' });
   }
 });
-
+//Orders
 module.exports = router;
