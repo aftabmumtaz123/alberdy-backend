@@ -130,7 +130,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async 
 
 
 // Get Offer by ID
-router.get('/:id', async (req, res) => {
+router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']),  async (req, res) => {
   try {
     const { id } = req.params;
     const order = await Order.findById(id).populate('items.product', 'name price');
