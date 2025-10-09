@@ -56,7 +56,7 @@ app.use('/api/orders', require('./router/orderRouter')); // Example: Protected o
 app.use('/', require('./router/authRouter')); // Example: Auth routes (login, register, refresh, logout)
 
 app.get("/",(req,res)=>{
-  res.json({Message: "API's are running well bro"})
+  res.json({Message: "API's are running well bro!!"})
 })
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
