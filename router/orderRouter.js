@@ -4,6 +4,7 @@ const router = express.Router();
 const Order = require('../model/Order');
 const auth = require('../middleware/auth'); // Assume middleware that sets req.user.id from JWT
 const Product = require('../model/Product'); // To validate stock (optional)
+const User = require('../model/User'); // To populate customer info
 const mongoose = require('mongoose');
 
 // Helper function to generate sequential order number (e.g., #ORD-001 to match UI)
@@ -25,7 +26,7 @@ const generateOrderNumber = async () => {
 // POST /api/orders - Create a new order from cart/checkout (without transactions for standalone MongoDB)
 router.post('/', auth, async (req, res) => {
   try {
-    const { items, subtotal, tax, discount, total, paymentMethod, shippingAddress } = req.body;
+    const { items, subtotal, tax, discount, total, paymentMethod, shippingAddress, notes } = req.body;
 
     // Validation
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -63,12 +64,6 @@ router.post('/', auth, async (req, res) => {
       return res.status(400).json({ success: false, msg: 'Total mismatch in order calculation.' });
     }
 
-    // // Recalculate subtotal from items to ensure consistency
-    // const calculatedSubtotal = updatedItems.reduce((sum, it) => sum + it.total, 0);
-    // if (Math.abs(calculatedSubtotal - subtotal) > 0.01) {
-    //   return res.status(400).json({ success: false, msg: 'Subtotal mismatch with items.' });
-    // }
-
     // Create and save order
     const order = new Order({
       user: req.user.id,
@@ -84,6 +79,7 @@ router.post('/', auth, async (req, res) => {
         ...shippingAddress,
         country: shippingAddress.country || 'USA' // Add if needed
       },
+      notes: notes || '',
       status: 'pending',
       paymentStatus: paymentMethod === 'COD' ? 'pending' : 'pending' // For online, handle separately
     });
@@ -121,6 +117,135 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
+// GET /api/orders - Fetch user's orders (list with pagination)
+router.get('/', auth, async (req, res) => {
+  try {
+    const { page = 1, limit = 10 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const query = { user: req.user.id }; // User-specific; remove for admin all-orders
+
+    const orders = await Order.find(query)
+      .populate('items.product', 'name price')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await Order.countDocuments(query);
+
+    res.json({
+      success: true,
+      data: orders,
+      pagination: {
+        current: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit)),
+        total
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching orders:', err);
+    res.status(500).json({ success: false, msg: 'Error fetching orders.' });
+  }
+});
+
+// GET /api/orders/:id - Fetch single order details (matches UI)
+router.get('/:id', auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, msg: 'Invalid order ID.' });
+    }
+
+    const order = await Order.findOne({ _id: id, user: req.user.id }) // User-specific; remove for admin
+      .populate('user', 'name email phone') // For customer info
+      .populate('items.product', 'name price thumbnail images'); // For products table
+
+    if (!order) {
+      return res.status(404).json({ success: false, msg: 'Order not found or access denied.' });
+    }
+
+    // Format response to match UI (e.g., dates)
+    const formattedOrder = {
+      ...order.toObject(),
+      createdAt: order.createdAt.toISOString().split('T')[0], // YYYY-MM-DD
+      updatedAt: order.updatedAt.toISOString().split('T')[0],
+      // Ensure shippingAddress has fullName (from user or input)
+      shippingAddress: {
+        ...order.shippingAddress,
+        fullName: order.shippingAddress.fullName || order.user?.name || 'Unknown'
+      }
+    };
+
+    res.json({
+      success: true,
+      order: formattedOrder
+    });
+  } catch (err) {
+    console.error('Error fetching order details:', err);
+    res.status(500).json({ success: false, msg: 'Server error fetching order details.' });
+  }
+});
+
+// PUT /api/orders/:id - Full update order (e.g., address, notes, delivery info; restrict fields post-creation)
+router.put('/:id', auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { shippingAddress, notes, paymentStatus, deliveryAssigned, deliveryDate } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, msg: 'Invalid order ID.' });
+    }
+
+    // Restrict updates: Only allow if pending or for specific fields (e.g., no items/total after creation)
+    const allowedUpdates = { shippingAddress, notes, paymentStatus, deliveryAssigned, deliveryDate };
+    const updateData = {};
+    for (const [key, value] of Object.entries(allowedUpdates)) {
+      if (value !== undefined) updateData[key] = value;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ success: false, msg: 'No valid fields to update.' });
+    }
+
+    // Validate shippingAddress if provided
+    if (updateData.shippingAddress) {
+      const addr = updateData.shippingAddress;
+      if (!addr.street || !addr.city || !addr.zip || !addr.fullName || !addr.phone) {
+        return res.status(400).json({ success: false, msg: 'Complete shipping address is required.' });
+      }
+    }
+
+    // Validate paymentStatus
+    if (updateData.paymentStatus && !['pending', 'paid', 'failed'].includes(updateData.paymentStatus)) {
+      return res.status(400).json({ success: false, msg: 'Invalid payment status.' });
+    }
+
+    const order = await Order.findOneAndUpdate(
+      { _id: id, user: req.user.id }, // User-specific
+      { $set: updateData },
+      { new: true, runValidators: true }
+    );
+
+    if (!order) {
+      return res.status(404).json({ success: false, msg: 'Order not found or access denied.' });
+    }
+
+    // Populate for response
+    await order.populate('items.product', 'name price thumbnail images');
+    await order.populate('user', 'name email phone');
+
+    res.json({
+      success: true,
+      order: order.toObject(),
+      msg: `Order ${order.orderNumber} updated successfully.`
+    });
+  } catch (err) {
+    console.error('Order update error:', err);
+    res.status(400).json({ success: false, msg: err.message || 'Server error updating order.' });
+  }
+});
+
 // PUT /api/orders/:id/status - Update order status (e.g., to confirmed, shipped, delivered, cancelled)
 router.put('/:id/status', auth, async (req, res) => {
   try {
@@ -153,6 +278,7 @@ router.put('/:id/status', auth, async (req, res) => {
 
     // Populate for response
     await order.populate('items.product', 'name price thumbnail images');
+    await order.populate('user', 'name email phone');
 
     res.json({
       success: true,
@@ -164,20 +290,6 @@ router.put('/:id/status', auth, async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error updating order status.' });
   }
 });
-
-// Optional: GET /api/orders - Fetch user's orders (for address saving/selection, but not required here)
-router.get('/', auth, async (req, res) => {
-  try {
-    const orders = await Order.find({ user: req.user.id })
-      .populate('items.product', 'name')
-      .sort({ createdAt: -1 })
-      .limit(10);
-    res.json({ success: true, orders });
-  } catch (err) {
-    res.status(500).json({ success: false, msg: 'Error fetching orders.' });
-  }
-});
-
 
 router.delete('/:id', auth, async (req, res) => {
   try {
@@ -209,7 +321,5 @@ router.delete('/:id', auth, async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting order.' });
   }
 });
-
-
 
 module.exports = router;
