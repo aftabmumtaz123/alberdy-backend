@@ -13,13 +13,13 @@ const requireRole = (roles) => (req, res, next) => {
 };
 
 const {
-  // createAppConfiguration,
+  createAppConfiguration,
   updateAppConfiguration,
   getAppConfigurationById
 } = require("../controller/appConfigurationController");
 
 // Create new configuration
-// router.post("/set", authMiddleware, upload.single("appLogo"), createAppConfiguration);
+router.post("/set", authMiddleware, upload.single("appLogo"), createAppConfiguration);
 
 // Update configuration
 router.put("/set/:id", authMiddleware, requireRole(['Super Admin', 'Manager']), upload.single("appLogo"), updateAppConfiguration);
