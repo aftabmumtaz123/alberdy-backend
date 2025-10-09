@@ -6,7 +6,6 @@ const Product = require('../model/Product'); // To validate stock (optional)
 const User = require('../model/User'); // To populate customer info
 const mongoose = require('mongoose');
 
-
 // Auth and role middleware
 const authMiddleware = require('../middleware/auth');
 const requireRole = (roles) => (req, res, next) => {
@@ -15,9 +14,6 @@ const requireRole = (roles) => (req, res, next) => {
   }
   next();
 };
-
-
-
 
 // Helper function to generate sequential order number (e.g., #ORD-001 to match UI)
 const generateOrderNumber = async () => {
@@ -36,7 +32,7 @@ const generateOrderNumber = async () => {
 };
 
 // POST /api/orders - Create a new order from cart/checkout (without transactions for standalone MongoDB)
-router.post('/', authMiddleware,  requireRole(['Super Admin', 'Manager']), async (req, res) => {
+router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { items, subtotal, tax, discount, total, paymentMethod, shippingAddress, notes } = req.body;
 
@@ -65,6 +61,7 @@ router.post('/', authMiddleware,  requireRole(['Super Admin', 'Manager']), async
         total: product.price * item.quantity
       });
     }
+    
 
     // Generate order number
     const orderNumber = await generateOrderNumber();
@@ -129,16 +126,41 @@ router.post('/', authMiddleware,  requireRole(['Super Admin', 'Manager']), async
   }
 });
 
-// GET /api/orders - Fetch user's orders (list with pagination)
+
+
+
+// Get Offer by ID
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const order = await Order.findById(id).populate('items.product', 'name price');
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+    res.status(200).json({
+      success: true,
+      data: order
+    });
+  } catch (error) {
+    console.error('Error fetching order:', error);
+    res.status(500).json({ message: 'Server error fetching order' });
+  }
+});
+
+
+
+// GET /api/orders - Fetch all orders (list with pagination) - FIXED: Removed user filter for admin access
 router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const query = { user: req.user.id }; // User-specific; remove for admin all-orders
+    // FIXED: Removed { user: req.user.id } to show all orders for admins
+    const query = {}; // Optional: Add filters like { status: req.query.status } if needed
 
     const orders = await Order.find(query)
       .populate('items.product', 'name price')
+      .populate('user', 'name email phone') // Added for customer info in list view
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -160,46 +182,42 @@ router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async (
   }
 });
 
-// GET /api/orders/:id - Fetch single order details (matches UI)
-router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
+// GET /api/orders - Fetch all orders (list with pagination)
+router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
-    const { id } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, msg: 'Invalid order ID.' });
-    }
+    const query = {}; // All orders for admins
 
-    const order = await Order.findOne({ _id: id, user: req.user.id }) // User-specific; remove for admin
-      .populate('user', 'name email phone') // For customer info
-      .populate('items.product', 'name price thumbnail images'); // For products table
+    const orders = await Order.find(query)
+      .populate('items.product', 'name price')
+      .populate('user', 'name email phone')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
 
-    if (!order) {
-      return res.status(404).json({ success: false, msg: 'Order not found or access denied.' });
-    }
+    // TEMP DEBUG: Log IDs for troubleshooting
+    console.log('Available order IDs in list:', orders.map(o => ({ _id: o._id.toString(), orderNumber: o.orderNumber, createdAt: o.createdAt })));
 
-    // Format response to match UI (e.g., dates)
-    const formattedOrder = {
-      ...order.toObject(),
-      createdAt: order.createdAt.toISOString().split('T')[0], // YYYY-MM-DD
-      updatedAt: order.updatedAt.toISOString().split('T')[0],
-      // Ensure shippingAddress has fullName (from user or input)
-      shippingAddress: {
-        ...order.shippingAddress,
-        fullName: order.shippingAddress.fullName || order.user?.name || 'Unknown'
-      }
-    };
+    const total = await Order.countDocuments(query);
 
     res.json({
       success: true,
-      order: formattedOrder
+      data: orders,
+      pagination: {
+        current: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit)),
+        total
+      }
     });
   } catch (err) {
-    console.error('Error fetching order details:', err);
-    res.status(500).json({ success: false, msg: 'Server error fetching order details.' });
+    console.error('Error fetching orders:', err);
+    res.status(500).json({ success: false, msg: 'Error fetching orders.' });
   }
 });
 
-// PUT /api/orders/:id - Full update order (e.g., address, notes, delivery info; restrict fields post-creation)
+// PUT /api/orders/:id - Full update order (e.g., address, notes, delivery info; restrict fields post-creation) - FIXED: Removed user filter
 router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { id } = req.params;
@@ -233,8 +251,9 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
       return res.status(400).json({ success: false, msg: 'Invalid payment status.' });
     }
 
+    // FIXED: Removed { user: req.user.id } to allow admin updates to any order
     const order = await Order.findOneAndUpdate(
-      { _id: id, user: req.user.id }, // User-specific
+      { _id: id },
       { $set: updateData },
       { new: true, runValidators: true }
     );
@@ -258,7 +277,7 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
   }
 });
 
-// PUT /api/orders/:id/status - Update order status (e.g., to confirmed, shipped, delivered, cancelled)
+// PUT /api/orders/:id/status - Update order status (e.g., to confirmed, shipped, delivered, cancelled) - FIXED: Removed user filter
 router.put('/:id/status', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { id } = req.params;
@@ -272,9 +291,9 @@ router.put('/:id/status', authMiddleware, requireRole(['Super Admin', 'Manager']
       return res.status(400).json({ success: false, msg: 'Invalid status. Must be one of: pending, confirmed, shipped, delivered, cancelled.' });
     }
 
-    // Find and update order (only allow update if user is owner or admin; assume auth checks role)
+    // FIXED: Removed { user: req.user.id } to allow admin updates to any order
     const order = await Order.findOneAndUpdate(
-      { _id: id, user: req.user.id }, // Restrict to user's order; remove for admin access
+      { _id: id },
       { status },
       { new: true } // Return updated document
     );
@@ -303,7 +322,8 @@ router.put('/:id/status', authMiddleware, requireRole(['Super Admin', 'Manager']
   }
 });
 
-router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']),  async (req, res) => {
+// DELETE /api/orders/:id - FIXED: Removed user filter; Added optional status check for stock restore
+router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -312,16 +332,18 @@ router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']),  
       return res.status(400).json({ success: false, msg: 'Invalid order ID.' });
     }
 
-    // Find and delete order (restrict to user's order; remove user filter for admin access)
-    const order = await Order.findOneAndDelete({ _id: id, user: req.user.id });
+    // FIXED: Removed { user: req.user.id } to allow admin deletion of any order
+    const order = await Order.findOneAndDelete({ _id: id });
 
     if (!order) {
       return res.status(404).json({ success: false, msg: 'Order not found or access denied.' });
     }
 
-    // Optional: Restore stock if deleting (e.g., for cancelled orders)
-    for (let item of order.items) {
-      await Product.findByIdAndUpdate(item.product, { $inc: { stockQuantity: item.quantity } });
+    // Optional: Restore stock if deleting (e.g., for cancelled orders) - Added status check
+    if (order.status === 'cancelled' || order.status === 'pending') { // Only restore if not shipped/delivered
+      for (let item of order.items) {
+        await Product.findByIdAndUpdate(item.product, { $inc: { stockQuantity: item.quantity } });
+      }
     }
 
     res.json({
@@ -333,5 +355,5 @@ router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']),  
     res.status(500).json({ success: false, msg: 'Server error deleting order.' });
   }
 });
-//Orders
+
 module.exports = router;
