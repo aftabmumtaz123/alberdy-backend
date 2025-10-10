@@ -234,6 +234,17 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
       if (value !== undefined) updateData[key] = value;
     }
 
+
+
+      if(updateData.status){
+      if (!['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'].includes(updateData.status)) {
+        return res.status(400).json({ success: false, msg: 'Invalid status. Must be one of: pending, confirmed, shipped, delivered, cancelled.' });
+      }
+    }
+
+
+
+
     if (Object.keys(updateData).length === 0) {
       return res.status(400).json({ success: false, msg: 'No valid fields to update.' });
     }
