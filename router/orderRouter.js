@@ -221,32 +221,26 @@ router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async (
 router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { id } = req.params;
-    const { shippingAddress, notes, paymentStatus, deliveryAssigned, deliveryDate } = req.body;
+    const { shippingAddress, notes, paymentStatus, deliveryAssigned, deliveryDate, status } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, msg: 'Invalid order ID.' });
     }
 
-    // Restrict updates: Only allow if pending or for specific fields (e.g., no items/total after creation)
-    const allowedUpdates = { shippingAddress, notes, paymentStatus, deliveryAssigned, deliveryDate };
+    // Include status in allowed updates for admin full control
+    const allowedUpdates = { shippingAddress, notes, paymentStatus, deliveryAssigned, deliveryDate, status };
     const updateData = {};
     for (const [key, value] of Object.entries(allowedUpdates)) {
       if (value !== undefined) updateData[key] = value;
     }
 
-
-
-      if(updateData.status){
-      if (!['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'].includes(updateData.status)) {
-        return res.status(400).json({ success: false, msg: 'Invalid status. Must be one of: pending, confirmed, shipped, delivered, cancelled.' });
-      }
-    }
-
-
-
-
     if (Object.keys(updateData).length === 0) {
       return res.status(400).json({ success: false, msg: 'No valid fields to update.' });
+    }
+
+    // Validate status if provided
+    if (updateData.status && !['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'].includes(updateData.status)) {
+      return res.status(400).json({ success: false, msg: 'Invalid status. Must be one of: pending, confirmed, shipped, delivered, cancelled.' });
     }
 
     // Validate shippingAddress if provided
@@ -262,6 +256,14 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
       return res.status(400).json({ success: false, msg: 'Invalid payment status.' });
     }
 
+    // Validate deliveryDate if provided (should be a valid date)
+    if (updateData.deliveryDate) {
+      if (isNaN(new Date(updateData.deliveryDate).getTime())) {
+        return res.status(400).json({ success: false, msg: 'Invalid delivery date format.' });
+      }
+      updateData.deliveryDate = new Date(updateData.deliveryDate);
+    }
+
     // FIXED: Removed { user: req.user.id } to allow admin updates to any order
     const order = await Order.findOneAndUpdate(
       { _id: id },
@@ -270,7 +272,7 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
     );
 
     if (!order) {
-      return res.status(404).json({ success: false, msg: 'Order not found or access denied.' });
+      return res.status(404).json({ success: false, msg: 'Order not found.' });
     }
 
     // Populate for response
