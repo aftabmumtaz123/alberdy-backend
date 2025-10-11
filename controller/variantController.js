@@ -1,7 +1,7 @@
 const fs = require('fs').promises; // For async file cleanup
 const path = require('path');
 
-const Variant = require('../model/Variants_product'); // Adjust path as needed
+const Variant = require('../model/variantProduct'); // Adjust path as needed
 const Product = require('../model/Product');
 const mongoose = require('mongoose');
 
