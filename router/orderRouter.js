@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const Order = require('../model/Order');
 const Product = require('../model/Product'); // To validate stock (optional)
+const Variation = require('../model/Variants_product'); // NEW: For separate variation documents
 const User = require('../model/User'); // To populate customer info
 const mongoose = require('mongoose');
 
@@ -34,7 +35,7 @@ const generateOrderNumber = async () => {
 // POST /api/orders - Create a new order from cart/checkout (without transactions for standalone MongoDB)
 router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
-    const { items, subtotal, tax, discount, total, paymentMethod, shippingAddress, notes } = req.body;
+    const { items, subtotal, tax, discount, total, paymentMethod, shippingAddress, notes, shipping = 5.99 } = req.body; // Dynamic shipping
 
     // Validation
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -47,32 +48,86 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async 
       return res.status(400).json({ success: false, msg: 'Complete shipping address is required.' });
     }
 
-    // Validate stock and prepare items (sequential, no session)
+    // Validate stock and prepare items (with variant support)
     const updatedItems = [];
+    let computedSubtotal = 0;
     for (let item of items) {
-      const product = await Product.findById(item.product);
-      if (!product || product.stockQuantity < item.quantity) {
-        return res.status(400).json({ success: false, msg: `Insufficient stock for ${product?.name || 'product'}.` });
+      if (!mongoose.Types.ObjectId.isValid(item.product)) {
+        return res.status(400).json({ success: false, msg: `Invalid product ID: ${item.product}` });
       }
+      // NEW: Populate variations since they are referenced (array of IDs in DB)
+      const product = await Product.findById(item.product).populate('variations');
+      if (!product) {
+        return res.status(400).json({ success: false, msg: `Product not found: ${item.product}` });
+      }
+
+      let stockToCheck, priceToUse, variant = null;
+      const quantity = Number(item.quantity); // Coerce to number for safety
+      if (isNaN(quantity) || quantity <= 0) {
+        return res.status(400).json({ success: false, msg: `Invalid quantity for product ${item.product}: ${item.quantity}` });
+      }
+
+      if (item.variant) { // Optional: item.variant as ObjectId string
+        if (!mongoose.Types.ObjectId.isValid(item.variant)) {
+          return res.status(400).json({ success: false, msg: `Invalid variant ID: ${item.variant}` });
+        }
+        // Find populated variant object
+        variant = product.variations?.find(v => v._id.toString() === item.variant.toString());
+        if (!variant) {
+          return res.status(400).json({ success: false, msg: `Variant not found for product ${product.name}` });
+        }
+        if (variant.stockQuantity < quantity) {
+          return res.status(400).json({ success: false, msg: `Insufficient stock for variant ${variant.sku || variant.value} in ${product.name}. Available: ${variant.stockQuantity}` });
+        }
+        stockToCheck = variant.stockQuantity;
+        priceToUse = variant.price;
+      } else {
+        // Base product fallback
+        if (product.stockQuantity < quantity) {
+          return res.status(400).json({ success: false, msg: `Insufficient stock for ${product.name}. Available: ${product.stockQuantity}` });
+        }
+        stockToCheck = product.stockQuantity;
+        priceToUse = product.price;
+      }
+
+      // Validate priceToUse to prevent NaN/undefined in schema
+      if (typeof priceToUse !== 'number' || isNaN(priceToUse) || priceToUse <= 0) {
+        const priceSource = item.variant ? `variant ${item.variant}` : `product ${item.product}`;
+        return res.status(400).json({ 
+          success: false, 
+          msg: `Invalid price for ${priceSource}: ${priceToUse}. Please check the product/variant data in the database.` 
+        });
+      }
+
+      const itemTotal = priceToUse * quantity;
+      if (isNaN(itemTotal)) { // Extra safety (shouldn't happen now)
+        return res.status(400).json({ success: false, msg: `Failed to calculate total for item: ${priceToUse} * ${quantity}` });
+      }
+
       updatedItems.push({
         product: item.product,
-        quantity: item.quantity,
-        price: product.price, // Snapshot current price
-        total: product.price * item.quantity
+        variant: item.variant || null, // Store variant ID
+        quantity,
+        price: priceToUse, // Snapshot variant or base price
+        total: itemTotal
       });
+      computedSubtotal += itemTotal;
     }
-    
+
+    // Validate provided subtotal against computed
+    if (Math.abs(computedSubtotal - subtotal) > 0.01) {
+      return res.status(400).json({ success: false, msg: `Subtotal mismatch: provided ${subtotal}, computed ${computedSubtotal.toFixed(2)}.` });
+    }
 
     // Generate order number
     const orderNumber = await generateOrderNumber();
 
     // Calculate final total (ensure it matches: subtotal + tax + shipping - discount)
-    const shipping = 5.99; // Fixed as per example
     const calculatedTotal = subtotal + (tax || 0) + shipping - (discount || 0);
     if (Math.abs(calculatedTotal - total) > 0.01) {
       return res.status(400).json({ success: false, msg: 'Total mismatch in order calculation.' });
     }
-    // Aftab
+
     // Create and save order
     const order = new Order({
       user: req.user.id,
@@ -86,7 +141,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async 
       paymentMethod,
       shippingAddress: {
         ...shippingAddress,
-        country: shippingAddress.country || 'USA' // Add if needed
+        country: shippingAddress.country || 'USA'
       },
       notes: notes || '',
       status: 'pending',
@@ -95,110 +150,87 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async 
 
     await order.save();
 
-    // Deduct stock after order save (sequential; race condition possible but simple for standalone DB)
+    // Deduct stock (after save for consistency; use atomic $inc)
+    // Group by product/variation to avoid redundant fetches (optimization)
+    const productsToUpdate = {};
+    const variationsToUpdate = {}; // NEW: Track unique variations
     for (let item of updatedItems) {
-      const product = await Product.findById(item.product);
-      if (product && product.stockQuantity >= item.quantity) {
-        await Product.findByIdAndUpdate(item.product, { $inc: { stockQuantity: -item.quantity } });
+      if (item.variant) {
+        if (!variationsToUpdate[item.variant]) {
+          variationsToUpdate[item.variant] = await Variation.findById(item.variant);
+        }
+        const variation = variationsToUpdate[item.variant];
+        if (variation && variation.stockQuantity >= item.quantity) {
+          await Variation.findByIdAndUpdate(variation._id, { $inc: { stockQuantity: -item.quantity } });
+        }
       } else {
-        console.warn(`Stock deduction skipped for ${item.product} - insufficient stock after order placement.`);
-        // Optional: Mark order for manual review or notify
+        if (!productsToUpdate[item.product]) {
+          productsToUpdate[item.product] = await Product.findById(item.product);
+        }
+        const product = productsToUpdate[item.product];
+        if (product && product.stockQuantity >= item.quantity) {
+          await Product.findByIdAndUpdate(product._id, { $inc: { stockQuantity: -item.quantity } });
+        }
       }
     }
 
-    // Populate items for response
+    // Populate items for response (no need for variations populate if embedded)
     await order.populate('items.product', 'name price thumbnail images');
 
     res.status(201).json({
       success: true,
-      order: order.toObject(), // Include _id, orderNumber, etc.
+      data: order.toObject(),
       msg: `Order ${orderNumber} placed successfully!`
     });
 
   } catch (err) {
-    console.error('Order creation error:', err);
+    console.error('Order creation error:', err.message || err);
+    if (err.name === 'CastError' && err.path === 'variations') {
+      return res.status(400).json({ success: false, msg: 'Invalid variations field in request. Ensure it\'s an array of valid ObjectIds or omit it.' });
+    }
     if (err.code === 11000 && err.keyPattern && err.keyPattern.orderId) {
-      // Specific handling for the legacy index error
       res.status(500).json({ success: false, msg: 'Legacy database index error. Please drop the "orderId_1" index on orders collection.' });
     } else {
-      res.status(400).json({ success: false, msg: err.message });
+      res.status(400).json({ success: false, msg: err.message || 'Server error creating order' });
     }
   }
 });
 
-
-
-
-// Get Offer by ID
-router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']),  async (req, res) => {
+// GET /api/orders/:id - Get order by ID
+router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { id } = req.params;
-    const order = await Order.findById(id).populate('items.product', 'name price');
+    const order = await Order.findById(id)
+      .populate('items.product', 'name price thumbnail images')
+      .populate('user', 'name email phone');
     if (!order) {
-      return res.status(404).json({ message: 'Order not found' });
+      return res.status(404).json({ success: false, msg: 'Order not found' });
     }
     res.status(200).json({
       success: true,
-      data: order
+      data: order.toObject()
     });
   } catch (error) {
-    console.error('Error fetching order:', error);
-    res.status(500).json({ message: 'Server error fetching order' });
-  }
-});
-
-
-
-// GET /api/orders - Fetch all orders (list with pagination) - FIXED: Removed user filter for admin access
-router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
-  try {
-    const { page = 1, limit = 10 } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    // FIXED: Removed { user: req.user.id } to show all orders for admins
-    const query = {}; // Optional: Add filters like { status: req.query.status } if needed
-
-    const orders = await Order.find(query)
-      .populate('items.product', 'name price')
-      .populate('user', 'name email phone') // Added for customer info in list view
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-
-    const total = await Order.countDocuments(query);
-
-    res.json({
-      success: true,
-      data: orders,
-      pagination: {
-        current: parseInt(page),
-        pages: Math.ceil(total / parseInt(limit)),
-        total
-      }
-    });
-  } catch (err) {
-    console.error('Error fetching orders:', err);
-    res.status(500).json({ success: false, msg: 'Error fetching orders.' });
+    console.error('Error fetching order:', error.message || error);
+    res.status(500).json({ success: false, msg: 'Server error fetching order', details: error.message || 'Unknown error' });
   }
 });
 
 // GET /api/orders - Fetch all orders (list with pagination)
 router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
-    const { page = 1, limit = 10 } = req.query;
+    const { page = 1, limit = 10, status } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const query = {}; // All orders for admins
+    const query = {};
+    if (status) query.status = status;
 
     const orders = await Order.find(query)
-      .populate('items.product', 'name price')
+      .populate('items.product', 'name price thumbnail images')
       .populate('user', 'name email phone')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
-
-    // TEMP DEBUG: Log IDs for troubleshooting
-    console.log('Available order IDs in list:', orders.map(o => ({ _id: o._id.toString(), orderNumber: o.orderNumber, createdAt: o.createdAt })));
 
     const total = await Order.countDocuments(query);
 
@@ -212,12 +244,12 @@ router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async (
       }
     });
   } catch (err) {
-    console.error('Error fetching orders:', err);
-    res.status(500).json({ success: false, msg: 'Error fetching orders.' });
+    console.error('Error fetching orders:', err.message || err);
+    res.status(500).json({ success: false, msg: 'Error fetching orders.', details: err.message || 'Unknown error' });
   }
 });
 
-// PUT /api/orders/:id - Full update order (e.g., address, notes, delivery info; restrict fields post-creation) - FIXED: Removed user filter
+// PUT /api/orders/:id - Full update order (e.g., address, notes, delivery info; restrict fields post-creation)
 router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { id } = req.params;
@@ -227,7 +259,6 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
       return res.status(400).json({ success: false, msg: 'Invalid order ID.' });
     }
 
-    // Include status in allowed updates for admin full control
     const allowedUpdates = { shippingAddress, notes, paymentStatus, deliveryAssigned, deliveryDate, status };
     const updateData = {};
     for (const [key, value] of Object.entries(allowedUpdates)) {
@@ -256,7 +287,7 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
       return res.status(400).json({ success: false, msg: 'Invalid payment status.' });
     }
 
-    // Validate deliveryDate if provided (should be a valid date)
+    // Validate deliveryDate if provided
     if (updateData.deliveryDate) {
       if (isNaN(new Date(updateData.deliveryDate).getTime())) {
         return res.status(400).json({ success: false, msg: 'Invalid delivery date format.' });
@@ -264,9 +295,8 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
       updateData.deliveryDate = new Date(updateData.deliveryDate);
     }
 
-    // FIXED: Removed { user: req.user.id } to allow admin updates to any order
-    const order = await Order.findOneAndUpdate(
-      { _id: id },
+    const order = await Order.findByIdAndUpdate(
+      id,
       { $set: updateData },
       { new: true, runValidators: true }
     );
@@ -281,91 +311,74 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
 
     res.json({
       success: true,
-      order: order.toObject(),
+      data: order.toObject(),
       msg: `Order ${order.orderNumber} updated successfully.`
     });
   } catch (err) {
-    console.error('Order update error:', err);
-    res.status(400).json({ success: false, msg: err.message || 'Server error updating order.' });
+    console.error('Order update error:', err.message || err);
+    res.status(400).json({ success: false, msg: err.message || 'Server error updating order.', details: err.message || 'Unknown error' });
   }
 });
 
-// PUT /api/orders/:id/status - Update order status (e.g., to confirmed, shipped, delivered, cancelled) - FIXED: Removed user filter
-router.put('/:id/status', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status } = req.body;
-
-    // Validation
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, msg: 'Invalid order ID.' });
-    }
-    if (!status || !['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'].includes(status)) {
-      return res.status(400).json({ success: false, msg: 'Invalid status. Must be one of: pending, confirmed, shipped, delivered, cancelled.' });
-    }
-
-    // FIXED: Removed { user: req.user.id } to allow admin updates to any order
-    const order = await Order.findOneAndUpdate(
-      { _id: id },
-      { status },
-      { new: true } // Return updated document
-    );
-
-    if (!order) {
-      return res.status(404).json({ success: false, msg: 'Order not found or access denied.' });
-    }
-
-    // Optional: Update paymentStatus if delivered and paid
-    if (status === 'delivered' && order.paymentMethod === 'online') {
-      await Order.findByIdAndUpdate(id, { paymentStatus: 'paid' });
-    }
-
-    // Populate for response
-    await order.populate('items.product', 'name price thumbnail images');
-    await order.populate('user', 'name email phone');
-
-    res.json({
-      success: true,
-      order: order.toObject(),
-      msg: `Order ${order.orderNumber} status updated to ${status}.`
-    });
-  } catch (err) {
-    console.error('Order status update error:', err);
-    res.status(500).json({ success: false, msg: 'Server error updating order status.' });
-  }
-});
-
-// DELETE /api/orders/:id - FIXED: Removed user filter; Added optional status check for stock restore
+// DELETE /api/orders/:id - Delete order by ID (restore stock if applicable)
 router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Validation
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, msg: 'Invalid order ID.' });
     }
 
-    // FIXED: Removed { user: req.user.id } to allow admin deletion of any order
-    const order = await Order.findOneAndDelete({ _id: id });
+    // Find the order first to restore stock and get details
+    const order = await Order.findById(id)
+      .populate('items.product', 'name price thumbnail images')
+      .populate('user', 'name email phone');
 
     if (!order) {
-      return res.status(404).json({ success: false, msg: 'Order not found or access denied.' });
+      return res.status(404).json({ success: false, msg: 'Order not found.' });
     }
 
-    // Optional: Restore stock if deleting (e.g., for cancelled orders) - Added status check
-    if (order.status === 'cancelled' || order.status === 'pending') { // Only restore if not shipped/delivered
-      for (let item of order.items) {
-        await Product.findByIdAndUpdate(item.product, { $inc: { stockQuantity: item.quantity } });
+    // Optional: Prevent deletion if status is 'delivered' or 'paid' (business rule)
+    if (order.status === 'delivered' || order.paymentStatus === 'paid') {
+      return res.status(400).json({ success: false, msg: 'Cannot delete delivered or paid orders.' });
+    }
+
+    // Restore stock (reverse deduction)
+    const productsToUpdate = {};
+    const variationsToUpdate = {};
+    for (let item of order.items) {
+      const quantity = Number(item.quantity);
+      if (item.variant) {
+        if (!variationsToUpdate[item.variant]) {
+          variationsToUpdate[item.variant] = await Variation.findById(item.variant);
+        }
+        const variation = variationsToUpdate[item.variant];
+        if (variation) {
+          await Variation.findByIdAndUpdate(variation._id, { $inc: { stockQuantity: quantity } });
+        }
+      } else {
+        if (!productsToUpdate[item.product]) {
+          productsToUpdate[item.product] = await Product.findById(item.product);
+        }
+        const product = productsToUpdate[item.product];
+        if (product) {
+          await Product.findByIdAndUpdate(product._id, { $inc: { stockQuantity: quantity } });
+        }
       }
     }
 
-    res.json({
+    // Delete the order
+    await Order.findByIdAndDelete(id);
+
+    res.status(200).json({
       success: true,
-      msg: `Order ${order.orderNumber} deleted successfully.`
+      data: order.toObject(),  // Return deleted order details
+      msg: `Order ${order.orderNumber} deleted successfully! Stock restored.`
     });
+
   } catch (err) {
-    console.error('Order deletion error:', err);
-    res.status(500).json({ success: false, msg: 'Server error deleting order.' });
+    console.error('Order deletion error:', err.message || err);
+    res.status(500).json({ success: false, msg: 'Server error deleting order.', details: err.message || 'Unknown error' });
   }
 });
 

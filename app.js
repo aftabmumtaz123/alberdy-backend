@@ -43,17 +43,18 @@ app.use('/api/categories', categoryRoutes); // Example: Protected category route
 app.use('/api/subcategories', require('./router/subcategories')); // Example: Protected subcategory routes
 app.use('/api/auth', require("./router/resetPassword"))
 app.use('/api/units', require('./router/unit')); // Example: Protected unit routes
-app.use('/api', require('./router/customer')); // Example: Protected customer routes
-app.use('/api/expenses', require('./router/expense')); // Example: Protected expense routes
-app.use('/api/expense-categories', require('./router/expenseCategory')); // Example: Protected expense category routes
-app.use('/api/currencies', require('./router/currency')); // Example: Protected currency routes
-app.use('/api', require('./router/inventoryRoutes')); // Example: Protected inventory routes
-app.use('/configuration', require('./router/appConfigurationRouter')); // Example: Protected configuration routes
+app.use('/api', require('./router/customer')); 
+app.use('/api/expenses', require('./router/expense')); 
+app.use('/api/expense-categories', require('./router/expenseCategory')); 
+app.use('/api/currencies', require('./router/currency')); 
+app.use('/api', require('./router/inventoryRoutes')); 
+app.use('/configuration', require('./router/appConfigurationRouter')); 
 const dashboardRoutes = require('./router/dashboard');
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/offer', require('./router/offer'));
-app.use('/api/orders', require('./router/orderRouter')); // Example: Protected order routes
-app.use('/', require('./router/authRouter')); // Example: Auth routes (login, register, refresh, logout)
+app.use('/api/orders', require('./router/orderRouter')); 
+app.use('/', require('./router/authRouter')); 
+app.use('/api/variants', require('./router/variant'));
 
 app.get("/",(req,res)=>{
   res.json({Message: "API's are running well bro!!"})
