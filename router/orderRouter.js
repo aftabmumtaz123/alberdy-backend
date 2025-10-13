@@ -3,7 +3,7 @@ const express = require('express');
 const router = express.Router();
 const Order = require('../model/Order');
 const Product = require('../model/Product'); // To validate stock (optional)
-const Variation = require('../model/variantProduct'); // NEW: For separate variation documents
+const Variation = require('../model/Variants_product'); // NEW: For separate variation documents
 const User = require('../model/User'); // To populate customer info
 const mongoose = require('mongoose');
 
@@ -33,7 +33,7 @@ const generateOrderNumber = async () => {
 };
 
 // POST /api/orders - Create a new order from cart/checkout (without transactions for standalone MongoDB)
-router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
+router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
     const { items, subtotal, tax, discount, total, paymentMethod, shippingAddress, notes, shipping = 5.99 } = req.body; // Dynamic shipping
 
@@ -197,7 +197,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async 
 });
 
 // GET /api/orders/:id - Get order by ID
-router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
+router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
     const { id } = req.params;
     const order = await Order.findById(id)
@@ -206,6 +206,12 @@ router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
     if (!order) {
       return res.status(404).json({ success: false, msg: 'Order not found' });
     }
+
+    // Restrict customers to their own orders
+    if (req.user.role === 'Customer' && order.user.toString() !== req.user.id.toString()) {
+      return res.status(403).json({ success: false, msg: 'Access denied. You can only view your own orders.' });
+    }
+
     res.status(200).json({
       success: true,
       data: order.toObject()
@@ -217,13 +223,18 @@ router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
 });
 
 // GET /api/orders - Fetch all orders (list with pagination)
-router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
+router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
     const { page = 1, limit = 10, status } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     const query = {};
     if (status) query.status = status;
+
+    // Restrict customers to their own orders
+    if (req.user.role === 'Customer') {
+      query.user = req.user.id;
+    }
 
     const orders = await Order.find(query)
       .populate('items.product', 'name price thumbnail images')
