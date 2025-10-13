@@ -763,8 +763,7 @@ const path = require('path');
 
 const Product = require('../model/Product');
 const Category = require('../model/Category');
-
-const Subcategory = require('../model/subCategory');
+const Subcategory = require('../model/Subcategory');
 const Brand = require('../model/Brand');
 const Unit = require('../model/Unit'); // Adjust path as needed
 const mongoose = require('mongoose');
