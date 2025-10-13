@@ -11,25 +11,23 @@ const orderItemSchema = new mongoose.Schema({
 
 const orderSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }, // Assuming User model
-  orderNumber: { type: String, unique: true, required: true }, // e.g., #ORD-001
+  orderNumber: { type: String, unique: true, required: true }, // e.g., Order00001
   items: [orderItemSchema],
   subtotal: { type: Number, required: true }, // Sum of item totals
   tax: { type: Number, default: 0 },
+  orderTrackingNumber: { type: String, unique: true, sparse: true }, // Unique tracking number
+  trackingStatus: { type: String, enum: ['not shipped', 'shipped', 'in transit', 'out for delivery', 'delivered', "cancelled"], default: 'not shipped' },
   discount: { type: Number, default: 0 },
-  shipping: { type: Number, default: 200 }, // Fixed shipping cost
-  total: { type: Number, required: true }, // subtotal + tax + shipping - discount
+  shipping: { type: Number, default: 5.99 }, // Fixed shipping cost
+  total: { type: Number, required: true }, // subtotal + tax + discount + shipping
   status: { type: String, enum: ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'], default: 'pending' },
-  notes: { type: String, default: '' }, // Added for notes section
-  deliveryAssigned: { type: String, default: '' }, // e.g., delivery partner name
-  deliveryDate: { type: Date }, // Scheduled delivery date
   shippingAddress: {
-    fullName: { type: String, required: true }, // Added for name
-    phone: { type: String, required: true },    // Added for phone
-    street: { type: String, required: true },
-    city: { type: String, required: true },
-    state: { type: String, required: true },
-    zip: { type: String, required: true },
-    country: { type: String, default: 'PK' } // Added for completeness
+    fullName: String, // Added for name
+    phone: String,    // Added for phone
+    street: String,
+    city: String,
+    state: String,
+    zip: String
   },
   paymentMethod: { type: String, required: true, enum: ['COD', 'online'] },
   paymentStatus: { type: String, enum: ['pending', 'paid', 'failed'], default: 'pending' }
