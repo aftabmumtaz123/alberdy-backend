@@ -32,6 +32,22 @@ const generateOrderNumber = async () => {
   }
 };
 
+// Helper function to generate sequential tracking number (e.g., #TRK-001)
+const generateTrackingNumber = async () => {
+  try {
+    const lastOrder = await Order.findOne().sort({ createdAt: -1 }).select('orderTrackingNumber');
+    if (!lastOrder || !lastOrder.orderTrackingNumber) return '#TRK-LEY-321-001';
+    const lastNum = parseInt(lastOrder.orderTrackingNumber.replace('#TRK-LEY-321-', ''));
+    const nextNum = lastNum + 1;
+    const trackingNumber = `#TRK-LEY-321-${nextNum.toString().padStart(3, '0')}`;
+    console.log('Generated tracking number:', trackingNumber);
+    return trackingNumber;
+  } catch (err) {
+    console.error('Error generating tracking number:', err);
+    throw new Error('Failed to generate tracking number');
+  }
+};
+
 // POST /api/orders - Create a new order from cart/checkout (without transactions for standalone MongoDB)
 router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
@@ -122,6 +138,9 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
     // Generate order number
     const orderNumber = await generateOrderNumber();
 
+    // Generate tracking number
+    const trackingNumber = await generateTrackingNumber();
+
     // Calculate final total (ensure it matches: subtotal + tax + shipping - discount)
     const calculatedTotal = subtotal + (tax || 0) + shipping - (discount || 0);
     if (Math.abs(calculatedTotal - total) > 0.01) {
@@ -132,6 +151,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
     const order = new Order({
       user: req.user.id,
       orderNumber, // Unique as per schema
+      orderTrackingNumber: trackingNumber,
       items: updatedItems,
       subtotal,
       tax: tax || 0,
@@ -264,13 +284,13 @@ router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer
 router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { id } = req.params;
-    const { shippingAddress, notes, paymentStatus, deliveryAssigned, deliveryDate, status } = req.body;
+    const { shippingAddress, notes, paymentStatus, deliveryAssigned, deliveryDate, status, orderTrackingNumber } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, msg: 'Invalid order ID.' });
     }
 
-    const allowedUpdates = { shippingAddress, notes, paymentStatus, deliveryAssigned, deliveryDate, status };
+    const allowedUpdates = { shippingAddress, notes, paymentStatus, deliveryAssigned, deliveryDate, status, orderTrackingNumber };
     const updateData = {};
     for (const [key, value] of Object.entries(allowedUpdates)) {
       if (value !== undefined) updateData[key] = value;
@@ -296,6 +316,14 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
     // Validate paymentStatus
     if (updateData.paymentStatus && !['pending', 'paid', 'failed'].includes(updateData.paymentStatus)) {
       return res.status(400).json({ success: false, msg: 'Invalid payment status.' });
+    }
+
+    // Validate orderTrackingNumber if provided
+    if (updateData.orderTrackingNumber) {
+      const existingOrder = await Order.findOne({ orderTrackingNumber: updateData.orderTrackingNumber });
+      if (existingOrder && existingOrder._id.toString() !== id) {
+        return res.status(400).json({ success: false, msg: 'Order tracking number already in use.' });
+      }
     }
 
     // Validate deliveryDate if provided
@@ -327,6 +355,9 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
     });
   } catch (err) {
     console.error('Order update error:', err.message || err);
+    if (err.name === 'MongoServerError' && err.code === 11000 && err.keyPattern && err.keyPattern.orderTrackingNumber) {
+      return res.status(400).json({ success: false, msg: 'Order tracking number already in use.' });
+    }
     res.status(400).json({ success: false, msg: err.message || 'Server error updating order.', details: err.message || 'Unknown error' });
   }
 });
@@ -390,6 +421,136 @@ router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), a
   } catch (err) {
     console.error('Order deletion error:', err.message || err);
     res.status(500).json({ success: false, msg: 'Server error deleting order.', details: err.message || 'Unknown error' });
+  }
+});
+
+
+
+// routes/orders.js (Add to existing file)
+
+// PUT /api/orders/:id/tracking - Update tracking status and/or tracking number
+router.put('/:id/tracking', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { trackingStatus, orderTrackingNumber } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, msg: 'Invalid order ID.' });
+    }
+
+    // Validate trackingStatus if provided
+    const validTrackingStatuses = ['not shipped', 'shipped', 'in transit', 'out for delivery', 'delivered', 'cancelled'];
+    if (trackingStatus && !validTrackingStatuses.includes(trackingStatus)) {
+      return res.status(400).json({ success: false, msg: `Invalid tracking status. Must be one of: ${validTrackingStatuses.join(', ')}.` });
+    }
+
+    // Find the order
+    const order = await Order.findById(id);
+    if (!order) {
+      return res.status(404).json({ success: false, msg: 'Order not found.' });
+    }
+
+    // Business rule: Prevent invalid status transitions
+    if (trackingStatus) {
+      const currentStatus = order.trackingStatus;
+      const invalidTransitions = {
+        'delivered': ['not shipped', 'shipped', 'in transit', 'out for delivery'], // Can't revert from delivered
+        'cancelled': ['not shipped', 'shipped', 'in transit', 'out for delivery', 'delivered'], // Can't revert from cancelled
+        'not shipped': ['delivered'], // Can't jump to delivered
+      };
+      if (invalidTransitions[currentStatus]?.includes(trackingStatus)) {
+        return res.status(400).json({ success: false, msg: `Invalid tracking status transition from ${currentStatus} to ${trackingStatus}.` });
+      }
+    }
+
+    // Validate orderTrackingNumber if provided
+    if (orderTrackingNumber) {
+      const existingOrder = await Order.findOne({ orderTrackingNumber, _id: { $ne: id } });
+      if (existingOrder) {
+        return res.status(400).json({ success: false, msg: 'Tracking number already in use.' });
+      }
+    }
+
+    // Update fields
+    const updateData = {};
+    if (trackingStatus) updateData.trackingStatus = trackingStatus;
+    if (orderTrackingNumber) updateData.orderTrackingNumber = orderTrackingNumber;
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ success: false, msg: 'No valid fields to update.' });
+    }
+
+    // Update order
+    const updatedOrder = await Order.findByIdAndUpdate(
+      id,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    )
+      .populate('items.product', 'name price thumbnail images')
+      .populate('user', 'name email phone');
+
+    // Optional: Trigger notification (pseudo-code, implement based on your system)
+    if (trackingStatus && trackingStatus !== order.trackingStatus) {
+      console.log(`Notification: Order ${order.orderNumber} tracking status updated to ${trackingStatus}`);
+      // Example: await sendNotification(order.user, `Your order ${order.orderNumber} is now ${trackingStatus}.`);
+    }
+
+    res.status(200).json({
+      success: true,
+      data: updatedOrder.toObject(),
+      msg: `Tracking status for order ${order.orderNumber} updated successfully.`
+    });
+  } catch (err) {
+    console.error('Tracking update error:', err.message || err);
+    if (err.name === 'MongoServerError' && err.code === 11000 && err.keyPattern?.orderTrackingNumber) {
+      return res.status(400).json({ success: false, msg: 'Tracking number already in use.' });
+    }
+    res.status(500).json({ success: false, msg: 'Server error updating tracking status.', details: err.message || 'Unknown error' });
+  }
+});
+
+// GET /api/orders/track/:identifier - Get tracking status by order ID or tracking number
+router.get('/track/:identifier', async (req, res) => {
+  try {
+    const { identifier } = req.params;
+
+    // Search by order ID or tracking number
+    const query = mongoose.Types.ObjectId.isValid(identifier)
+      ? { _id: identifier }
+      : { orderTrackingNumber: identifier };
+
+    const order = await Order.findOne(query)
+      .populate('items.product', 'name price thumbnail images')
+      .populate('user', 'name email phone');
+
+    if (!order) {
+      return res.status(404).json({ success: false, msg: 'Order not found.' });
+    }
+
+    // Restrict sensitive data for unauthenticated users (optional)
+    const responseData = {
+      orderNumber: order.orderNumber,
+      orderTrackingNumber: order.orderTrackingNumber,
+      trackingStatus: order.trackingStatus,
+      status: order.status,
+      shippingAddress: order.shippingAddress,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+    };
+
+    // If authenticated, allow customer to see their own order details
+    if (req.user && req.user.role === 'Customer' && order.user.toString() !== req.user.id.toString()) {
+      return res.status(403).json({ success: false, msg: 'Access denied. You can only view your own orders.' });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: responseData,
+      msg: `Tracking details for order ${order.orderNumber}.`
+    });
+  } catch (err) {
+    console.error('Tracking fetch error:', err.message || err);
+    res.status(500).json({ success: false, msg: 'Server error fetching tracking details.', details: err.message || 'Unknown error' });
   }
 });
 
