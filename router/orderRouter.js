@@ -3,7 +3,7 @@ const express = require('express');
 const router = express.Router();
 const Order = require('../model/Order');
 const Product = require('../model/Product'); // To validate stock (optional)
-const Variation = require('../model/Variants_product'); // NEW: For separate variation documents
+const Variation = require('../model/variantProduct'); // NEW: For separate variation documents
 const User = require('../model/User'); // To populate customer info
 const mongoose = require('mongoose');
 
