@@ -141,18 +141,11 @@ exports.createAppConfiguration = async (req, res) => {
 
 exports.getAppConfigurationById = async (req, res) => {
   try {
-    const { id } = req.params; // e.g., /configuration/get/:id
 
-    // Validate ObjectId
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid configuration ID",
-      });
-    }
+   
 
     // Find configuration
-    const configuration = await Configuration.findById(id).lean(); 
+    const configuration = await Configuration.find().lean(); 
     // .lean() returns a plain JS object (faster, no mongoose overhead if no methods needed)
 
     if (!configuration) {
@@ -176,7 +169,6 @@ exports.getAppConfigurationById = async (req, res) => {
     });
   }
 };
-
 
 
 exports.updateAppConfiguration = async (req, res) => {
