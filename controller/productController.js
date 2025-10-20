@@ -440,7 +440,43 @@ exports.getProductById = async (req, res) => {
     const pipeline = [
       { $match: { _id: new mongoose.Types.ObjectId(id) } },
       // Basic populates via lookup
-     // Offer lookup
+      // {
+      //   $lookup: {
+      //     from: 'categories',
+      //     localField: 'category',
+      //     foreignField: '_id',
+      //     as: 'category'
+      //   }
+      // },
+      // { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
+      // {
+      //   $lookup: {
+      //     from: 'subcategories',
+      //     localField: 'subcategory',
+      //     foreignField: '_id',
+      //     as: 'subcategory'
+      //   }
+      // },
+      // { $unwind: { path: '$subcategory', preserveNullAndEmptyArrays: true } },
+      // {
+      //   $lookup: {
+      //     from: 'brands',
+      //     localField: 'brand',
+      //     foreignField: '_id',
+      //     as: 'brand'
+      //   }
+      // },
+      // { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
+      // {
+      //   $lookup: {
+      //     from: 'units',
+      //     localField: 'unit',
+      //     foreignField: '_id',
+      //     as: 'unit'
+      //   }
+      // },
+      // { $unwind: { path: '$unit', preserveNullAndEmptyArrays: true } },
+       // Offer lookup
       {
         $lookup: {
           from: 'offers',
