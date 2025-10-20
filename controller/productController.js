@@ -477,68 +477,68 @@ exports.getProductById = async (req, res) => {
       // },
       // { $unwind: { path: '$unit', preserveNullAndEmptyArrays: true } },
        // Offer lookup
-      {
-        $lookup: {
-          from: 'offers',
-          let: { prodId: '$_id', currentDate: new Date() },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $in: ['$$prodId', '$applicableProducts'] },
-                status: 'active',
-                $expr: {
-                  $and: [
-                    { $lte: ['$startDate', '$$currentDate'] },
-                    { $gte: ['$endDate', '$$currentDate'] }
-                  ]
-                }
-              }
-            },
-            { $sort: { createdAt: -1 } },
-            { $limit: 1 },
-            {
-              $project: {
-                discountType: 1,
-                discountValue: 1,
-                _id: 0
-              }
-            }
-          ],
-          as: 'activeOffer'
-        }
-      },
-      { $unwind: { path: '$activeOffer', preserveNullAndEmptyArrays: true } },
-      // Calculate effective price (fixed: use 'price' consistently)
-      {
-        $addFields: {
-          effectivePrice: {
-            $cond: {
-              if: { $ne: ['$activeOffer', null] },
-              then: {
-                $cond: {
-                  if: { $eq: ['$activeOffer.discountType', 'Percentage'] },
-                  then: {
-                    $subtract: [
-                      { $ifNull: ['$price', 0] },
-                      { $multiply: [{ $ifNull: ['$price', 0] }, { $divide: ['$activeOffer.discountValue', 100] }] }
-                    ]
-                  },
-                  else: { $subtract: [{ $ifNull: ['$price', 0] }, '$activeOffer.discountValue'] }
-                }
-              },
-              else: { $ifNull: ['$price', 0] }
-            }
-          }
-        }
-      },
-      {
-        $project: {
-          __v: 0
-        }
-      }
+    //   {
+    //     $lookup: {
+    //       from: 'offers',
+    //       let: { prodId: '$_id', currentDate: new Date() },
+    //       pipeline: [
+    //         {
+    //           $match: {
+    //             $expr: { $in: ['$$prodId', '$applicableProducts'] },
+    //             status: 'active',
+    //             $expr: {
+    //               $and: [
+    //                 { $lte: ['$startDate', '$$currentDate'] },
+    //                 { $gte: ['$endDate', '$$currentDate'] }
+    //               ]
+    //             }
+    //           }
+    //         },
+    //         { $sort: { createdAt: -1 } },
+    //         { $limit: 1 },
+    //         {
+    //           $project: {
+    //             discountType: 1,
+    //             discountValue: 1,
+    //             _id: 0
+    //           }
+    //         }
+    //       ],
+    //       as: 'activeOffer'
+    //     }
+    //   },
+    //   { $unwind: { path: '$activeOffer', preserveNullAndEmptyArrays: true } },
+    //   // Calculate effective price (fixed: use 'price' consistently)
+    //   {
+    //     $addFields: {
+    //       effectivePrice: {
+    //         $cond: {
+    //           if: { $ne: ['$activeOffer', null] },
+    //           then: {
+    //             $cond: {
+    //               if: { $eq: ['$activeOffer.discountType', 'Percentage'] },
+    //               then: {
+    //                 $subtract: [
+    //                   { $ifNull: ['$price', 0] },
+    //                   { $multiply: [{ $ifNull: ['$price', 0] }, { $divide: ['$activeOffer.discountValue', 100] }] }
+    //                 ]
+    //               },
+    //               else: { $subtract: [{ $ifNull: ['$price', 0] }, '$activeOffer.discountValue'] }
+    //             }
+    //           },
+    //           else: { $ifNull: ['$price', 0] }
+    //         }
+    //       }
+    //     }
+    //   },
+    //   {
+    //     $project: {
+    //       __v: 0
+    //     }
+    //   }
     ];
 
-    const [product] = await Product.aggregate(pipeline);
+    const [product] = await Product.findById( id );
     if (!product) {
       return res.status(404).json({ success: false, msg: 'Product not found' });
     }
