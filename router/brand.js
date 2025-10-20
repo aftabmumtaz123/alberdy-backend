@@ -19,18 +19,19 @@ const requireRole = (roles) => (req, res, next) => {
 // =============================================================================
 
 // GET /api/brands - List View (paginated/filtered)
-router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager']), getAllBrands);
+router.get('/', getAllBrands);
 
 // POST /api/brands - Create Brand (with optional image)
 router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager']), upload.single('image'), createBrand);
 
 // GET /api/brands/:id - View Brand Details
-router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), getBrandById);
+router.get('/:id', getBrandById);
 
 // PUT /api/brands/:id - Update Brand (with optional new image)
 router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), upload.single('image'), updateBrand);
 
 // DELETE /api/brands/:id
 router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), deleteBrand);
+
 
 module.exports = router;
