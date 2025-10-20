@@ -14,10 +14,11 @@ const requireRole = (roles) => (req, res, next) => {
 
 
 // Unit routes
-router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Staff']), unitController.getAllUnits);
-router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager', 'Staff']), unitController.getUnitById);
+router.get('/',  unitController.getAllUnits);
+router.get('/:id', unitController.getUnitById);
 router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager']), unitController.createUnit);
 router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), unitController.updateUnit);
 router.delete('/:id', authMiddleware, requireRole(['Super Admin']), unitController.deleteUnit);
 
 module.exports = router;
+
