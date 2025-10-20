@@ -13,10 +13,10 @@ const auth = require('../middleware/auth'); // Remove isAdmin if not defined yet
 
 
 
-router.get('/', auth, getAllOffers); // Temporarily without isAdmin
+router.get('/',getAllOffers); // Temporarily without isAdmin
 
 // GET /api/offers/:id - Get offer by ID
-router.get('/:id', auth, getOfferById);
+router.get('/:id', getOfferById);
 
 // POST /api/offers - Create new offer
 router.post('/', auth, createOffer);
@@ -26,5 +26,6 @@ router.put('/:id', auth, updateOffer);
 
 // DELETE /api/offers/:id - Delete offer
 router.delete('/:id', auth, deleteOffer)
+
 
 module.exports = router;
