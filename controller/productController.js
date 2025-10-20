@@ -4,7 +4,7 @@ const path = require('path');
 
 const Product = require('../model/Product');
 const Category = require('../model/Category');
-const Subcategory = require('../model/subcategory');
+const Subcategory = require('../model/SubCategory');
 const Brand = require('../model/Brand');
 const Unit = require('../model/Unit'); // Adjust path as needed
 const mongoose = require('mongoose');
@@ -867,3 +867,4 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
