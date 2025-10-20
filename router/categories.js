@@ -28,14 +28,15 @@ const requireRole = (roles) => (req, res, next) => {
 
 router.post('/', upload.single('image'), authMiddleware, requireRole(['Super Admin', 'Manager']), createCategory);
 
-router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager']), getCategories);
+router.get('/', getCategories);
 
-router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), getCategoryById);
+router.get('/:id', getCategoryById);
 
 // Update Category
 router.put('/:id', upload.single('image'), authMiddleware, requireRole(['Super Admin', 'Manager']), updateCategory);
 
 // Delete Category
 router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), deleteCategory);
+
 
 module.exports = router;
