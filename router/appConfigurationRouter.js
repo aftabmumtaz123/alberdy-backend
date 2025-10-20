@@ -25,6 +25,7 @@ router.post("/set", authMiddleware, upload.single("appLogo"), createAppConfigura
 router.put("/set/:id", authMiddleware, requireRole(['Super Admin', 'Manager']), upload.single("appLogo"), updateAppConfiguration);
 
 // Get configuration (no file upload needed)
-router.get("/get/:id", authMiddleware, requireRole(['Super Admin', 'Manager']), getAppConfigurationById);
+router.get("/get/:id", getAppConfigurationById);
 
 module.exports = router;
+
