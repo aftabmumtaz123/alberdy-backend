@@ -549,7 +549,7 @@ exports.getProductById = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error fetching product', details: err.message || 'Unknown error' });
   }
 };
-
+//
 // Update Product (Similar enhancements: logs, enriched errors, trim, now with variations CRUD)
 exports.updateProduct = async (req, res) => {
   console.log('DEBUG: Update req.body:', req.body); // Remove in prod
