@@ -138,7 +138,6 @@ exports.createAppConfiguration = async (req, res) => {
     }
   }
 };
-
 exports.getAppConfigurationById = async (req, res) => {
   try {
 
@@ -169,7 +168,6 @@ exports.getAppConfigurationById = async (req, res) => {
     });
   }
 };
-
 
 exports.updateAppConfiguration = async (req, res) => {
   try {
