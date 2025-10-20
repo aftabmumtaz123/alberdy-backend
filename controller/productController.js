@@ -437,8 +437,8 @@ exports.getProductById = async (req, res) => {
     const { id } = req.params;
 
     // Use aggregation for single product to include offer integration
-    const pipeline = [
-      { $match: { _id: new mongoose.Types.ObjectId(id) } },
+    // const pipeline = [
+    //   { $match: { _id: new mongoose.Types.ObjectId(id) } },
       // Basic populates via lookup
       // {
       //   $lookup: {
@@ -536,13 +536,12 @@ exports.getProductById = async (req, res) => {
     //       __v: 0
     //     }
     //   }
-    ];
+    // ];
 
-    const [product] = await Product.findById( id );
+    const product = await Product.findById( id );
     if (!product) {
       return res.status(404).json({ success: false, msg: 'Product not found' });
     }
-
     res.json({ success: true, product });
   } catch (err) {
     console.error('Product get error:', err.message || err);
