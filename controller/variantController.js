@@ -1,8 +1,9 @@
 const fs = require('fs').promises; // For async file cleanup
 const path = require('path');
 
-const Variant = require('../model/variantProduct'); // Adjust path as needed
+const Variant = require('../model/Variants_product'); // Adjust path as needed
 const Product = require('../model/Product');
+const Unit = require('../model/Unit'); // Assuming Unit model exists; adjust path as needed
 const mongoose = require('mongoose');
 
 
@@ -18,7 +19,7 @@ const findVariantByIdOrSku = async (value) => {
 // Create Variant (POST /api/variants)
 exports.createVariant = async (req, res) => {
   console.log('DEBUG: Variant req.body:', req.body); // Remove in prod
-  const { product: productValue, attribute, value, sku, price, discountPrice, stockQuantity, status = 'Active' } = req.body;
+  const { product: productValue, weightQuantity , attribute, value, sku, unit: unitValue, purchasePrice, price, discountPrice, stockQuantity, expiryDate, status = 'Active' } = req.body;
 
   // Handle optional image upload
   const imageFile = req.files && req.files['image'] ? req.files['image'][0] : null;
@@ -29,20 +30,28 @@ exports.createVariant = async (req, res) => {
     if (imageFile) try { await fs.unlink(image); } catch { }
     return res.status(400).json({ success: false, msg: 'Invalid status' });
   }
-  if (!attribute || !value || !sku || sku.trim() === '') {
+  if (!attribute || !value || !sku || sku.trim() === '' || !unitValue || !mongoose.Types.ObjectId.isValid(unitValue)) {
     if (imageFile) try { await fs.unlink(image); } catch { }
-    return res.status(400).json({ success: false, msg: 'Missing required fields: attribute, value, or sku' });
+    return res.status(400).json({ success: false, msg: 'Missing or invalid required fields: attribute, value, sku, or unit' });
   }
   const parsedPrice = parseFloat(price);
+  const parsedPurchasePrice = parseFloat(purchasePrice);
   const parsedStock = parseInt(stockQuantity || 0);
-  if (isNaN(parsedPrice) || parsedPrice <= 0 || isNaN(parsedStock) || parsedStock < 0) {
+  if (isNaN(parsedPrice) || parsedPrice <= 0 || isNaN(parsedPurchasePrice) || parsedPurchasePrice <= 0 || isNaN(parsedStock) || parsedStock < 0) {
     if (imageFile) try { await fs.unlink(image); } catch { }
-    return res.status(400).json({ success: false, msg: 'Invalid price or stockQuantity' });
+    return res.status(400).json({ success: false, msg: 'Invalid price, purchasePrice, or stockQuantity' });
   }
   const parsedDiscount = parseFloat(discountPrice);
   if (discountPrice !== undefined && (isNaN(parsedDiscount) || parsedDiscount > parsedPrice)) {
     if (imageFile) try { await fs.unlink(image); } catch { }
     return res.status(400).json({ success: false, msg: 'Invalid discountPrice' });
+  }
+  if (expiryDate !== undefined) {
+    const expiry = new Date(expiryDate);
+    if (isNaN(expiry.getTime())) {
+      if (imageFile) try { await fs.unlink(image); } catch { }
+      return res.status(400).json({ success: false, msg: 'Invalid expiryDate' });
+    }
   }
 
   try {
@@ -58,6 +67,13 @@ exports.createVariant = async (req, res) => {
       return res.status(400).json({ success: false, msg: `Product not found for value: ${productValue}` });
     }
 
+    // Lookup unit
+    const unit = await Unit.findById(unitValue);
+    if (!unit) {
+      if (imageFile) try { await fs.unlink(image); } catch { }
+      return res.status(400).json({ success: false, msg: `Unit not found for ID: ${unitValue}` });
+    }
+
     // Check SKU uniqueness
     const existingVariant = await Variant.findOne({ sku: sku.trim() });
     if (existingVariant) {
@@ -70,17 +86,21 @@ exports.createVariant = async (req, res) => {
       attribute: attribute.trim(),
       value: value.trim(),
       sku: sku.trim(),
+      unit: unit._id,
+      weightQuantity,
+      purchasePrice: parsedPurchasePrice,
       price: parsedPrice,
       stockQuantity: parsedStock,
       status
     };
     if (discountPrice !== undefined) variantData.discountPrice = parsedDiscount;
+    if (expiryDate !== undefined) variantData.expiryDate = new Date(expiryDate);
     if (image) variantData.image = image;
 
     const newVariant = new Variant(variantData);
     await newVariant.validate();
     await newVariant.save();
-    await newVariant.populate('product', 'name');
+    await newVariant.populate('product unit', 'name');
 
     // Add ref to product's variations array
     await Product.findByIdAndUpdate(product._id, { $push: { variations: newVariant._id } });
@@ -123,7 +143,7 @@ exports.getAllVariants = async (req, res) => {
 
   try {
     const variants = await Variant.find(filter)
-      .populate('product', 'name')
+      .populate('product unit', 'name')
       .sort({ createdAt: -1 })
       .skip((page - 1) * parseInt(limit))
       .limit(parseInt(limit));
@@ -160,7 +180,7 @@ exports.getVariantById = async (req, res) => {
 // Update Variant (PUT /api/variants/:id)
 exports.updateVariant = async (req, res) => {
   console.log('DEBUG: Update variant req.body:', req.body); // Remove in prod
-  const { attribute, value, sku, price, discountPrice, stockQuantity, status } = req.body;
+  const { attribute, value, sku, unit: unitValue, purchasePrice, price, discountPrice, stockQuantity, expiryDate, status } = req.body;
 
   // Handle optional new image (replace)
   const newImageFile = req.files && req.files['image'] ? req.files['image'][0] : null;
@@ -175,6 +195,10 @@ exports.updateVariant = async (req, res) => {
     if (newImageFile) try { await fs.unlink(newImage); } catch { }
     return res.status(400).json({ success: false, msg: 'Invalid sku' });
   }
+  if (unitValue !== undefined && (!mongoose.Types.ObjectId.isValid(unitValue))) {
+    if (newImageFile) try { await fs.unlink(newImage); } catch { }
+    return res.status(400).json({ success: false, msg: 'Invalid unit' });
+  }
   if (price !== undefined) {
     const parsedPrice = parseFloat(price);
     if (isNaN(parsedPrice) || parsedPrice <= 0) {
@@ -182,10 +206,18 @@ exports.updateVariant = async (req, res) => {
       return res.status(400).json({ success: false, msg: 'Invalid price' });
     }
   }
+  if (purchasePrice !== undefined) {
+    const parsedPurchasePrice = parseFloat(purchasePrice);
+    if (isNaN(parsedPurchasePrice) || parsedPurchasePrice <= 0) {
+      if (newImageFile) try { await fs.unlink(newImage); } catch { }
+      return res.status(400).json({ success: false, msg: 'Invalid purchasePrice' });
+    }
+  }
   if (discountPrice !== undefined) {
     const parsedDiscount = parseFloat(discountPrice);
     const currentVariant = await Variant.findById(req.params.id);
-    if (isNaN(parsedDiscount) || parsedDiscount > (price !== undefined ? parseFloat(price) : currentVariant.price)) {
+    const currentPrice = price !== undefined ? parseFloat(price) : currentVariant.price;
+    if (isNaN(parsedDiscount) || parsedDiscount > currentPrice) {
       if (newImageFile) try { await fs.unlink(newImage); } catch { }
       return res.status(400).json({ success: false, msg: 'Invalid discountPrice' });
     }
@@ -197,9 +229,16 @@ exports.updateVariant = async (req, res) => {
       return res.status(400).json({ success: false, msg: 'Invalid stockQuantity' });
     }
   }
+  if (expiryDate !== undefined) {
+    const expiry = new Date(expiryDate);
+    if (isNaN(expiry.getTime())) {
+      if (newImageFile) try { await fs.unlink(newImage); } catch { }
+      return res.status(400).json({ success: false, msg: 'Invalid expiryDate' });
+    }
+  }
 
   try {
-    const currentVariant = await Variant.findById(req.params.id).populate('product');
+    const currentVariant = await Variant.findById(req.params.id).populate('product unit');
     if (!currentVariant) {
       if (newImageFile) try { await fs.unlink(newImage); } catch { }
       return res.status(404).json({ success: false, msg: 'Variant not found' });
@@ -215,13 +254,26 @@ exports.updateVariant = async (req, res) => {
       }
     }
 
+    // If unit changed, validate
+    let finalUnit = unitValue !== undefined ? unitValue : currentVariant.unit._id;
+    if (unitValue !== undefined && finalUnit !== currentVariant.unit._id) {
+      const unit = await Unit.findById(finalUnit);
+      if (!unit) {
+        if (newImageFile) try { await fs.unlink(newImage); } catch { }
+        return res.status(400).json({ success: false, msg: `Unit not found for ID: ${finalUnit}` });
+      }
+    }
+
     const updateData = {};
     if (attribute !== undefined) updateData.attribute = attribute.trim();
     if (value !== undefined) updateData.value = value.trim();
     if (sku !== undefined) updateData.sku = finalSku;
+    if (unitValue !== undefined) updateData.unit = finalUnit;
+    if (purchasePrice !== undefined) updateData.purchasePrice = parseFloat(purchasePrice);
     if (price !== undefined) updateData.price = parseFloat(price);
     if (discountPrice !== undefined) updateData.discountPrice = parseFloat(discountPrice);
     if (stockQuantity !== undefined) updateData.stockQuantity = parseInt(stockQuantity);
+    if (expiryDate !== undefined) updateData.expiryDate = new Date(expiryDate);
     if (status !== undefined) updateData.status = status;
     if (newImage) {
       updateData.image = newImage;
@@ -234,7 +286,7 @@ exports.updateVariant = async (req, res) => {
     }
 
     const updatedVariant = await Variant.findByIdAndUpdate(req.params.id, updateData, { new: true, runValidators: true })
-      .populate('product', 'name');
+      .populate('product unit', 'name');
 
     res.json({
       success: true,
