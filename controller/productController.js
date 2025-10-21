@@ -430,118 +430,123 @@ exports.getAllProducts = async (req, res) => {
   }
 };
 
-
-// Get Product by ID - Enhanced with dynamic offers, now includes variations
 exports.getProductById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Use aggregation for single product to include offer integration
-    // const pipeline = [
-    //   { $match: { _id: new mongoose.Types.ObjectId(id) } },
-      // Basic populates via lookup
-      // {
-      //   $lookup: {
-      //     from: 'categories',
-      //     localField: 'category',
-      //     foreignField: '_id',
-      //     as: 'category'
-      //   }
-      // },
-      // { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
-      // {
-      //   $lookup: {
-      //     from: 'subcategories',
-      //     localField: 'subcategory',
-      //     foreignField: '_id',
-      //     as: 'subcategory'
-      //   }
-      // },
-      // { $unwind: { path: '$subcategory', preserveNullAndEmptyArrays: true } },
-      // {
-      //   $lookup: {
-      //     from: 'brands',
-      //     localField: 'brand',
-      //     foreignField: '_id',
-      //     as: 'brand'
-      //   }
-      // },
-      // { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
-      // {
-      //   $lookup: {
-      //     from: 'units',
-      //     localField: 'unit',
-      //     foreignField: '_id',
-      //     as: 'unit'
-      //   }
-      // },
-      // { $unwind: { path: '$unit', preserveNullAndEmptyArrays: true } },
-       // Offer lookup
-    //   {
-    //     $lookup: {
-    //       from: 'offers',
-    //       let: { prodId: '$_id', currentDate: new Date() },
-    //       pipeline: [
-    //         {
-    //           $match: {
-    //             $expr: { $in: ['$$prodId', '$applicableProducts'] },
-    //             status: 'active',
-    //             $expr: {
-    //               $and: [
-    //                 { $lte: ['$startDate', '$$currentDate'] },
-    //                 { $gte: ['$endDate', '$$currentDate'] }
-    //               ]
-    //             }
-    //           }
-    //         },
-    //         { $sort: { createdAt: -1 } },
-    //         { $limit: 1 },
-    //         {
-    //           $project: {
-    //             discountType: 1,
-    //             discountValue: 1,
-    //             _id: 0
-    //           }
-    //         }
-    //       ],
-    //       as: 'activeOffer'
-    //     }
-    //   },
-    //   { $unwind: { path: '$activeOffer', preserveNullAndEmptyArrays: true } },
-    //   // Calculate effective price (fixed: use 'price' consistently)
-    //   {
-    //     $addFields: {
-    //       effectivePrice: {
-    //         $cond: {
-    //           if: { $ne: ['$activeOffer', null] },
-    //           then: {
-    //             $cond: {
-    //               if: { $eq: ['$activeOffer.discountType', 'Percentage'] },
-    //               then: {
-    //                 $subtract: [
-    //                   { $ifNull: ['$price', 0] },
-    //                   { $multiply: [{ $ifNull: ['$price', 0] }, { $divide: ['$activeOffer.discountValue', 100] }] }
-    //                 ]
-    //               },
-    //               else: { $subtract: [{ $ifNull: ['$price', 0] }, '$activeOffer.discountValue'] }
-    //             }
-    //           },
-    //           else: { $ifNull: ['$price', 0] }
-    //         }
-    //       }
-    //     }
-    //   },
-    //   {
-    //     $project: {
-    //       __v: 0
-    //     }
-    //   }
-    // ];
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, msg: 'Invalid product ID' });
+    }
 
-    const product = await Product.findById( id );
-    if (!product) {
+    // Use aggregation for consistency with getAllProducts (populates, offers, effectivePrice)
+    const pipeline = [
+      { $match: { _id: new mongoose.Types.ObjectId(id) } },
+      // Basic populates via lookup
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'category',
+          foreignField: '_id',
+          as: 'category'
+        }
+      },
+      { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: 'subcategories',
+          localField: 'subcategory',
+          foreignField: '_id',
+          as: 'subcategory'
+        }
+      },
+      { $unwind: { path: '$subcategory', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: 'brands',
+          localField: 'brand',
+          foreignField: '_id',
+          as: 'brand'
+        }
+      },
+      { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: 'units',
+          localField: 'unit',
+          foreignField: '_id',
+          as: 'unit'
+        }
+      },
+      { $unwind: { path: '$unit', preserveNullAndEmptyArrays: true } },
+      // Offer lookup (same as getAllProducts)
+      {
+        $lookup: {
+          from: 'offers',
+          let: { prodId: '$_id', currentDate: new Date() },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $in: ['$$prodId', '$applicableProducts'] },
+                status: 'active',
+                $expr: {
+                  $and: [
+                    { $lte: ['$startDate', '$$currentDate'] },
+                    { $gte: ['$endDate', '$$currentDate'] }
+                  ]
+                }
+              }
+            },
+            { $sort: { createdAt: -1 } },
+            { $limit: 1 },
+            {
+              $project: {
+                discountType: 1,
+                discountValue: 1,
+                _id: 0
+              }
+            }
+          ],
+          as: 'activeOffer'
+        }
+      },
+      { $unwind: { path: '$activeOffer', preserveNullAndEmptyArrays: true } },
+      // Calculate effective price (same as getAllProducts)
+      {
+        $addFields: {
+          effectivePrice: {
+            $cond: {
+              if: { $ne: ['$activeOffer', null] },
+              then: {
+                $cond: {
+                  if: { $eq: ['$activeOffer.discountType', 'Percentage'] },
+                  then: {
+                    $subtract: [
+                      { $ifNull: ['$price', 0] },
+                      { $multiply: [{ $ifNull: ['$price', 0] }, { $divide: ['$activeOffer.discountValue', 100] }] }
+                    ]
+                  },
+                  else: { $subtract: [{ $ifNull: ['$price', 0] }, '$activeOffer.discountValue'] }
+                }
+              },
+              else: { $ifNull: ['$price', 0] }
+            }
+          }
+        }
+      },
+      {
+        $project: {
+          __v: 0
+        }
+      }
+    ];
+
+    const products = await Product.aggregate(pipeline);
+    if (products.length === 0) {
       return res.status(404).json({ success: false, msg: 'Product not found' });
     }
+
+    const product = products[0]; // Single product
+
     res.json({ success: true, product });
   } catch (err) {
     console.error('Product get error:', err.message || err);
@@ -866,4 +871,5 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
