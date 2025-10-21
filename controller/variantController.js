@@ -1,7 +1,7 @@
 const fs = require('fs').promises; // For async file cleanup
 const path = require('path');
 
-const Variant = require('../model/Variants_product'); // Adjust path as needed
+const Variant = require('../model/variantProduct'); // Adjust path as needed
 const Product = require('../model/Product');
 const Unit = require('../model/Unit'); // Assuming Unit model exists; adjust path as needed
 const mongoose = require('mongoose');
@@ -328,3 +328,4 @@ exports.deleteVariant = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting variant', details: err.message || 'Unknown error' });
   }
 };
+
