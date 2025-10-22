@@ -316,9 +316,10 @@ exports.createProduct = async (req, res) => {
 };
 
 
-// Get All Products (List View) - Enhanced with dynamic offers (Fixed projection, now includes variations)
+
+
 exports.getAllProducts = async (req, res) => {
-  const { page = 1, limit = 10, category, subcategory, brand, unit, status, name, lowStock } = req.query;
+  const { page = 1, limit = 10, category, subcategory, brand, status, name, lowStock } = req.query;
   const filter = {};
   if (category) {
     const cat = await findCategoryByIdOrName(category);
@@ -339,7 +340,7 @@ exports.getAllProducts = async (req, res) => {
   if (name) filter.name = { $regex: name, $options: 'i' };
 
   try {
-    // Base pipeline stages
+    // Base pipeline stages (matching getProductById structure)
     let pipeline = [
       { $match: filter },
       // Basic populates via lookup
@@ -370,19 +371,50 @@ exports.getAllProducts = async (req, res) => {
         }
       },
       { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
-      // Variations lookup (lightweight for list)
+      // Full variations lookup (like getProductById)
       {
         $lookup: {
           from: 'variants',
-          localField: 'variations',
-          foreignField: '_id',
-          as: 'variations',
+          let: { varIds: { $ifNull: ['$variations', []] } },
           pipeline: [
-            { $project: { price: 1, stockQuantity: 1 } }
-          ]
+            {
+              $match: {
+                $expr: { $in: ['$_id', '$$varIds'] }
+              }
+            },
+            // Nested lookup for unit in variants
+            {
+              $lookup: {
+                from: 'units',
+                localField: 'unit',
+                foreignField: '_id',
+                as: 'unit'
+              }
+            },
+            { $unwind: { path: '$unit', preserveNullAndEmptyArrays: true } },
+            // Project specific fields from Variant model
+            {
+              $project: {
+                attribute: 1,
+                value: 1,
+                sku: 1,
+                unit: { $ifNull: ['$unit', null] },
+                purchasePrice: 1,
+                price: 1,
+                discountPrice: 1,
+                stockQuantity: 1,
+                expiryDate: 1,
+                weightQuantity: 1,
+                image: 1,
+                status: 1,
+                _id: 1
+              }
+            }
+          ],
+          as: 'variations'
         }
       },
-      // Offer lookup
+      // Offer lookup (same as getProductById)
       {
         $lookup: {
           from: 'offers',
@@ -414,45 +446,61 @@ exports.getAllProducts = async (req, res) => {
         }
       },
       { $unwind: { path: '$activeOffer', preserveNullAndEmptyArrays: true } },
-      // Calculate aggregated fields from variations and offers
+      // Calculate effective price for each variation (matching getProductById)
       {
         $addFields: {
-          minBasePrice: { $min: "$variations.price" },
-          totalStock: { $sum: "$variations.stockQuantity" },
-          effectiveMinPrice: {
-            $cond: {
-              if: { 
-                $and: [
-                  { $ne: ['$activeOffer', null] },
-                  { $gt: [ { $size: { $ifNull: ["$variations", []] } }, 0 ] }
+          variations: {
+            $map: {
+              input: { $ifNull: ['$variations', []] },
+              as: 'var',
+              in: {
+                $mergeObjects: [
+                  '$$var',
+                  {
+                    effectivePrice: {
+                      $cond: {
+                        if: { $ne: ['$activeOffer', null] },
+                        then: {
+                          $cond: {
+                            if: { $eq: ['$activeOffer.discountType', 'Percentage'] },
+                            then: {
+                              $subtract: [
+                                { $ifNull: ['$$var.price', 0] },
+                                { $multiply: [{ $ifNull: ['$$var.price', 0] }, { $divide: ['$activeOffer.discountValue', 100] }] }
+                              ]
+                            },
+                            else: { $subtract: [{ $ifNull: ['$$var.price', 0] }, '$activeOffer.discountValue'] }
+                          }
+                        },
+                        else: { $ifNull: ['$$var.price', 0] }
+                      }
+                    }
+                  }
                 ]
-              },
-              then: {
-                $cond: {
-                  if: { $eq: ['$activeOffer.discountType', 'Percentage'] },
-                  then: {
-                    $subtract: [
-                      { $ifNull: ['$minBasePrice', 0] },
-                      { $multiply: [{ $ifNull: ['$minBasePrice', 0] }, { $divide: ['$activeOffer.discountValue', 100] }] }
-                    ]
-                  },
-                  else: { $subtract: [{ $ifNull: ['$minBasePrice', 0] }, { $ifNull: ['$activeOffer.discountValue', 0] }] }
-                }
-              },
-              else: { $ifNull: ['$minBasePrice', 0] }
+              }
             }
           }
         }
       }
     ];
 
-    // Add lowStock filter after addFields
+    // Add lowStock filter after addFields (filter on total stock across variations)
     if (lowStock === 'true') {
+      pipeline.push({
+        $addFields: {
+          totalStock: { $sum: "$variations.stockQuantity" }
+        }
+      });
       pipeline.push({ $match: { totalStock: { $lt: 10 } } });
     }
 
-    // Count pipeline
-    const countPipeline = [...pipeline, { $count: 'total' }];
+    // Count pipeline (replicate for accurate count with filters)
+    let countPipeline = [...pipeline];
+    if (lowStock !== 'true') {
+      // If no lowStock, add totalStock field only for count if needed, but since no filter, can count earlier
+      countPipeline = pipeline.slice(0, pipeline.length - 1); // Remove last addFields if present
+    }
+    countPipeline.push({ $count: 'total' });
     const countResult = await Product.aggregate(countPipeline);
     const total = countResult.length > 0 ? countResult[0].total : 0;
 
@@ -463,8 +511,7 @@ exports.getAllProducts = async (req, res) => {
     const projectStage = { 
       $project: { 
         __v: 0,
-        variations: 0, // Hide full variations in list
-        activeOffer: 0 // Hide offer details
+        activeOffer: 0 // Hide offer details, but keep effectivePrice in variations
       } 
     };
 
@@ -483,7 +530,6 @@ exports.getAllProducts = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error fetching products', details: err.message || 'Unknown error' });
   }
 };
-
 exports.getProductById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -646,12 +692,14 @@ exports.getProductById = async (req, res) => {
 
     const product = products[0]; // Single product
 
-    res.json({ success: true, product });
+    res.json({ success: true, message: "Product fetched successfully", product });
   } catch (err) {
     console.error('Product get error:', err.message || err);
     res.status(500).json({ success: false, msg: 'Server error fetching product', details: err.message || 'Unknown error' });
   }
 };
+
+
 
 exports.updateProduct = async (req, res) => {
   console.log('DEBUG: Update req.body:', req.body); // Remove in prod
@@ -1067,6 +1115,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
