@@ -119,26 +119,14 @@ exports.createProduct = async (req, res) => {
   const parsedDiscountPrice = parseFloat(discountPrice || 0);
   const parsedPrice = parseFloat(price);
   const parsedPurchasePrice = parseFloat(purchasePrice);
-  if (isNaN(parsedPrice) || parsedPrice <= 0 || isNaN(parsedPurchasePrice) || parsedPurchasePrice <= 0) {
-    await cleanupAllFiles();
-    return res.status(400).json({ success: false, msg: 'Invalid price or purchasePrice' });
-  }
-  if (discountPrice !== undefined && (isNaN(parsedDiscountPrice) || parsedDiscountPrice > parsedPrice)) {
-    await cleanupAllFiles();
-    return res.status(400).json({ success: false, msg: `Discount price (${parsedDiscountPrice}) must be less than or equal to sell price (${parsedPrice})` });
-  }
  
-  if (isNaN(parseFloat(weightQuantity)) || parseFloat(weightQuantity) <= 0) {
-    await cleanupAllFiles();
-    return res.status(400).json({ success: false, msg: 'Invalid weightQuantity' });
-  }
+  
+ 
+ 
 
   // Handle default variant if no variations provided
   if (parsedVariations.length === 0) {
-    if (!sku || sku.trim() === '') {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: 'SKU required for default variant when no variations provided' });
-    }
+    
     parsedVariations = [{
       attribute: 'Default',
       value: 'Standard',
@@ -152,21 +140,12 @@ exports.createProduct = async (req, res) => {
   // Variation validation (now always at least one)
   for (let i = 0; i < parsedVariations.length; i++) {
     const varObj = parsedVariations[i];
-    if (!varObj.attribute || !varObj.value || !varObj.sku || varObj.sku.trim() === '') {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Variation ${i} missing required fields: attribute, value, or sku` });
-    }
+
     const varPrice = parseFloat(varObj.price);
     const varStock = parseInt(varObj.stockQuantity || 0);
-    if (isNaN(varPrice) || varPrice <= 0 || isNaN(varStock) || varStock < 0) {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Variation ${i} invalid price or stock` });
-    }
+
     const varDiscount = parseFloat(varObj.discountPrice || 0);
-    if (varObj.discountPrice !== undefined && (isNaN(varDiscount) || varDiscount > varPrice)) {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Variation ${i} invalid discountPrice` });
-    }
+
     // Check for duplicate SKUs across variations
     const skuExists = parsedVariations.some((v, idx) => idx !== i && v.sku.trim() === varObj.sku.trim());
     if (skuExists) {
@@ -1103,6 +1082,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
