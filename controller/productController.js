@@ -86,17 +86,8 @@ exports.createProduct = async (req, res) => {
     subCategory: subcategoryValueFromCamel,
     subcategory: subcategoryValueFromSnake,
     brand: brandValue,
-    weightQuantity,
-    unit: unitValue,
-    purchasePrice,
-    price,
-    discountPrice,
-    stockQuantity,
-    expiryDate,
-    sku,
     ingredients,
     suitableFor,
-    status = 'Active',
     variations
   } = req.body;
 
@@ -269,7 +260,6 @@ exports.createProduct = async (req, res) => {
       { path: 'variations', select: 'attribute value sku price stockQuantity discountPrice image unit purchasePrice expiryDate status weightQuantity' }
     ]);
     await Variant.populate(newProduct.variations, { path: 'unit', select: 'unit_name' });
-
     res.status(201).json({
       success: true,
       msg: 'Product created successfully',
@@ -672,13 +662,12 @@ exports.updateProduct = async (req, res) => {
   console.log('DEBUG: Update req.body:', req.body); // Remove in prod
   const { name, description, category: categoryValue, subcategory: subcategoryValue, brand: brandValue, weightQuantity, unit: unitValue, purchasePrice, price, discountPrice, stockQuantity, expiryDate, ingredients, suitableFor, status, variations: incomingVariations, variationOperation, variationIndex } = req.body;
 
-  // Handle multi-field uploads for update: new images (append) and optional new thumbnail (replace)
   const newImagesFiles = req.files && req.files['images'] ? req.files['images'] : [];
   const newThumbnailFile = req.files && req.files['thumbnail'] ? req.files['thumbnail'][0] : null;
   const newImages = newImagesFiles.map(file => file.path);
   const newThumbnail = newThumbnailFile ? newThumbnailFile.path : undefined;
 
-  // Handle variation images for add/update
+  
   const variationImages = {};
   if (variationOperation) {
     let parsedIncoming = [];
@@ -706,7 +695,7 @@ exports.updateProduct = async (req, res) => {
     }
   }
 
-  // Consolidated cleanup helper
+  
   const cleanupAllNewFiles = async () => {
     const allNewFiles = [...newImagesFiles, newThumbnailFile, ...Object.values(variationImages).filter(Boolean)].filter(f => f);
     for (const file of allNewFiles) {
@@ -714,11 +703,7 @@ exports.updateProduct = async (req, res) => {
     }
   };
 
- 
-  if (suitableFor !== undefined && !['Puppy', 'Adult', 'Senior', 'All Ages'].includes(suitableFor)) {
-    await cleanupAllNewFiles();
-    return res.status(400).json({ success: false, msg: 'Invalid suitableFor' });
-  }
+
   const parsedStockQuantity = stockQuantity !== undefined ? parseInt(stockQuantity) : NaN;
   if (stockQuantity !== undefined && (isNaN(parsedStockQuantity) || parsedStockQuantity < 0)) {
     await cleanupAllNewFiles();
@@ -806,7 +791,7 @@ exports.updateProduct = async (req, res) => {
       return res.status(400).json({ success: false, msg: `Discount price (${finalDiscountPrice}) must be less than or equal to sell price` });
     }
 
-    // Uniqueness check if name or brand is being updated
+    
     if (name !== undefined || brandValue !== undefined) {
       const checkName = name !== undefined ? name.trim() : currentProduct.name;
       const checkBrandId = brandValue !== undefined ? brandDoc._id : currentProduct.brand;
@@ -836,7 +821,7 @@ exports.updateProduct = async (req, res) => {
     }
     updateData.updatedAt = new Date().toISOString();
 
-    // Bulk update shared fields across all variants if base fields provided (no variationOperation)
+    
     if (purchasePrice !== undefined || price !== undefined || discountPrice !== undefined || stockQuantity !== undefined || weightQuantity !== undefined || expiryDate !== undefined || unitValue !== undefined) {
       const bulkUpdate = { $set: {} };
       if (purchasePrice !== undefined) bulkUpdate.$set.purchasePrice = finalPurchasePrice;
@@ -1072,6 +1057,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
