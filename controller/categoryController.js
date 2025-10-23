@@ -94,8 +94,7 @@ exports.updateCategory =  async (req, res) => {
   if (status && !['Active', 'Inactive'].includes(status)) { // Fixed validation logic
     return res.status(400).json({ success: false, msg: 'Invalid status' });
   }
-  const categoryImg = await Category.findById({req.params.id})
-    const image = req.file ? req.file.path : categoryImg.image;
+    const image = req.file ? req.file.path : null;
 
   try {
     const category = await Category.findByIdAndUpdate(
@@ -132,5 +131,6 @@ exports.deleteCategory =  async (req, res) => {
   }
 
 }
+
 
 
