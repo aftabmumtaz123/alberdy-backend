@@ -176,6 +176,7 @@ exports.createProduct = async (req, res) => {
     }
 
     const unit = await findUnitByIdOrName(unitValue);
+    console.log(unit)
     if (!unit) {
       await cleanupAllFiles();
       return res.status(400).json({ success: false, msg: `Unit not found for value: ${unitValue}` });
@@ -1082,6 +1083,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
