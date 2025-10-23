@@ -3,7 +3,7 @@ const fs = require('fs').promises; // For async file cleanup
 const path = require('path');
 
 const Product = require('../model/Product');
-const Variant = require('../model/Variants_product');
+const Variant = require('../model/variantProduct');
 const Category = require('../model/Category');
 const Subcategory = require('../model/Subcategory');
 const Brand = require('../model/Brand');
@@ -1103,3 +1103,4 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
