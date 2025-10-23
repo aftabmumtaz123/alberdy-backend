@@ -130,7 +130,7 @@ exports.createProduct = async (req, res) => {
     parsedVariations = [{
       attribute: 'Default',
       value: 'Standard',
-      sku: sku.trim(),
+      sku: sku,
       price: price,
       discountPrice: discountPrice,
       stockQuantity: stockQuantity
@@ -1082,6 +1082,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
