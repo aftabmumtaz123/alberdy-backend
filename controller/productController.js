@@ -114,10 +114,6 @@ exports.createProduct = async (req, res) => {
   const parsedPurchasePrice = parseFloat(purchasePrice);
 
  
-  if (isNaN(parseFloat(weightQuantity)) || parseFloat(weightQuantity) <= 0) {
-    await cleanupAllFiles();
-    return res.status(400).json({ success: false, msg: 'Invalid weightQuantity' });
-  }
 
   // Handle default variant if no variations provided
   if (parsedVariations.length === 0) {
@@ -1085,6 +1081,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
