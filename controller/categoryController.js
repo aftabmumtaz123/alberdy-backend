@@ -105,7 +105,7 @@ exports.updateCategory = async (req, res) => {
     // Update fields
     existingCategory.name = name ?? existingCategory.name;
     existingCategory.description = description ?? existingCategory.description;
-    existingCategory.status = status ?? existingCategory.status;
+    existingCategory.status = status;
     existingCategory.image = image;
 
     await existingCategory.save();
@@ -137,6 +137,7 @@ exports.deleteCategory =  async (req, res) => {
   }
 
 }
+
 
 
 
