@@ -48,7 +48,7 @@ app.use('/api/expenses', require('./router/expense'));
 app.use('/api/expense-categories', require('./router/expenseCategory')); 
 app.use('/api/currencies', require('./router/currency')); 
 app.use('/api', require('./router/inventoryRoutes')); 
-app.use('/configuration', require('./router/appConfigurationRouter')); 
+app.use('/api/configuration', require('./router/appConfigurationRouter')); 
 const dashboardRoutes = require('./router/dashboard');
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/offer', require('./router/offer'));
@@ -59,5 +59,6 @@ app.use('/api/variants', require('./router/variant'));
 app.get("/",(req,res)=>{
   res.json({Message: "API's are running well bro!!"})
 })
+
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
