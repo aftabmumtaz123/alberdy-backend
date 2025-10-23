@@ -84,7 +84,6 @@ exports.createProduct = async (req, res) => {
     category: categoryValue,
     description,
     subCategory: subcategoryValueFromCamel,
-    subcategory: subcategoryValueFromSnake,
     brand: brandValue,
     ingredients,
     suitableFor,
@@ -1091,6 +1090,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
