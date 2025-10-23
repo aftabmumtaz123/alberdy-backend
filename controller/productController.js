@@ -55,7 +55,7 @@ const findBrandByIdOrName = async (value) => {
 
 const findUnitByIdOrName = async (value) => {
   if (!value) return null;
-  const trimmedValue = value.toString().trim();
+  const trimmedValue = value.toString();
   if (mongoose.Types.ObjectId.isValid(trimmedValue)) return await Unit.findById(trimmedValue);
   return await Unit.findOne({ unit_name: trimmedValue, unit_status: 'enable' });
 };
@@ -1082,6 +1082,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
