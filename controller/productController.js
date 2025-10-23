@@ -144,11 +144,7 @@ exports.createProduct = async (req, res) => {
   const parsedPurchasePrice = parseFloat(purchasePrice || 0); // Fixed: fallback
   const parsedWeightQuantity = parseFloat(weightQuantity || 0); // Added: fallback
 
-  // Validate main fields (for default variation)
-  if (parsedPrice <= parsedPurchasePrice) {
-    await cleanupAllFiles();
-    return res.status(400).json({ success: false, msg: 'Sell price must be greater than purchase price' });
-  }
+ 
   if (parsedDiscountPrice > parsedPrice) {
     await cleanupAllFiles();
     return res.status(400).json({ success: false, msg: 'Discount price must be less than or equal to sell price' });
@@ -1089,6 +1085,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
