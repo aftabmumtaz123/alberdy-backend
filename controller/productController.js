@@ -87,7 +87,7 @@ exports.createProduct = async (req, res) => {
   let parsedVariations = [];
   if (req.files && variants) {
     try {
-      parsedVariations = JSON.parse(variations);
+      parsedVariations = JSON.parse(variants);
       if (!Array.isArray(parsedVariations)) {
         throw new Error('Not an array');
       }
@@ -921,9 +921,9 @@ exports.updateProduct = async (req, res) => {
           const addVariantIds = [];
           for (let i = 0; i < parsedIncomingVariations.length; i++) {
             const varObj = parsedIncomingVariations[i];
-            if (!varObj.attribute || !varObj.value || !varObj.sku || varObj.sku.trim() === '' || !varObj.unit) {
+            if (!varObj.unit || !varObj.price) {
               await cleanupAllNewFiles();
-              return res.status(400).json({ success: false, msg: `New variation ${i} missing required fields` });
+              return res.status(400).json({ success: false, msg: `New variation ${i} missing required fields (unit, price)` });
             }
             const varPrice = parseFloat(varObj.price);
             const varStock = parseInt(varObj.stockQuantity || 0);
@@ -938,9 +938,9 @@ exports.updateProduct = async (req, res) => {
               await cleanupAllNewFiles();
               return res.status(400).json({ success: false, msg: `New variation ${i} invalid discountPrice` });
             }
-            const newSku = varObj.sku.trim();
+            const newSku = varObj.sku?.trim() || await generateSKU();
             // Check duplicate within new
-            const newSkus = parsedIncomingVariations.slice(0, i).map(v => v.sku.trim());
+            const newSkus = parsedIncomingVariations.slice(0, i).map(v => v.sku?.trim() || await generateSKU());
             if (newSkus.includes(newSku)) {
               await cleanupAllNewFiles();
               return res.status(400).json({ success: false, msg: `Duplicate SKU in new variations` });
@@ -960,8 +960,8 @@ exports.updateProduct = async (req, res) => {
 
             const variantData = {
               product: currentProduct._id,
-              attribute: varObj.attribute.trim(),
-              value: varObj.value.trim(),
+              attribute: varObj.attribute?.trim() || 'Default',
+              value: varObj.value?.trim() || 'Standard',
               sku: newSku,
               unit: unit._id,
               purchasePrice: varPurchase,
@@ -997,11 +997,11 @@ exports.updateProduct = async (req, res) => {
           const variantId = currentProduct.variations[idx]._id;
           const currentVariant = await Variant.findById(variantId);
           const updateVar = parsedIncomingVariations[0];
-          if (!updateVar.attribute || !updateVar.value || !updateVar.sku || updateVar.sku.trim() === '' || !updateVar.unit) {
+          if (!updateVar.unit || !updateVar.price) {
             await cleanupAllNewFiles();
-            return res.status(400).json({ success: false, msg: 'Updated variation missing required fields' });
+            return res.status(400).json({ success: false, msg: 'Updated variation missing required fields (unit, price)' });
           }
-          const updateSku = updateVar.sku.trim();
+          const updateSku = updateVar.sku?.trim() || await generateSKU();
           if (updateSku !== currentVariant.sku) {
             // Check uniqueness if SKU changed
             const existingSku = await Variant.findOne({ sku: updateSku, _id: { $ne: variantId } });
@@ -1031,8 +1031,8 @@ exports.updateProduct = async (req, res) => {
           }
 
           const updatedVarData = {
-            attribute: updateVar.attribute.trim(),
-            value: updateVar.value.trim(),
+            attribute: updateVar.attribute?.trim() || 'Default',
+            value: updateVar.value?.trim() || 'Standard',
             sku: updateSku,
             unit: unit._id,
             price: updateVarPrice,
