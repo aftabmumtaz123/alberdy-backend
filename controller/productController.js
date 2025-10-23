@@ -91,7 +91,6 @@ exports.createProduct = async (req, res) => {
     stockQuantity,
     discountPrice ,
     price, // Added
-    discountPrice, // Added
     purchasePrice, // Added
     unit: unitValue, // Added (renamed from unitValue for clarity)
     weightQuantity, // Added
@@ -1092,6 +1091,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
