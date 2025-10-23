@@ -90,7 +90,6 @@ exports.getCategoryById =   async (req, res) => {
 
 exports.updateCategory =  async (req, res) => {
   const { name, description, status } = req.body;
- const image = req.file ? req.file.path : null;
 
   if (status && !['Active', 'Inactive'].includes(status)) { // Fixed validation logic
     return res.status(400).json({ success: false, msg: 'Invalid status' });
@@ -129,4 +128,5 @@ exports.deleteCategory =  async (req, res) => {
     console.error('Category delete error:', err);
     res.status(500).json({ success: false, msg: 'Server error deleting category' });
   }
+
 }
