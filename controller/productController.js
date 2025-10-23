@@ -144,15 +144,7 @@ exports.createProduct = async (req, res) => {
   const parsedPurchasePrice = parseFloat(purchasePrice || 0); // Fixed: fallback
   const parsedWeightQuantity = parseFloat(weightQuantity || 0); // Added: fallback
 
- 
-  if (parsedDiscountPrice > parsedPrice) {
-    await cleanupAllFiles();
-    return res.status(400).json({ success: false, msg: 'Discount price must be less than or equal to sell price' });
-  }
-  if (isNaN(parsedWeightQuantity) || parsedWeightQuantity <= 0) {
-    await cleanupAllFiles();
-    return res.status(400).json({ success: false, msg: 'Weight quantity must be positive' });
-  }
+
 
   // Generate random SKU if not provided or empty
   const providedSku = sku && sku.trim() ? sku.trim() : null;
@@ -1085,6 +1077,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
