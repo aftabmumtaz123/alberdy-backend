@@ -76,37 +76,36 @@ const generateSKU = async () => {
 
   return `SKU-NUM-${String(nextNumber).padStart(3, '0')}`; // e.g., SKU-NUM-001
 };
-
 exports.createProduct = async (req, res) => {
-  console.log('DEBUG: Full req.body:', req.body); // Remove in prod
+  console.log('DEBUG: Full req.body:', req.body); // Remove in production
+
   const {
     name,
     category: categoryValue,
     description,
-    subCategory,
+    subcategory, // ✅ Fixed (was subCategory)
     brand: brandValue,
     ingredients,
     suitableFor,
     stockQuantity,
-    discountPrice ,
-    price, // Added
-    purchasePrice, // Added
-    unit: unitValue, // Added (renamed from unitValue for clarity)
-    weightQuantity, // Added
-    expiryDate, // Added
-    status, // Added
-    sku, // Added (optional)
+    discountPrice,
+    price,
+    purchasePrice,
+    unit: unitValue,
+    weightQuantity,
+    expiryDate,
+    status,
+    sku,
     variations
   } = req.body;
 
-
-  // Handle image uploads (unchanged)
+  // Handle image uploads
   const imagesFiles = req.files?.images || [];
   const thumbnailFile = req.files?.thumbnail ? req.files.thumbnail[0] : null;
   const images = imagesFiles.map(file => file.path);
   const thumbnail = thumbnailFile ? thumbnailFile.path : null;
 
-  // Handle variation images (unchanged)
+  // Handle variation images
   const variationImages = {};
   let parsedVariations = [];
   if (req.files && variations) {
@@ -124,33 +123,35 @@ exports.createProduct = async (req, res) => {
     }
   }
 
-  // Cleanup helper (unchanged)
+  // Cleanup helper
   const cleanupAllFiles = async () => {
-    const allFiles = [...imagesFiles, thumbnailFile, ...Object.values(variationImages)].filter(Boolean);
+    const allFiles = [
+      ...imagesFiles.map(f => f.path),
+      thumbnailFile?.path,
+      ...Object.values(variationImages)
+    ].filter(Boolean);
     for (const file of allFiles) {
-      try { await fs.unlink(file.path || file); } catch {}
+      try { await fs.unlink(file); } catch {}
     }
   };
 
-  // Parse numeric fields with fallbacks
+  // Parse numeric fields safely
   const parsedStockQuantity = parseInt(stockQuantity || 0);
+  const parsedPrice = parseFloat(price || 0);
+  const parsedDiscountPrice = parseFloat(discountPrice || 0);
+  const parsedPurchasePrice = parseFloat(purchasePrice || 0);
+  const parsedWeightQuantity = parseFloat(weightQuantity || 0);
+
   if (isNaN(parsedStockQuantity) || parsedStockQuantity < 0) {
     await cleanupAllFiles();
     return res.status(400).json({ success: false, msg: 'Stock quantity must be non-negative' });
   }
 
-  const parsedPrice = parseFloat(price || 0); // Fixed: fallback
-  const parsedDiscountPrice = parseFloat(discountPrice || 0); // Fixed: fallback
-  const parsedPurchasePrice = parseFloat(purchasePrice || 0); // Fixed: fallback
-  const parsedWeightQuantity = parseFloat(weightQuantity || 0); // Added: fallback
-
-
-
-  // Generate random SKU if not provided or empty
+  // Generate random SKU if not provided
   const providedSku = sku && sku.trim() ? sku.trim() : null;
   const randSKU = await generateSKU();
 
-  // Handle default variation
+  // Handle default variation if none provided
   if (parsedVariations.length === 0) {
     const defaultSku = providedSku || randSKU;
     parsedVariations = [{
@@ -163,18 +164,13 @@ exports.createProduct = async (req, res) => {
     }];
   }
 
-  // Variation validation (now covers defaults too)
+  // Validate variations
   for (let i = 0; i < parsedVariations.length; i++) {
     const v = parsedVariations[i];
     if (!v.attribute || !v.value || !v.sku?.trim()) {
       await cleanupAllFiles();
       return res.status(400).json({ success: false, msg: `Variation ${i} missing attribute, value, or sku` });
     }
-
-    const varPrice = parseFloat(v.price || 0);
-    const varStock = parseInt(v.stockQuantity || 0);
-    const varDiscount = parseFloat(v.discountPrice || 0);
-
 
     const skuExists = parsedVariations.some((vv, idx) => idx !== i && vv.sku.trim() === v.sku.trim());
     if (skuExists) {
@@ -184,12 +180,12 @@ exports.createProduct = async (req, res) => {
   }
 
   try {
-    // Lookups (now enforce status via updated functions)
+    // Lookups
     const category = await findCategoryByIdOrName(categoryValue);
     if (!category) throw new Error(`Category not found or inactive: ${categoryValue}`);
 
-    const subcategory = await findSubcategoryByIdOrName(subCategory);
-    if (!subcategory) throw new Error(`Subcategory not found or inactive: ${subCategory}`);
+    const subcategoryDoc = await findSubcategoryByIdOrName(subcategory); // ✅ Fixed variable name
+    if (!subcategoryDoc) throw new Error(`Subcategory not found or inactive: ${subcategory}`);
 
     const brand = await findBrandByIdOrName(brandValue);
     if (!brand) throw new Error(`Brand not found or inactive: ${brandValue}`);
@@ -197,19 +193,19 @@ exports.createProduct = async (req, res) => {
     const unit = await findUnitByIdOrName(unitValue);
     if (!unit) throw new Error(`Unit not found or disabled: ${unitValue}`);
 
-    // Check uniqueness (unchanged)
+    // Check product uniqueness
     const existingProduct = await Product.findOne({ name: name.trim(), brand: brand._id });
     if (existingProduct) throw new Error('Product with this name already exists under this brand');
 
     const ingredientsString = Array.isArray(ingredients) ? ingredients.join('\n') : ingredients;
 
-    // Create product (with status default)
+    // Create product
     const productData = {
       name: name.trim(),
       category: category._id,
-      subcategory: subcategory._id,
+      subcategory: subcategoryDoc._id, // ✅ Fixed reference
       brand: brand._id,
-      status: status || 'Active', // Fixed: default
+      status: status || 'Active',
       createdAt: new Date(),
       updatedAt: new Date(),
       variations: [],
@@ -223,7 +219,7 @@ exports.createProduct = async (req, res) => {
     const newProduct = new Product(productData);
     await newProduct.save();
 
-    // Check SKU uniqueness globally (unchanged)
+    // Check SKU uniqueness globally
     for (const v of parsedVariations) {
       const exists = await Variant.findOne({ sku: v.sku.trim() });
       if (exists) {
@@ -233,7 +229,7 @@ exports.createProduct = async (req, res) => {
       }
     }
 
-    // Create variants (with fallbacks)
+    // Create variants
     const variantIds = [];
     for (let i = 0; i < parsedVariations.length; i++) {
       const v = parsedVariations[i];
@@ -243,13 +239,13 @@ exports.createProduct = async (req, res) => {
         value: v.value.trim(),
         sku: v.sku.trim(),
         unit: unit._id,
-        purchasePrice: parsedPurchasePrice, // Shared
+        purchasePrice: parsedPurchasePrice,
         price: parseFloat(v.price),
         discountPrice: parseFloat(v.discountPrice || 0),
         stockQuantity: parseInt(v.stockQuantity || 0),
-        weightQuantity: parsedWeightQuantity, // Shared
+        weightQuantity: parsedWeightQuantity,
         status: 'Active',
-        expiryDate: expiryDate ? new Date(expiryDate) : undefined, // Shared
+        expiryDate: expiryDate ? new Date(expiryDate) : undefined,
         image: variationImages[i]
       };
 
@@ -258,30 +254,37 @@ exports.createProduct = async (req, res) => {
       variantIds.push(newVariant._id);
     }
 
-    // Link variants to product (unchanged)
+    // Link variants to product
     if (variantIds.length > 0) {
-      await Product.findByIdAndUpdate(newProduct._id, { $push: { variations: { $each: variantIds } } });
+      await Product.findByIdAndUpdate(newProduct._id, {
+        $push: { variations: { $each: variantIds } }
+      });
     }
 
-    // Populate and respond (unchanged)
+    // Populate and respond
     await newProduct.populate([
       { path: 'category', select: 'name' },
       { path: 'subcategory', select: 'subcategoryName' },
       { path: 'brand', select: 'name' },
-      { path: 'variations', select: 'attribute value sku price stockQuantity discountPrice image unit purchasePrice expiryDate status weightQuantity' }
+      {
+        path: 'variations',
+        select: 'attribute value sku price stockQuantity discountPrice image unit purchasePrice expiryDate status weightQuantity'
+      }
     ]);
     await Variant.populate(newProduct.variations, { path: 'unit', select: 'unit_name' });
+
     res.status(201).json({
       success: true,
       msg: 'Product created successfully',
       product: newProduct
     });
   } catch (err) {
-    console.error('Product creation error:', err);
+    console.error('Product creation error:', err.message);
     await cleanupAllFiles();
     res.status(400).json({ success: false, msg: err.message || 'Server error during product creation' });
   }
 };
+
 
 exports.getAllProducts = async (req, res) => {
   const { page = 1, limit = 10, category, subcategory, brand, status, name, lowStock } = req.query;
@@ -760,10 +763,10 @@ exports.updateProduct = async (req, res) => {
       }
     }
     if (subCategory !== undefined) {
-      subcategory = await findSubcategoryByIdOrName(subCategory);
+      subcategory = await findSubcategoryByIdOrName(subcategory);
       if (!subcategory) {
         await cleanupAllNewFiles();
-        return res.status(400).json({ success: false, msg: `Subcategory not found for value: ${subCategory}` });
+        return res.status(400).json({ success: false, msg: `Subcategory not found for value: ${subcategory}` });
       }
     }
     if (brandValue !== undefined) {
@@ -1065,6 +1068,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
