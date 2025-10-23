@@ -737,11 +737,7 @@ exports.updateProduct = async (req, res) => {
     }
   };
 
-  // Validation (similar to create, but optional)
-  if (status !== undefined && !['Active', 'Inactive'].includes(status)) {
-    await cleanupAllNewFiles();
-    return res.status(400).json({ success: false, msg: 'Invalid status' });
-  }
+ 
   if (suitableFor !== undefined && !['Puppy', 'Adult', 'Senior', 'All Ages'].includes(suitableFor)) {
     await cleanupAllNewFiles();
     return res.status(400).json({ success: false, msg: 'Invalid suitableFor' });
@@ -1099,6 +1095,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
