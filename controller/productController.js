@@ -112,15 +112,8 @@ exports.createProduct = async (req, res) => {
   const parsedDiscountPrice = parseFloat(discountPrice || 0);
   const parsedPrice = parseFloat(price);
   const parsedPurchasePrice = parseFloat(purchasePrice);
-  if (isNaN(parsedPrice) || parsedPrice <= 0 || isNaN(parsedPurchasePrice) || parsedPurchasePrice <= 0) {
-    await cleanupAllFiles();
-    return res.status(400).json({ success: false, msg: 'Invalid price or purchasePrice' });
-  }
-  if (discountPrice !== undefined && (isNaN(parsedDiscountPrice) || parsedDiscountPrice > parsedPrice)) {
-    await cleanupAllFiles();
-    return res.status(400).json({ success: false, msg: `Discount price (${parsedDiscountPrice}) must be less than or equal to sell price (${parsedPrice})` });
-  }
-  
+
+ 
   if (isNaN(parseFloat(weightQuantity)) || parseFloat(weightQuantity) <= 0) {
     await cleanupAllFiles();
     return res.status(400).json({ success: false, msg: 'Invalid weightQuantity' });
@@ -1092,6 +1085,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
