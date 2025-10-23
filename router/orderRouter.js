@@ -329,7 +329,7 @@ router.get('/track/:identifier', async (req, res) => {
     const slim = {
       orderNumber: order.orderNumber,
       orderTrackingNumber: order.orderTrackingNumber,
-752      trackingStatus: order.trackingStatus,
+      trackingStatus: order.trackingStatus,
       status: order.status,
       shippingAddress: order.shippingAddress,
       createdAt: order.createdAt,
@@ -343,3 +343,4 @@ router.get('/track/:identifier', async (req, res) => {
 });
 
 module.exports = router;
+
