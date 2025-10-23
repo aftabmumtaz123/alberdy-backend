@@ -40,6 +40,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
   try {
     const { items, subtotal, tax, discount, total, paymentMethod, shippingAddress, notes, shipping = 5.99 } = req.body;
 
+    // Validate request body
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ success: false, msg: 'Order items are required' });
     }
@@ -50,15 +51,22 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       return res.status(400).json({ success: false, msg: 'Complete shipping address is required' });
     }
 
+    // Validate stock and compute totals
     const updatedItems = [];
     let computedSubtotal = 0;
     for (const item of items) {
       if (!mongoose.Types.ObjectId.isValid(item.product)) {
         return res.status(400).json({ success: false, msg: `Invalid product ID: ${item.product}` });
       }
-      const product = await Product.findById(item.product).populate('variations');
+      const product = await Product.findById(item.product).populate({
+        path: 'variations',
+        select: 'attribute value sku price discountPrice stockQuantity image'
+      });
       if (!product) {
         return res.status(400).json({ success: false, msg: `Product not found: ${item.product}` });
+      }
+      if (!product.variations || !Array.isArray(product.variations)) {
+        return res.status(400).json({ success: false, msg: `No variations found for product ${item.product}` });
       }
 
       const quantity = Number(item.quantity);
@@ -73,12 +81,12 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
         }
         variant = product.variations.find(v => v._id.toString() === item.variant.toString());
         if (!variant) {
-          return res.status(400).json({ success: false, msg: `Variant not found for product ${product.name}` });
+          return res.status(400).json({ success: false, msg: `Variant ${item.variant} not found for product ${product.name}` });
         }
         if (variant.stockQuantity < quantity) {
           return res.status(400).json({ success: false, msg: `Insufficient stock for variant ${variant.sku} in ${product.name}. Available: ${variant.stockQuantity}` });
         }
-        priceToUse = variant.effectivePrice || variant.price;
+        priceToUse = variant.discountPrice || variant.price;
       } else {
         return res.status(400).json({ success: false, msg: `Variant required for product ${product.name}` });
       }
@@ -94,18 +102,22 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       computedSubtotal += itemTotal;
     }
 
+    // Validate subtotal
     if (Math.abs(computedSubtotal - subtotal) > 0.01) {
       return res.status(400).json({ success: false, msg: `Subtotal mismatch: provided ${subtotal}, computed ${computedSubtotal.toFixed(2)}` });
     }
 
+    // Validate total
     const calculatedTotal = subtotal + (tax || 0) + shipping - (discount || 0);
     if (Math.abs(calculatedTotal - total) > 0.01) {
       return res.status(400).json({ success: false, msg: 'Total mismatch in order calculation' });
     }
 
+    // Generate identifiers
     const orderNumber = await generateOrderNumber();
     const trackingNumber = await generateTrackingNumber();
 
+    // Create order
     const order = new Order({
       user: req.user.id,
       orderNumber,
@@ -126,14 +138,16 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
 
     await order.save();
 
+    // Update stock for variants
     for (const item of updatedItems) {
       if (item.variant) {
         await Variant.findByIdAndUpdate(item.variant, { $inc: { stockQuantity: -item.quantity } });
       }
     }
 
+    // Populate response
     await order.populate('items.product', 'name thumbnail images');
-    await order.populate({ path: 'items.variant', select: 'attribute value sku price effectivePrice stockQuantity image' });
+    await order.populate({ path: 'items.variant', select: 'attribute value sku price discountPrice stockQuantity image' });
     await order.populate('user', 'name email phone');
 
     res.status(201).json({
@@ -142,10 +156,11 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       msg: `Order ${orderNumber} placed successfully`
     });
   } catch (err) {
+    console.error('Order creation error:', err);
     if (err.name === 'MongoServerError' && err.code === 11000) {
       return res.status(400).json({ success: false, msg: 'Duplicate order number or tracking number' });
     }
-    res.status(500).json({ success: false, msg: 'Server error creating order', details: err.message });
+    return res.status(500).json({ success: false, msg: 'Server error creating order', details: err.message || 'Unknown error' });
   }
 });
 
@@ -332,3 +347,4 @@ router.get('/track/:identifier', async (req, res) => {
 });
 
 module.exports = router;
+
