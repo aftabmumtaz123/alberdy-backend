@@ -83,7 +83,7 @@ exports.createProduct = async (req, res) => {
     name,
     category: categoryValue,
     description,
-    subCategory: subcategoryValueFromCamel,
+    subCategory,
     brand: brandValue,
     ingredients,
     suitableFor,
@@ -99,7 +99,7 @@ exports.createProduct = async (req, res) => {
     variations
   } = req.body;
 
-  const subcategoryValue = subcategoryValueFromCamel || subcategoryValueFromSnake;
+  const subcategoryValue;
 
   // Handle image uploads (unchanged)
   const imagesFiles = req.files?.images || [];
@@ -1090,6 +1090,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
