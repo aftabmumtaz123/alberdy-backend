@@ -61,96 +61,127 @@ const findUnitByIdOrName = async (value) => {
 };
 
 
+
+// 🔹 Auto-increment SKU generator
+const generateSKU = async () => {
+  const lastVariant = await Variant.findOne().sort({ createdAt: -1 }); // Get last created variant
+  let nextNumber = 1;
+
+  if (lastVariant && lastVariant.sku) {
+    const match = lastVariant.sku.match(/SKU-NUM-(\d+)/);
+    if (match) {
+      nextNumber = parseInt(match[1], 10) + 1;
+    }
+  }
+
+  return `SKU-NUM-${String(nextNumber).padStart(3, '0')}`; // e.g., SKU-NUM-001
+};
+
 exports.createProduct = async (req, res) => {
   console.log('DEBUG: Full req.body:', req.body); // Remove in prod
-  const { name, category: categoryValue, description, subCategory: subcategoryValueFromCamel, subcategory: subcategoryValueFromSnake, brand: brandValue, weightQuantity, unit: unitValue, purchasePrice, price, discountPrice, stockQuantity, expiryDate, sku, ingredients, suitableFor, status = 'Active', variations } = req.body;
+  const {
+    name,
+    category: categoryValue,
+    description,
+    subCategory: subcategoryValueFromCamel,
+    subcategory: subcategoryValueFromSnake,
+    brand: brandValue,
+    weightQuantity,
+    unit: unitValue,
+    purchasePrice,
+    price,
+    discountPrice,
+    stockQuantity,
+    expiryDate,
+    sku,
+    ingredients,
+    suitableFor,
+    status = 'Active',
+    variations
+  } = req.body;
 
   const subcategoryValue = subcategoryValueFromCamel || subcategoryValueFromSnake;
 
-  // Handle multi-field uploads: images (array) and thumbnail (single)
-  const imagesFiles = req.files && req.files['images'] ? req.files['images'] : [];
-  const thumbnailFile = req.files && req.files['thumbnail'] ? req.files['thumbnail'][0] : null;
+  // Handle image uploads
+  const imagesFiles = req.files?.images || [];
+  const thumbnailFile = req.files?.thumbnail ? req.files.thumbnail[0] : null;
   const images = imagesFiles.map(file => file.path);
   const thumbnail = thumbnailFile ? thumbnailFile.path : null;
 
-  // Handle variation images: assume variations.images is an array of file objects if uploaded
+  // Handle variation images
   const variationImages = {};
   let parsedVariations = [];
   if (req.files && variations) {
     try {
       parsedVariations = JSON.parse(variations);
-      if (!Array.isArray(parsedVariations)) {
-        throw new Error('Not an array');
-      }
-    } catch (e) {
+      if (!Array.isArray(parsedVariations)) throw new Error('Not an array');
+    } catch {
       parsedVariations = [];
     }
     for (let i = 0; i < parsedVariations.length; i++) {
       const fieldName = `variation_images_${i}`;
       if (req.files[fieldName]) {
-        variationImages[i] = req.files[fieldName][0].path; // Single image for variant
+        variationImages[i] = req.files[fieldName][0].path;
       }
     }
   }
 
-  // Consolidated cleanup helper
+  // Cleanup helper (if validation fails)
   const cleanupAllFiles = async () => {
-    const allFiles = [...imagesFiles, thumbnailFile, ...Object.values(variationImages).filter(Boolean)].filter(f => f);
+    const allFiles = [...imagesFiles, thumbnailFile, ...Object.values(variationImages)].filter(Boolean);
     for (const file of allFiles) {
-      try { await fs.unlink(file); } catch { }
+      try { await fs.unlink(file.path || file); } catch {}
     }
   };
 
-
-  
-
+  // Validate numeric fields
   const parsedStockQuantity = parseInt(stockQuantity || 0);
   if (isNaN(parsedStockQuantity) || parsedStockQuantity < 0) {
     await cleanupAllFiles();
     return res.status(400).json({ success: false, msg: 'Stock quantity must be non-negative' });
   }
+
   const parsedDiscountPrice = parseFloat(discountPrice || 0);
   const parsedPrice = parseFloat(price);
   const parsedPurchasePrice = parseFloat(purchasePrice);
 
- 
+  // Generate random SKU if not provided
+  const randSKU = await generateSKU();
 
-  // Handle default variant if no variations provided
+  // Handle default variation
   if (parsedVariations.length === 0) {
-    if (!sku || sku.trim() === '') {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: 'SKU required for default variant when no variations provided' });
-    }
     parsedVariations = [{
       attribute: 'Default',
       value: 'Standard',
-      sku: sku.trim(),
-      price: price,
-      discountPrice: discountPrice,
-      stockQuantity: stockQuantity
+      sku: sku?.trim() || randSKU,
+      price: parsedPrice,
+      discountPrice: parsedDiscountPrice,
+      stockQuantity: parsedStockQuantity
     }];
   }
 
-  // Variation validation (now always at least one)
+  // Variation validation
   for (let i = 0; i < parsedVariations.length; i++) {
-    const varObj = parsedVariations[i];
-    if (!varObj.attribute || !varObj.value || !varObj.sku || varObj.sku.trim() === '') {
+    const v = parsedVariations[i];
+    if (!v.attribute || !v.value || !v.sku?.trim()) {
       await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Variation ${i} missing required fields: attribute, value, or sku` });
+      return res.status(400).json({ success: false, msg: `Variation ${i} missing attribute, value, or sku` });
     }
-    const varPrice = parseFloat(varObj.price);
-    const varStock = parseInt(varObj.stockQuantity || 0);
+
+    const varPrice = parseFloat(v.price);
+    const varStock = parseInt(v.stockQuantity || 0);
     if (isNaN(varPrice) || varPrice <= 0 || isNaN(varStock) || varStock < 0) {
       await cleanupAllFiles();
       return res.status(400).json({ success: false, msg: `Variation ${i} invalid price or stock` });
     }
-    const varDiscount = parseFloat(varObj.discountPrice || 0);
-    if (varObj.discountPrice !== undefined && (isNaN(varDiscount) || varDiscount > varPrice)) {
+
+    const varDiscount = parseFloat(v.discountPrice || 0);
+    if (!isNaN(varDiscount) && varDiscount > varPrice) {
       await cleanupAllFiles();
       return res.status(400).json({ success: false, msg: `Variation ${i} invalid discountPrice` });
     }
-    // Check for duplicate SKUs across variations
-    const skuExists = parsedVariations.some((v, idx) => idx !== i && v.sku.trim() === varObj.sku.trim());
+
+    const skuExists = parsedVariations.some((vv, idx) => idx !== i && vv.sku.trim() === v.sku.trim());
     if (skuExists) {
       await cleanupAllFiles();
       return res.status(400).json({ success: false, msg: `Duplicate SKU in variations` });
@@ -160,105 +191,79 @@ exports.createProduct = async (req, res) => {
   try {
     // Lookups
     const category = await findCategoryByIdOrName(categoryValue);
-    if (!category) {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Category not found for value: ${categoryValue}` });
-    }
+    if (!category) throw new Error(`Category not found: ${categoryValue}`);
 
-    console.log('DEBUG: Subcategory value before lookup:', subcategoryValue); // Remove in prod
     const subcategory = await findSubcategoryByIdOrName(subcategoryValue);
-    if (!subcategory) {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Subcategory not found for value: ${subcategoryValue}` });
-    }
+    if (!subcategory) throw new Error(`Subcategory not found: ${subcategoryValue}`);
 
     const brand = await findBrandByIdOrName(brandValue);
-    if (!brand) {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Brand not found for value: ${brandValue}` });
-    }
+    if (!brand) throw new Error(`Brand not found: ${brandValue}`);
 
     const unit = await findUnitByIdOrName(unitValue);
-    if (!unit) {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Unit not found for value: ${unitValue}` });
-    }
+    if (!unit) throw new Error(`Unit not found: ${unitValue}`);
 
-    // Uniqueness check (name + brand)
+    // Check uniqueness
     const existingProduct = await Product.findOne({ name: name.trim(), brand: brand._id });
-    if (existingProduct) {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: 'Product with this name already exists under this brand' });
-    }
+    if (existingProduct) throw new Error('Product with this name already exists under this brand');
 
-    // Convert ingredients array to string if needed
     const ingredientsString = Array.isArray(ingredients) ? ingredients.join('\n') : ingredients;
 
+    // Create product
     const productData = {
       name: name.trim(),
       category: category._id,
       subcategory: subcategory._id,
       brand: brand._id,
       status,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      variations: [] 
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      variations: [],
+      description: description?.trim(),
+      images,
+      thumbnail,
+      ingredients: ingredientsString?.trim(),
+      suitableFor
     };
-    if (ingredientsString) productData.ingredients = ingredientsString.trim();
-    if (suitableFor) productData.suitableFor = suitableFor;
-    if (images.length > 0) productData.images = images;
-    if (thumbnail) productData.thumbnail = thumbnail;
-    if (description) productData.description = description.trim();
 
     const newProduct = new Product(productData);
-    await newProduct.validate();
     await newProduct.save();
 
-    let variantIds = [];
-    // Check global SKU uniqueness before creating
-    for (const varObj of parsedVariations) {
-      const existingVariant = await Variant.findOne({ sku: varObj.sku.trim() });
-      if (existingVariant) {
+    // Check SKU uniqueness globally
+    for (const v of parsedVariations) {
+      const exists = await Variant.findOne({ sku: v.sku.trim() });
+      if (exists) {
         await cleanupAllFiles();
-        // Also cleanup product if variants fail
         await Product.findByIdAndDelete(newProduct._id);
-        if (newProduct.images && newProduct.images.length > 0) {
-          for (const img of newProduct.images) {
-            try { await fs.unlink(img); } catch { }
-          }
-        }
-        if (newProduct.thumbnail) try { await fs.unlink(newProduct.thumbnail); } catch { }
-        return res.status(400).json({ success: false, msg: `SKU '${varObj.sku}' already exists` });
+        return res.status(400).json({ success: false, msg: `SKU '${v.sku}' already exists` });
       }
     }
 
     // Create variants
+    const variantIds = [];
     for (let i = 0; i < parsedVariations.length; i++) {
-      const varObj = parsedVariations[i];
+      const v = parsedVariations[i];
       const variantData = {
         product: newProduct._id,
-        attribute: varObj.attribute.trim(),
-        value: varObj.value.trim(),
-        sku: varObj.sku.trim(),
+        attribute: v.attribute.trim(),
+        value: v.value.trim(),
+        sku: v.sku.trim(),
         unit: unit._id,
         purchasePrice: parsedPurchasePrice,
-        price: parseFloat(varObj.price),
-        discountPrice: parseFloat(varObj.discountPrice || 0),
-        stockQuantity: parseInt(varObj.stockQuantity || 0),
+        price: parseFloat(v.price),
+        discountPrice: parseFloat(v.discountPrice || 0),
+        stockQuantity: parseInt(v.stockQuantity || 0),
         weightQuantity: parseFloat(weightQuantity),
-        status: 'Active'
+        status: 'Active',
+        expiryDate: expiryDate ? new Date(expiryDate) : undefined,
+        image: variationImages[i]
       };
-      if (expiryDate) variantData.expiryDate = new Date(expiryDate);
-      const imagePath = variationImages[i];
-      if (imagePath) variantData.image = imagePath;
 
       const newVariant = new Variant(variantData);
-      await newVariant.validate();
       await newVariant.save();
       variantIds.push(newVariant._id);
     }
 
-    // Add to product
+    // Link variants to product
     if (variantIds.length > 0) {
       await Product.findByIdAndUpdate(newProduct._id, { $push: { variations: { $each: variantIds } } });
     }
@@ -269,9 +274,7 @@ exports.createProduct = async (req, res) => {
       { path: 'brand', select: 'name' },
       { path: 'variations', select: 'attribute value sku price stockQuantity discountPrice image unit purchasePrice expiryDate status weightQuantity' }
     ]);
-    if (variantIds.length > 0) {
-      await Variant.populate(newProduct.variations, { path: 'unit', select: 'unit_name' });
-    }
+    await Variant.populate(newProduct.variations, { path: 'unit', select: 'unit_name' });
 
     res.status(201).json({
       success: true,
@@ -279,15 +282,9 @@ exports.createProduct = async (req, res) => {
       product: newProduct
     });
   } catch (err) {
-    console.error('Product creation error:', err.message || err); // Enhanced logging
+    console.error('Product creation error:', err);
     await cleanupAllFiles();
-    if (err.name === 'MongoServerError' && err.code === 11000) { // More reliable check
-      return res.status(400).json({ success: false, msg: `Duplicate data detected: ${err.errmsg || 'Check SKU or product name/brand uniqueness'}` });
-    }
-    if (err.name === 'ValidationError') {
-      return res.status(400).json({ success: false, msg: `Validation error: ${Object.values(err.errors).map(e => e.message).join(', ')}` });
-    }
-    res.status(500).json({ success: false, msg: 'Server error during product creation', details: err.message || 'Unknown error' });
+    res.status(400).json({ success: false, msg: err.message || 'Server error during product creation' });
   }
 };
 
@@ -1081,6 +1078,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
