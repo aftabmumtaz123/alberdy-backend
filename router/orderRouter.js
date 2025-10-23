@@ -102,16 +102,16 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       computedSubtotal += itemTotal;
     }
 
-    // Validate subtotal
-    if (Math.abs(computedSubtotal - subtotal) > 0.01) {
-      return res.status(400).json({ success: false, msg: `Subtotal mismatch: provided ${subtotal}, computed ${computedSubtotal.toFixed(2)}` });
-    }
+    // // Validate subtotal
+    // if (Math.abs(computedSubtotal - subtotal) > 0.01) {
+    //   return res.status(400).json({ success: false, msg: `Subtotal mismatch: provided ${subtotal}, computed ${computedSubtotal.toFixed(2)}` });
+    // }
 
-    // Validate total
-    const calculatedTotal = subtotal + (tax || 0) + shipping - (discount || 0);
-    if (Math.abs(calculatedTotal - total) > 0.01) {
-      return res.status(400).json({ success: false, msg: 'Total mismatch in order calculation' });
-    }
+    // // Validate total
+    // const calculatedTotal = subtotal + (tax || 0) + shipping - (discount || 0);
+    // if (Math.abs(calculatedTotal - total) > 0.01) {
+    //   return res.status(400).json({ success: false, msg: 'Total mismatch in order calculation' });
+    // }
 
     // Generate identifiers
     const orderNumber = await generateOrderNumber();
@@ -347,4 +347,5 @@ router.get('/track/:identifier', async (req, res) => {
 });
 
 module.exports = router;
+
 
