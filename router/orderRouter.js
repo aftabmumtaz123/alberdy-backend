@@ -1,131 +1,118 @@
-const express = require('express');
-const router = express.Router();
-const mongoose = require('mongoose');
-const Order = require('../model/Order');
+// routes/order.js
+const express   = require('express');
+const router    = express.Router();
+const mongoose  = require('mongoose');
+
+const Order   = require('../model/Order');
 const Product = require('../model/Product');
-const Variant = require('../model/variantProduct'); 
-const User = require('../model/User');
+const Variant = require('../model/variantProduct');   // <-- correct model name
+const User    = require('../model/User');
 const authMiddleware = require('../middleware/auth');
 
-const requireRole = (roles) => (req, res, next) => {
+const requireRole = roles => (req, res, next) => {
   if (!req.user || !roles.includes(req.user.role)) {
     return res.status(403).json({ success: false, msg: 'Access denied' });
   }
   next();
 };
 
+/* ---------- Helper: generate order / tracking numbers ---------- */
 const generateOrderNumber = async () => {
-  try {
-    const lastOrder = await Order.findOne().sort({ createdAt: -1 }).select('orderNumber');
-    if (!lastOrder) return '#ORD-001';
-    const lastNum = parseInt(lastOrder.orderNumber.replace('#ORD-', ''));
-    return `#ORD-${(lastNum + 1).toString().padStart(3, '0')}`;
-  } catch (err) {
-    throw new Error('Failed to generate order number');
-  }
+  const last = await Order.findOne().sort({ createdAt: -1 }).select('orderNumber');
+  if (!last) return '#ORD-001';
+  const num = parseInt(last.orderNumber.replace('#ORD-', '')) + 1;
+  return `#ORD-${num.toString().padStart(3, '0')}`;
 };
 
 const generateTrackingNumber = async () => {
-  try {
-    const lastOrder = await Order.findOne().sort({ createdAt: -1 }).select('orderTrackingNumber');
-    if (!lastOrder || !lastOrder.orderTrackingNumber) return '#TRK-LEY-321-001';
-    const lastNum = parseInt(lastOrder.orderTrackingNumber.replace('#TRK-LEY-321-', ''));
-    return `#TRK-LEY-321-${(lastNum + 1).toString().padStart(3, '0')}`;
-  } catch (err) {
-    throw new Error('Failed to generate tracking number');
-  }
+  const last = await Order.findOne().sort({ createdAt: -1 }).select('orderTrackingNumber');
+  if (!last || !last.orderTrackingNumber) return '#TRK-LEY-321-001';
+  const num = parseInt(last.orderTrackingNumber.replace('#TRK-LEY-321-', '')) + 1;
+  return `#TRK-LEY-321-${num.toString().padStart(3, '0')}`;
 };
 
-router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
+/* -------------------------- CREATE ORDER -------------------------- */
+router.post('/', authMiddleware, requireRole(['Super Admin','Manager','Customer']), async (req, res) => {
   try {
-    const { items, subtotal, tax, discount, total, paymentMethod, shippingAddress, notes, shipping = 5.99 } = req.body;
+    const {
+      items, subtotal, tax = 0, discount = 0, total,
+      paymentMethod, shippingAddress, notes, shipping = 5.99
+    } = req.body;
 
-    // Validate request body
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ success: false, msg: 'Order items are required' });
-    }
-    if (!paymentMethod) {
-      return res.status(400).json({ success: false, msg: 'Payment method is required' });
-    }
-    if (!shippingAddress || !shippingAddress.street || !shippingAddress.city || !shippingAddress.zip || !shippingAddress.fullName || !shippingAddress.phone) {
-      return res.status(400).json({ success: false, msg: 'Complete shipping address is required' });
+    // ---- basic validation ----
+    if (!items?.length) return res.status(400).json({ success: false, msg: 'Order items required' });
+    if (!paymentMethod) return res.status(400).json({ success: false, msg: 'Payment method required' });
+    if (!shippingAddress?.street || !shippingAddress?.city || !shippingAddress?.zip ||
+        !shippingAddress?.fullName || !shippingAddress?.phone) {
+      return res.status(400).json({ success: false, msg: 'Complete shipping address required' });
     }
 
-    // Validate stock and compute totals
-    const updatedItems = [];
+    // ---- compute subtotal & validate stock ----
+    const orderItems = [];
     let computedSubtotal = 0;
-    for (const item of items) {
-      if (!mongoose.Types.ObjectId.isValid(item.product)) {
-        return res.status(400).json({ success: false, msg: `Invalid product ID: ${item.product}` });
-      }
-      const product = await Product.findById(item.product).populate({
-        path: 'variations',
-        select: 'attribute value sku price discountPrice stockQuantity image'
+
+    for (const itm of items) {
+      if (!mongoose.Types.ObjectId.isValid(itm.product))
+        return res.status(400).json({ success: false, msg: `Invalid product ID: ${itm.product}` });
+
+      const product = await Product.findById(itm.product)
+        .populate({ path: 'variations', select: 'attribute value sku price discountPrice stockQuantity image' });
+
+      if (!product) return res.status(400).json({ success: false, msg: `Product not found: ${itm.product}` });
+      if (!product.variations?.length)
+        return res.status(400).json({ success: false, msg: `No variations for product ${itm.product}` });
+
+      const qty = Number(itm.quantity);
+      if (isNaN(qty) || qty <= 0)
+        return res.status(400).json({ success: false, msg: `Invalid quantity for ${itm.product}` });
+
+      if (!itm.variant)
+        return res.status(400).json({ success: false, msg: `Variant required for ${product.name}` });
+
+      if (!mongoose.Types.ObjectId.isValid(itm.variant))
+        return res.status(400).json({ success: false, msg: `Invalid variant ID: ${itm.variant}` });
+
+      const variant = product.variations.find(v => v._id.toString() === itm.variant);
+      if (!variant) return res.status(400).json({ success: false, msg: `Variant ${itm.variant} not found` });
+
+      if (variant.stockQuantity < qty)
+        return res.status(400).json({ success: false,
+          msg: `Insufficient stock for ${variant.sku}. Available: ${variant.stockQuantity}` });
+
+      const price = variant.discountPrice || variant.price;
+      const lineTotal = price * qty;
+
+      orderItems.push({
+        product: itm.product,
+        variant: itm.variant,
+        quantity: qty,
+        price,
+        total: lineTotal
       });
-      if (!product) {
-        return res.status(400).json({ success: false, msg: `Product not found: ${item.product}` });
-      }
-      if (!product.variations || !Array.isArray(product.variations)) {
-        return res.status(400).json({ success: false, msg: `No variations found for product ${item.product}` });
-      }
-
-      const quantity = Number(item.quantity);
-      if (isNaN(quantity) || quantity <= 0) {
-        return res.status(400).json({ success: false, msg: `Invalid quantity for product ${item.product}: ${item.quantity}` });
-      }
-
-      let priceToUse, variant = null;
-      if (item.variant) {
-        if (!mongoose.Types.ObjectId.isValid(item.variant)) {
-          return res.status(400).json({ success: false, msg: `Invalid variant ID: ${item.variant}` });
-        }
-        variant = product.variations.find(v => v._id.toString() === item.variant.toString());
-        if (!variant) {
-          return res.status(400).json({ success: false, msg: `Variant ${item.variant} not found for product ${product.name}` });
-        }
-        if (variant.stockQuantity < quantity) {
-          return res.status(400).json({ success: false, msg: `Insufficient stock for variant ${variant.sku} in ${product.name}. Available: ${variant.stockQuantity}` });
-        }
-        priceToUse = variant.discountPrice || variant.price;
-      } else {
-        return res.status(400).json({ success: false, msg: `Variant required for product ${product.name}` });
-      }
-
-      const itemTotal = priceToUse * quantity;
-      updatedItems.push({
-        product: item.product,
-        variant: item.variant,
-        quantity,
-        price: priceToUse,
-        total: itemTotal
-      });
-      computedSubtotal += itemTotal;
+      computedSubtotal += lineTotal;
     }
 
-    // // Validate subtotal
-    // if (Math.abs(computedSubtotal - subtotal) > 0.01) {
-    //   return res.status(400).json({ success: false, msg: `Subtotal mismatch: provided ${subtotal}, computed ${computedSubtotal.toFixed(2)}` });
-    // }
+    // ---- subtotal / total validation ----
+    if (Math.abs(computedSubtotal - subtotal) > 0.01)
+      return res.status(400).json({ success: false,
+        msg: `Subtotal mismatch: provided ${subtotal}, computed ${computedSubtotal.toFixed(2)}` });
 
-    // // Validate total
-    const calculatedTotal = subtotal + (tax || 0) + shipping - (discount || 0);
-    // if (Math.abs(calculatedTotal - total) > 0.01) {
-    //   return res.status(400).json({ success: false, msg: 'Total mismatch in order calculation' });
-    // }
+    const calcTotal = subtotal + tax + shipping - discount;
+    if (Math.abs(calcTotal - total) > 0.01)
+      return res.status(400).json({ success: false, msg: 'Total mismatch' });
 
-    // Generate identifiers
+    // ---- create order ----
     const orderNumber = await generateOrderNumber();
     const trackingNumber = await generateTrackingNumber();
 
-    // Create order
     const order = new Order({
       user: req.user.id,
       orderNumber,
       orderTrackingNumber: trackingNumber,
-      items: updatedItems,
+      items: orderItems,
       subtotal,
-      tax: tax || 0,
-      discount: discount || 0,
+      tax,
+      discount,
       shipping,
       total,
       paymentMethod,
@@ -138,16 +125,15 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
 
     await order.save();
 
-    // Update stock for variants
-    for (const item of updatedItems) {
-      if (item.variant) {
-        await Variant.findByIdAndUpdate(item.variant, { $inc: { stockQuantity: -item.quantity } });
-      }
+    // ---- decrement stock ----
+    for (const itm of orderItems) {
+      await Variant.findByIdAndUpdate(itm.variant, { $inc: { stockQuantity: -itm.quantity } });
     }
 
-    // Populate response
+    // ---- populate response ----
     await order.populate('items.product', 'name thumbnail images');
-    await order.populate({ path: 'items.variant', select: 'attribute value sku price discountPrice stockQuantity image' });
+    await order.populate({ path: 'items.variant',
+      select: 'attribute value sku price discountPrice stockQuantity image' });
     await order.populate('user', 'name email phone');
 
     res.status(201).json({
@@ -157,197 +143,203 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
     });
   } catch (err) {
     console.error('Order creation error:', err);
-    if (err.name === 'MongoServerError' && err.code === 11000) {
-      return res.status(400).json({ success: false, msg: 'Duplicate order number or tracking number' });
-    }
-    return res.status(500).json({ success: false, msg: 'Server error creating order', details: err.message || 'Unknown error' });
+    if (err.name === 'MongoServerError' && err.code === 11000)
+      return res.status(400).json({ success: false, msg: 'Duplicate order/tracking number' });
+    res.status(500).json({ success: false,
+      msg: 'Server error creating order',
+      details: err.message || 'Unknown error'
+    });
   }
 });
 
-router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
+/* -------------------------- GET ONE ORDER -------------------------- */
+router.get('/:id', authMiddleware, requireRole(['Super Admin','Manager','Customer']), async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
       .populate('items.product', 'name thumbnail images')
-      .populate('items.variant', 'attribute value sku price effectivePrice stockQuantity image')
+      .populate('items.variant', 'attribute value sku price discountPrice stockQuantity image')
       .populate('user', 'name email phone');
-    if (!order) {
-      return res.status(404).json({ success: false, msg: 'Order not found' });
-    }
-    if (req.user.role === 'Customer' && order.user.toString() !== req.user.id) {
+
+    if (!order) return res.status(404).json({ success: false, msg: 'Order not found' });
+    if (req.user.role === 'Customer' && order.user.toString() !== req.user.id)
       return res.status(403).json({ success: false, msg: 'Access denied' });
-    }
-    res.status(200).json({ success: true, data: order });
+
+    res.json({ success: true, data: order });
   } catch (err) {
-    res.status(500).json({ success: false, msg: 'Server error fetching order', details: err.message });
+    res.status(500).json({ success: false, msg: 'Server error', details: err.message });
   }
 });
 
-router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
+/* -------------------------- LIST ORDERS -------------------------- */
+router.get('/', authMiddleware, requireRole(['Super Admin','Manager','Customer']), async (req, res) => {
   try {
     const { page = 1, limit = 10, status } = req.query;
     const query = status ? { status } : {};
-    if (req.user.role === 'Customer') {
-      query.user = req.user.id;
-    }
+    if (req.user.role === 'Customer') query.user = req.user.id;
+
     const orders = await Order.find(query)
       .populate('items.product', 'name thumbnail images')
-      .populate('items.variant', 'attribute value sku price effectivePrice stockQuantity image')
+      .populate('items.variant', 'attribute value sku price discountPrice stockQuantity image')
       .populate('user', 'name email phone')
       .sort({ createdAt: -1 })
       .skip((page - 1) * parseInt(limit))
       .limit(parseInt(limit));
+
     const total = await Order.countDocuments(query);
     res.json({
       success: true,
       data: orders,
-      pagination: { current: parseInt(page), pages: Math.ceil(total / parseInt(limit)), total }
+      pagination: { current: +page, pages: Math.ceil(total / limit), total }
     });
   } catch (err) {
-    res.status(500).json({ success: false, msg: 'Server error fetching orders', details: err.message });
+    res.status(500).json({ success: false, msg: 'Server error', details: err.message });
   }
 });
 
-router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
+/* -------------------------- UPDATE ORDER -------------------------- */
+router.put('/:id', authMiddleware, requireRole(['Super Admin','Manager']), async (req, res) => {
   try {
     const { id } = req.params;
-    const { shippingAddress, notes, paymentStatus, deliveryAssigned, deliveryDate, status, orderTrackingNumber } = req.body;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    const { shippingAddress, notes, paymentStatus, deliveryAssigned, deliveryDate,
+            status, orderTrackingNumber } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ success: false, msg: 'Invalid order ID' });
-    }
-    const updateData = {};
-    if (shippingAddress) updateData.shippingAddress = shippingAddress;
-    if (notes) updateData.notes = notes;
-    if (paymentStatus) updateData.paymentStatus = paymentStatus;
-    if (deliveryAssigned) updateData.deliveryAssigned = deliveryAssigned;
-    if (deliveryDate) updateData.deliveryDate = new Date(deliveryDate);
-    if (status) updateData.status = status;
-    if (orderTrackingNumber) updateData.orderTrackingNumber = orderTrackingNumber;
-    if (Object.keys(updateData).length === 0) {
-      return res.status(400).json({ success: false, msg: 'No valid fields to update' });
-    }
-    if (updateData.status && !['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'].includes(updateData.status)) {
+
+    const update = {};
+    if (shippingAddress) update.shippingAddress = shippingAddress;
+    if (notes) update.notes = notes;
+    if (paymentStatus) update.paymentStatus = paymentStatus;
+    if (deliveryAssigned) update.deliveryAssigned = deliveryAssigned;
+    if (deliveryDate) update.deliveryDate = new Date(deliveryDate);
+    if (status) update.status = status;
+    if (orderTrackingNumber) update.orderTrackingNumber = orderTrackingNumber;
+
+    if (!Object.keys(update).length)
+      return res.status(400).json({ success: false, msg: 'No fields to update' });
+
+    if (update.status && !['pending','confirmed','shipped','delivered','cancelled'].includes(update.status))
       return res.status(400).json({ success: false, msg: 'Invalid status' });
+
+    if (update.orderTrackingNumber) {
+      const exists = await Order.findOne({ orderTrackingNumber: update.orderTrackingNumber, _id: { $ne: id } });
+      if (exists) return res.status(400).json({ success: false, msg: 'Tracking number already used' });
     }
-    if (updateData.orderTrackingNumber) {
-      const existingOrder = await Order.findOne({ orderTrackingNumber: updateData.orderTrackingNumber, _id: { $ne: id } });
-      if (existingOrder) {
-        return res.status(400).json({ success: false, msg: 'Tracking number already in use' });
-      }
-    }
-    const order = await Order.findByIdAndUpdate(id, { $set: updateData }, { new: true, runValidators: true })
+
+    const order = await Order.findByIdAndUpdate(id, { $set: update }, { new: true, runValidators: true })
       .populate('items.product', 'name thumbnail images')
-      .populate('items.variant', 'attribute value sku price effectivePrice stockQuantity image')
+      .populate('items.variant', 'attribute value sku price discountPrice stockQuantity image')
       .populate('user', 'name email phone');
-    if (!order) {
-      return res.status(404).json({ success: false, msg: 'Order not found' });
-    }
-    res.json({ success: true, data: order, msg: `Order ${order.orderNumber} updated successfully` });
+
+    if (!order) return res.status(404).json({ success: false, msg: 'Order not found' });
+
+    res.json({ success: true, data: order, msg: `Order ${order.orderNumber} updated` });
   } catch (err) {
-    res.status(500).json({ success: false, msg: 'Server error updating order', details: err.message });
+    res.status(500).json({ success: false, msg: 'Server error', details: err.message });
   }
 });
 
-router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
+/* -------------------------- DELETE ORDER (restore stock) -------------------------- */
+router.delete('/:id', authMiddleware, requireRole(['Super Admin','Manager']), async (req, res) => {
   try {
     const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ success: false, msg: 'Invalid order ID' });
-    }
+
     const order = await Order.findById(id)
       .populate('items.product', 'name thumbnail images')
-      .populate('items.variant', 'attribute value sku price effectivePrice stockQuantity image');
-    if (!order) {
-      return res.status(404).json({ success: false, msg: 'Order not found' });
-    }
-    if (order.status === 'delivered' || order.paymentStatus === 'paid') {
-      return res.status(400).json({ success: false, msg: 'Cannot delete delivered or paid orders' });
-    }
-    for (const item of order.items) {
-      if (item.variant) {
-        await Variant.findByIdAndUpdate(item.variant, { $inc: { stockQuantity: item.quantity } });
+      .populate('items.variant', 'attribute value sku price discountPrice stockQuantity image');
+
+    if (!order) return res.status(404).json({ success: false, msg: 'Order not found' });
+    if (order.status === 'delivered' || order.paymentStatus === 'paid')
+      return res.status(400).json({ success: false, msg: 'Cannot delete delivered/paid orders' });
+
+    // restore stock
+    for (const itm of order.items) {
+      if (itm.variant) {
+        await Variant.findByIdAndUpdate(itm.variant, { $inc: { stockQuantity: itm.quantity } });
       }
     }
+
     await Order.findByIdAndDelete(id);
-    res.json({ success: true, data: order, msg: `Order ${order.orderNumber} deleted successfully` });
+    res.json({ success: true, data: order, msg: `Order ${order.orderNumber} deleted` });
   } catch (err) {
-    res.status(500).json({ success: false, msg: 'Server error deleting order', details: err.message });
+    res.status(500).json({ success: false, msg: 'Server error', details: err.message });
   }
 });
 
-router.put('/:id/tracking', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
+/* -------------------------- UPDATE TRACKING -------------------------- */
+router.put('/:id/tracking', authMiddleware, requireRole(['Super Admin','Manager']), async (req, res) => {
   try {
     const { id } = req.params;
     const { trackingStatus, orderTrackingNumber } = req.body;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ success: false, msg: 'Invalid order ID' });
-    }
-    const validTrackingStatuses = ['not shipped', 'shipped', 'in transit', 'out for delivery', 'delivered', 'cancelled'];
-    if (trackingStatus && !validTrackingStatuses.includes(trackingStatus)) {
+
+    const valid = ['not shipped','shipped','in transit','out for delivery','delivered','cancelled'];
+    if (trackingStatus && !valid.includes(trackingStatus))
       return res.status(400).json({ success: false, msg: `Invalid tracking status: ${trackingStatus}` });
-    }
+
     const order = await Order.findById(id);
-    if (!order) {
-      return res.status(404).json({ success: false, msg: 'Order not found' });
-    }
-    if (trackingStatus && ['delivered', 'cancelled'].includes(order.trackingStatus)) {
-      return res.status(400).json({ success: false, msg: `Cannot change tracking status from ${order.trackingStatus}` });
-    }
+    if (!order) return res.status(404).json({ success: false, msg: 'Order not found' });
+
+    if (trackingStatus && ['delivered','cancelled'].includes(order.trackingStatus))
+      return res.status(400).json({ success: false,
+        msg: `Cannot change tracking from ${order.trackingStatus}` });
+
     if (orderTrackingNumber) {
-      const existingOrder = await Order.findOne({ orderTrackingNumber, _id: { $ne: id } });
-      if (existingOrder) {
-        return res.status(400).json({ success: false, msg: 'Tracking number already in use' });
-      }
+      const exists = await Order.findOne({ orderTrackingNumber, _id: { $ne: id } });
+      if (exists) return res.status(400).json({ success: false, msg: 'Tracking number already used' });
     }
-    const updateData = {};
-    if (trackingStatus) updateData.trackingStatus = trackingStatus;
-    if (orderTrackingNumber) updateData.orderTrackingNumber = orderTrackingNumber;
-    if (Object.keys(updateData).length === 0) {
-      return res.status(400).json({ success: false, msg: 'No valid fields to update' });
-    }
-    const updatedOrder = await Order.findByIdAndUpdate(id, { $set: updateData }, { new: true })
+
+    const upd = {};
+    if (trackingStatus) upd.trackingStatus = trackingStatus;
+    if (orderTrackingNumber) upd.orderTrackingNumber = orderTrackingNumber;
+    if (!Object.keys(upd).length) return res.status(400).json({ success: false, msg: 'Nothing to update' });
+
+    const updated = await Order.findByIdAndUpdate(id, { $set: upd }, { new: true })
       .populate('items.product', 'name thumbnail images')
-      .populate('items.variant', 'attribute value sku price effectivePrice stockQuantity image')
+      .populate('items.variant', 'attribute value sku price discountPrice stockQuantity image')
       .populate('user', 'name email phone');
-    res.json({ success: true, data: updatedOrder, msg: `Tracking updated for order ${updatedOrder.orderNumber}` });
+
+    res.json({ success: true, data: updated, msg: `Tracking updated for ${updated.orderNumber}` });
   } catch (err) {
-    res.status(500).json({ success: false, msg: 'Server error updating tracking', details: err.message });
+    res.status(500).json({ success: false, msg: 'Server error', details: err.message });
   }
 });
 
+/* -------------------------- PUBLIC TRACKING LOOKUP -------------------------- */
 router.get('/track/:identifier', async (req, res) => {
   try {
     const { identifier } = req.params;
     const query = mongoose.Types.ObjectId.isValid(identifier)
       ? { _id: identifier }
       : { orderTrackingNumber: identifier };
+
     const order = await Order.findOne(query)
       .populate('items.product', 'name thumbnail images')
-      .populate('items.variant', 'attribute value sku price effectivePrice stockQuantity image')
+      .populate('items.variant', 'attribute value sku price discountPrice stockQuantity image')
       .populate('user', 'name email phone');
-    if (!order) {
-      return res.status(404).json({ success: false, msg: 'Order not found' });
-    }
-    if (req.user && req.user.role === 'Customer' && order.user.toString() !== req.user.id) {
+
+    if (!order) return res.status(404).json({ success: false, msg: 'Order not found' });
+
+    if (req.user?.role === 'Customer' && order.user.toString() !== req.user.id)
       return res.status(403).json({ success: false, msg: 'Access denied' });
-    }
-    const responseData = {
+
+    const slim = {
       orderNumber: order.orderNumber,
       orderTrackingNumber: order.orderTrackingNumber,
-      trackingStatus: order.trackingStatus,
+752      trackingStatus: order.trackingStatus,
       status: order.status,
       shippingAddress: order.shippingAddress,
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
       items: order.items
     };
-    res.json({ success: true, data: responseData, msg: `Tracking details for order ${order.orderNumber}` });
+    res.json({ success: true, data: slim, msg: `Tracking for ${order.orderNumber}` });
   } catch (err) {
-    res.status(500).json({ success: false, msg: 'Server error fetching tracking', details: err.message });
+    res.status(500).json({ success: false, msg: 'Server error', details: err.message });
   }
 });
 
 module.exports = router;
-
-
-
-
