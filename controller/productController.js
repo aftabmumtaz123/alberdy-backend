@@ -99,7 +99,6 @@ exports.createProduct = async (req, res) => {
     variations
   } = req.body;
 
-  const subcategoryValue;
 
   // Handle image uploads (unchanged)
   const imagesFiles = req.files?.images || [];
@@ -213,8 +212,8 @@ exports.createProduct = async (req, res) => {
     const category = await findCategoryByIdOrName(categoryValue);
     if (!category) throw new Error(`Category not found or inactive: ${categoryValue}`);
 
-    const subcategory = await findSubcategoryByIdOrName(subcategoryValue);
-    if (!subcategory) throw new Error(`Subcategory not found or inactive: ${subcategoryValue}`);
+    const subcategory = await findSubcategoryByIdOrName(subcate);
+    if (!subcategory) throw new Error(`Subcategory not found or inactive: ${subCategory}`);
 
     const brand = await findBrandByIdOrName(brandValue);
     if (!brand) throw new Error(`Brand not found or inactive: ${brandValue}`);
@@ -693,7 +692,7 @@ exports.getProductById = async (req, res) => {
 
 exports.updateProduct = async (req, res) => {
   console.log('DEBUG: Update req.body:', req.body); // Remove in prod
-  const { name, description, category: categoryValue, subcategory: subcategoryValue, brand: brandValue, weightQuantity, unit: unitValue, purchasePrice, price, discountPrice, stockQuantity, expiryDate, ingredients, suitableFor, status, variations: incomingVariations, variationOperation, variationIndex } = req.body;
+  const { name, description, category: categoryValue, subcategory: subCategory, brand: brandValue, weightQuantity, unit: unitValue, purchasePrice, price, discountPrice, stockQuantity, expiryDate, ingredients, suitableFor, status, variations: incomingVariations, variationOperation, variationIndex } = req.body;
 
   const newImagesFiles = req.files && req.files['images'] ? req.files['images'] : [];
   const newThumbnailFile = req.files && req.files['thumbnail'] ? req.files['thumbnail'][0] : null;
@@ -784,11 +783,11 @@ exports.updateProduct = async (req, res) => {
         return res.status(400).json({ success: false, msg: `Category not found for value: ${categoryValue}` });
       }
     }
-    if (subcategoryValue !== undefined) {
-      subcategory = await findSubcategoryByIdOrName(subcategoryValue);
+    if (subCategory !== undefined) {
+      subcategory = await findSubcategoryByIdOrName(subCategory);
       if (!subcategory) {
         await cleanupAllNewFiles();
-        return res.status(400).json({ success: false, msg: `Subcategory not found for value: ${subcategoryValue}` });
+        return res.status(400).json({ success: false, msg: `Subcategory not found for value: ${subCategory}` });
       }
     }
     if (brandValue !== undefined) {
@@ -839,7 +838,7 @@ exports.updateProduct = async (req, res) => {
     if (name !== undefined) updateData.name = name.trim();
     if (description !== undefined) updateData.description = description.trim();
     if (categoryValue !== undefined) updateData.category = category._id;
-    if (subcategoryValue !== undefined) updateData.subcategory = subcategory._id;
+    if (subCategory !== undefined) updateData.subcategory = subcategory._id;
     if (brandValue !== undefined) updateData.brand = brandDoc._id;
     if (ingredients !== undefined) updateData.ingredients = Array.isArray(ingredients) ? ingredients.join('\n') : ingredients.trim();
     if (suitableFor !== undefined) updateData.suitableFor = suitableFor;
@@ -1090,6 +1089,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
