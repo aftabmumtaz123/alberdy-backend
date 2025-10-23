@@ -175,18 +175,6 @@ exports.createProduct = async (req, res) => {
     const varStock = parseInt(v.stockQuantity || 0);
     const varDiscount = parseFloat(v.discountPrice || 0);
 
-    if (isNaN(varPrice) || varPrice <= parsedPurchasePrice || varPrice <= 0) { // Use shared purchasePrice
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Variation ${i} invalid price (must > purchase price)` });
-    }
-    if (isNaN(varStock) || varStock < 0) {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Variation ${i} invalid stock quantity` });
-    }
-    if (varDiscount > varPrice) {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Variation ${i} invalid discount price` });
-    }
 
     const skuExists = parsedVariations.some((vv, idx) => idx !== i && vv.sku.trim() === v.sku.trim());
     if (skuExists) {
@@ -1077,6 +1065,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
