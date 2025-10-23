@@ -89,18 +89,26 @@ exports.createProduct = async (req, res) => {
     ingredients,
     suitableFor,
     stockQuantity,
+    price, // Added
+    discountPrice, // Added
+    purchasePrice, // Added
+    unit: unitValue, // Added (renamed from unitValue for clarity)
+    weightQuantity, // Added
+    expiryDate, // Added
+    status, // Added
+    sku, // Added (optional)
     variations
   } = req.body;
 
   const subcategoryValue = subcategoryValueFromCamel || subcategoryValueFromSnake;
 
-  // Handle image uploads
+  // Handle image uploads (unchanged)
   const imagesFiles = req.files?.images || [];
   const thumbnailFile = req.files?.thumbnail ? req.files.thumbnail[0] : null;
   const images = imagesFiles.map(file => file.path);
   const thumbnail = thumbnailFile ? thumbnailFile.path : null;
 
-  // Handle variation images
+  // Handle variation images (unchanged)
   const variationImages = {};
   let parsedVariations = [];
   if (req.files && variations) {
@@ -118,7 +126,7 @@ exports.createProduct = async (req, res) => {
     }
   }
 
-  // Cleanup helper (if validation fails)
+  // Cleanup helper (unchanged)
   const cleanupAllFiles = async () => {
     const allFiles = [...imagesFiles, thumbnailFile, ...Object.values(variationImages)].filter(Boolean);
     for (const file of allFiles) {
@@ -126,33 +134,50 @@ exports.createProduct = async (req, res) => {
     }
   };
 
-  // Validate numeric fields
+  // Parse numeric fields with fallbacks
   const parsedStockQuantity = parseInt(stockQuantity || 0);
   if (isNaN(parsedStockQuantity) || parsedStockQuantity < 0) {
     await cleanupAllFiles();
     return res.status(400).json({ success: false, msg: 'Stock quantity must be non-negative' });
   }
 
-  const parsedDiscountPrice = parseFloat(discountPrice || 0);
-  const parsedPrice = parseFloat(price);
-  const parsedPurchasePrice = parseFloat(purchasePrice);
+  const parsedPrice = parseFloat(price || 0); // Fixed: fallback
+  const parsedDiscountPrice = parseFloat(discountPrice || 0); // Fixed: fallback
+  const parsedPurchasePrice = parseFloat(purchasePrice || 0); // Fixed: fallback
+  const parsedWeightQuantity = parseFloat(weightQuantity || 0); // Added: fallback
 
-  // Generate random SKU if not provided
+  // Validate main fields (for default variation)
+  if (parsedPrice <= parsedPurchasePrice) {
+    await cleanupAllFiles();
+    return res.status(400).json({ success: false, msg: 'Sell price must be greater than purchase price' });
+  }
+  if (parsedDiscountPrice > parsedPrice) {
+    await cleanupAllFiles();
+    return res.status(400).json({ success: false, msg: 'Discount price must be less than or equal to sell price' });
+  }
+  if (isNaN(parsedWeightQuantity) || parsedWeightQuantity <= 0) {
+    await cleanupAllFiles();
+    return res.status(400).json({ success: false, msg: 'Weight quantity must be positive' });
+  }
+
+  // Generate random SKU if not provided or empty
+  const providedSku = sku && sku.trim() ? sku.trim() : null;
   const randSKU = await generateSKU();
 
   // Handle default variation
   if (parsedVariations.length === 0) {
+    const defaultSku = providedSku || randSKU;
     parsedVariations = [{
       attribute: 'Default',
       value: 'Standard',
-      sku: sku?.trim() || randSKU,
+      sku: defaultSku,
       price: parsedPrice,
       discountPrice: parsedDiscountPrice,
       stockQuantity: parsedStockQuantity
     }];
   }
 
-  // Variation validation
+  // Variation validation (now covers defaults too)
   for (let i = 0; i < parsedVariations.length; i++) {
     const v = parsedVariations[i];
     if (!v.attribute || !v.value || !v.sku?.trim()) {
@@ -160,12 +185,22 @@ exports.createProduct = async (req, res) => {
       return res.status(400).json({ success: false, msg: `Variation ${i} missing attribute, value, or sku` });
     }
 
-    const varPrice = parseFloat(v.price);
+    const varPrice = parseFloat(v.price || 0);
     const varStock = parseInt(v.stockQuantity || 0);
-
-
     const varDiscount = parseFloat(v.discountPrice || 0);
-  
+
+    if (isNaN(varPrice) || varPrice <= parsedPurchasePrice || varPrice <= 0) { // Use shared purchasePrice
+      await cleanupAllFiles();
+      return res.status(400).json({ success: false, msg: `Variation ${i} invalid price (must > purchase price)` });
+    }
+    if (isNaN(varStock) || varStock < 0) {
+      await cleanupAllFiles();
+      return res.status(400).json({ success: false, msg: `Variation ${i} invalid stock quantity` });
+    }
+    if (varDiscount > varPrice) {
+      await cleanupAllFiles();
+      return res.status(400).json({ success: false, msg: `Variation ${i} invalid discount price` });
+    }
 
     const skuExists = parsedVariations.some((vv, idx) => idx !== i && vv.sku.trim() === v.sku.trim());
     if (skuExists) {
@@ -175,32 +210,32 @@ exports.createProduct = async (req, res) => {
   }
 
   try {
-    // Lookups
+    // Lookups (now enforce status via updated functions)
     const category = await findCategoryByIdOrName(categoryValue);
-    if (!category) throw new Error(`Category not found: ${categoryValue}`);
+    if (!category) throw new Error(`Category not found or inactive: ${categoryValue}`);
 
     const subcategory = await findSubcategoryByIdOrName(subcategoryValue);
-    if (!subcategory) throw new Error(`Subcategory not found: ${subcategoryValue}`);
+    if (!subcategory) throw new Error(`Subcategory not found or inactive: ${subcategoryValue}`);
 
     const brand = await findBrandByIdOrName(brandValue);
-    if (!brand) throw new Error(`Brand not found: ${brandValue}`);
+    if (!brand) throw new Error(`Brand not found or inactive: ${brandValue}`);
 
     const unit = await findUnitByIdOrName(unitValue);
-    if (!unit) throw new Error(`Unit not found: ${unitValue}`);
+    if (!unit) throw new Error(`Unit not found or disabled: ${unitValue}`);
 
-    // Check uniqueness
+    // Check uniqueness (unchanged)
     const existingProduct = await Product.findOne({ name: name.trim(), brand: brand._id });
     if (existingProduct) throw new Error('Product with this name already exists under this brand');
 
     const ingredientsString = Array.isArray(ingredients) ? ingredients.join('\n') : ingredients;
 
-    // Create product
+    // Create product (with status default)
     const productData = {
       name: name.trim(),
       category: category._id,
       subcategory: subcategory._id,
       brand: brand._id,
-      status,
+      status: status || 'Active', // Fixed: default
       createdAt: new Date(),
       updatedAt: new Date(),
       variations: [],
@@ -214,17 +249,17 @@ exports.createProduct = async (req, res) => {
     const newProduct = new Product(productData);
     await newProduct.save();
 
-    // Check SKU uniqueness globally
+    // Check SKU uniqueness globally (unchanged)
     for (const v of parsedVariations) {
       const exists = await Variant.findOne({ sku: v.sku.trim() });
       if (exists) {
-        await cleanupAllFiles();
         await Product.findByIdAndDelete(newProduct._id);
+        await cleanupAllFiles();
         return res.status(400).json({ success: false, msg: `SKU '${v.sku}' already exists` });
       }
     }
 
-    // Create variants
+    // Create variants (with fallbacks)
     const variantIds = [];
     for (let i = 0; i < parsedVariations.length; i++) {
       const v = parsedVariations[i];
@@ -234,13 +269,13 @@ exports.createProduct = async (req, res) => {
         value: v.value.trim(),
         sku: v.sku.trim(),
         unit: unit._id,
-        purchasePrice: parsedPurchasePrice,
+        purchasePrice: parsedPurchasePrice, // Shared
         price: parseFloat(v.price),
         discountPrice: parseFloat(v.discountPrice || 0),
         stockQuantity: parseInt(v.stockQuantity || 0),
-        weightQuantity: parseFloat(weightQuantity),
+        weightQuantity: parsedWeightQuantity, // Shared
         status: 'Active',
-        expiryDate: expiryDate ? new Date(expiryDate) : undefined,
+        expiryDate: expiryDate ? new Date(expiryDate) : undefined, // Shared
         image: variationImages[i]
       };
 
@@ -249,11 +284,12 @@ exports.createProduct = async (req, res) => {
       variantIds.push(newVariant._id);
     }
 
-    // Link variants to product
+    // Link variants to product (unchanged)
     if (variantIds.length > 0) {
       await Product.findByIdAndUpdate(newProduct._id, { $push: { variations: { $each: variantIds } } });
     }
 
+    // Populate and respond (unchanged)
     await newProduct.populate([
       { path: 'category', select: 'name' },
       { path: 'subcategory', select: 'subcategoryName' },
@@ -272,9 +308,6 @@ exports.createProduct = async (req, res) => {
     res.status(400).json({ success: false, msg: err.message || 'Server error during product creation' });
   }
 };
-
-
-
 
 exports.getAllProducts = async (req, res) => {
   const { page = 1, limit = 10, category, subcategory, brand, status, name, lowStock } = req.query;
