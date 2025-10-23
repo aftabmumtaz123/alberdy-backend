@@ -1,5 +1,6 @@
-// product controller 
-const fs = require('fs').promises; // For async file cleanup
+// productController.js
+const fs = require('fs').promises;
+const mongoose = require('mongoose');
 const path = require('path');
 
 const Product = require('../model/Product');
@@ -7,83 +8,65 @@ const Variant = require('../model/variantProduct');
 const Category = require('../model/Category');
 const Subcategory = require('../model/subCategory');
 const Brand = require('../model/Brand');
-const Unit = require('../model/Unit'); // Adjust path as needed
-const mongoose = require('mongoose');
+const Unit = require('../model/Unit');
 
-// Flexible lookups (Enhanced with logging and status check)
+// ========== Utility Lookup Functions ========== //
 const findCategoryByIdOrName = async (value) => {
   if (!value) return null;
-  const trimmedValue = value.toString().trim();
-  if (mongoose.Types.ObjectId.isValid(trimmedValue)) {
-    return await Category.findById(trimmedValue);
-  }
-  return await Category.findOne({ name: trimmedValue, status: 'Active' });
+  const trimmed = value.toString().trim();
+  if (mongoose.Types.ObjectId.isValid(trimmed)) return Category.findById(trimmed);
+  return Category.findOne({ name: trimmed, status: 'Active' });
 };
 
 const findSubcategoryByIdOrName = async (value) => {
   if (!value) return null;
-  const trimmedValue = value.toString().trim();
-  console.log('DEBUG: Attempting subcategory lookup for value:', trimmedValue); // Remove in prod
-  console.log('DEBUG: Is valid ObjectId?', mongoose.Types.ObjectId.isValid(trimmedValue)); // Remove in prod
-
+  const trimmed = value.toString().trim();
   let subDoc;
-  if (mongoose.Types.ObjectId.isValid(trimmedValue)) {
-    subDoc = await Subcategory.findById(trimmedValue);
-    console.log('DEBUG: Raw findById result:', subDoc ? 'Found' : 'Null'); // Remove in prod
+  if (mongoose.Types.ObjectId.isValid(trimmed)) {
+    subDoc = await Subcategory.findById(trimmed);
   } else {
-    // Fallback to name if ID invalid
-    subDoc = await Subcategory.findOne({ subcategoryName: trimmedValue, status: 'Active' });
-    console.log('DEBUG: Raw name search result:', subDoc ? 'Found' : 'Null'); // Remove in prod
+    subDoc = await Subcategory.findOne({ subcategoryName: trimmed, status: 'Active' });
   }
-
-  if (subDoc) {
-    // Optional: Enforce Active status even for ID lookups
-    if (subDoc.status !== 'Active') {
-      console.log('DEBUG: Subcategory found but Inactive:', subDoc._id); // Remove in prod
-    }
-    return await subDoc.populate('parent_category_id', 'name');
+  if (subDoc && subDoc.status === 'Active') {
+    return subDoc.populate('parent_category_id', 'name');
   }
   return null;
 };
 
 const findBrandByIdOrName = async (value) => {
   if (!value) return null;
-  const trimmedValue = value.toString().trim();
-  if (mongoose.Types.ObjectId.isValid(trimmedValue)) return await Brand.findById(trimmedValue);
-  return await Brand.findOne({ name: trimmedValue, status: 'Active' });
+  const trimmed = value.toString().trim();
+  if (mongoose.Types.ObjectId.isValid(trimmed)) return Brand.findById(trimmed);
+  return Brand.findOne({ name: trimmed, status: 'Active' });
 };
 
 const findUnitByIdOrName = async (value) => {
   if (!value) return null;
-  const trimmedValue = value.toString().trim();
-  if (mongoose.Types.ObjectId.isValid(trimmedValue)) return await Unit.findById(trimmedValue);
-  return await Unit.findOne({ unit_name: trimmedValue, unit_status: 'enable' });
+  const trimmed = value.toString().trim();
+  if (mongoose.Types.ObjectId.isValid(trimmed)) return Unit.findById(trimmed);
+  return Unit.findOne({ unit_name: trimmed, unit_status: 'enable' });
 };
 
-
-
-// 🔹 Auto-increment SKU generator
+// ========== Auto-increment SKU Generator ========== //
 const generateSKU = async () => {
-  const lastVariant = await Variant.findOne().sort({ createdAt: -1 }); // Get last created variant
+  const lastVariant = await Variant.findOne().sort({ createdAt: -1 });
   let nextNumber = 1;
-
   if (lastVariant && lastVariant.sku) {
     const match = lastVariant.sku.match(/SKU-NUM-(\d+)/);
-    if (match) {
-      nextNumber = parseInt(match[1], 10) + 1;
-    }
+    if (match) nextNumber = parseInt(match[1], 10) + 1;
   }
-
-  return `SKU-NUM-${String(nextNumber).padStart(3, '0')}`; // e.g., SKU-NUM-001
+  return `SKU-NUM-${String(nextNumber).padStart(3, '0')}`;
 };
+
+// ========== Main Controller ========== //
 exports.createProduct = async (req, res) => {
-  console.log('DEBUG: Full req.body:', req.body); // Remove in production
+  console.log('DEBUG: Incoming Product Body:', req.body); // Optional, remove in production
 
   const {
     name,
     category: categoryValue,
     description,
-    subcategory, // ✅ Fixed (was subCategory)
+    subcategory,
     brand: brandValue,
     ingredients,
     suitableFor,
@@ -99,68 +82,62 @@ exports.createProduct = async (req, res) => {
     variations
   } = req.body;
 
-  // Handle image uploads
+  // Handle file uploads
   const imagesFiles = req.files?.images || [];
   const thumbnailFile = req.files?.thumbnail ? req.files.thumbnail[0] : null;
-  const images = imagesFiles.map(file => file.path);
+  const images = imagesFiles.map(f => f.path);
   const thumbnail = thumbnailFile ? thumbnailFile.path : null;
 
-  // Handle variation images
   const variationImages = {};
   let parsedVariations = [];
   if (req.files && variations) {
     try {
       parsedVariations = JSON.parse(variations);
-      if (!Array.isArray(parsedVariations)) throw new Error('Not an array');
+      if (!Array.isArray(parsedVariations)) throw new Error('Variations must be an array');
     } catch {
       parsedVariations = [];
     }
     for (let i = 0; i < parsedVariations.length; i++) {
       const fieldName = `variation_images_${i}`;
-      if (req.files[fieldName]) {
-        variationImages[i] = req.files[fieldName][0].path;
-      }
+      if (req.files[fieldName]) variationImages[i] = req.files[fieldName][0].path;
     }
   }
 
-  // Cleanup helper
+  // Helper for file cleanup
   const cleanupAllFiles = async () => {
-    const allFiles = [
+    const files = [
       ...imagesFiles.map(f => f.path),
       thumbnailFile?.path,
       ...Object.values(variationImages)
     ].filter(Boolean);
-    for (const file of allFiles) {
+    for (const file of files) {
       try { await fs.unlink(file); } catch {}
     }
   };
 
   // Parse numeric fields safely
-  const parsedStockQuantity = parseInt(stockQuantity || 0);
+  const parsedStock = parseInt(stockQuantity || 0);
   const parsedPrice = parseFloat(price || 0);
-  const parsedDiscountPrice = parseFloat(discountPrice || 0);
-  const parsedPurchasePrice = parseFloat(purchasePrice || 0);
-  const parsedWeightQuantity = parseFloat(weightQuantity || 0);
+  const parsedDiscount = parseFloat(discountPrice || 0);
+  const parsedPurchase = parseFloat(purchasePrice || 0);
+  const parsedWeight = parseFloat(weightQuantity || 0);
 
-  if (isNaN(parsedStockQuantity) || parsedStockQuantity < 0) {
+  if (isNaN(parsedStock) || parsedStock < 0) {
     await cleanupAllFiles();
-    return res.status(400).json({ success: false, msg: 'Stock quantity must be non-negative' });
+    return res.status(400).json({ success: false, msg: 'Invalid stock quantity' });
   }
 
-  // Generate random SKU if not provided
-  const providedSku = sku && sku.trim() ? sku.trim() : null;
+  // Default variation setup
+  const providedSku = sku?.trim() || null;
   const randSKU = await generateSKU();
-
-  // Handle default variation if none provided
   if (parsedVariations.length === 0) {
-    const defaultSku = providedSku || randSKU;
     parsedVariations = [{
       attribute: 'Default',
       value: 'Standard',
-      sku: defaultSku,
+      sku: providedSku || randSKU,
       price: parsedPrice,
-      discountPrice: parsedDiscountPrice,
-      stockQuantity: parsedStockQuantity
+      discountPrice: parsedDiscount,
+      stockQuantity: parsedStock
     }];
   }
 
@@ -169,122 +146,119 @@ exports.createProduct = async (req, res) => {
     const v = parsedVariations[i];
     if (!v.attribute || !v.value || !v.sku?.trim()) {
       await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Variation ${i} missing attribute, value, or sku` });
+      return res.status(400).json({ success: false, msg: `Variation ${i + 1} missing fields` });
     }
 
-    const skuExists = parsedVariations.some((vv, idx) => idx !== i && vv.sku.trim() === v.sku.trim());
-    if (skuExists) {
+    const dupSku = parsedVariations.some((vv, idx) => idx !== i && vv.sku.trim() === v.sku.trim());
+    if (dupSku) {
       await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Duplicate SKU in variations` });
+      return res.status(400).json({ success: false, msg: `Duplicate SKU detected in variations` });
     }
   }
 
-  try {
-    // Lookups
-    const category = await findCategoryByIdOrName(categoryValue);
-    if (!category) throw new Error(`Category not found or inactive: ${categoryValue}`);
+  // Transaction for consistency
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-    const subcategoryDoc = await findSubcategoryByIdOrName(subcategory); // ✅ Fixed variable name
-    if (!subcategoryDoc) throw new Error(`Subcategory not found or inactive: ${subcategory}`);
+  try {
+    // Lookup dependencies
+    const category = await findCategoryByIdOrName(categoryValue);
+    if (!category) throw new Error(`Category not found: ${categoryValue}`);
+
+    const subcategoryDoc = await findSubcategoryByIdOrName(subcategory);
+    if (!subcategoryDoc) throw new Error(`Subcategory not found: ${subcategory}`);
 
     const brand = await findBrandByIdOrName(brandValue);
-    if (!brand) throw new Error(`Brand not found or inactive: ${brandValue}`);
+    if (!brand) throw new Error(`Brand not found: ${brandValue}`);
 
     const unit = await findUnitByIdOrName(unitValue);
-    if (!unit) throw new Error(`Unit not found or disabled: ${unitValue}`);
+    if (!unit) throw new Error(`Unit not found: ${unitValue}`);
 
-    // Check product uniqueness
+    // Check uniqueness
     const existingProduct = await Product.findOne({ name: name.trim(), brand: brand._id });
-    if (existingProduct) throw new Error('Product with this name already exists under this brand');
+    if (existingProduct) throw new Error('Product already exists for this brand');
 
-    const ingredientsString = Array.isArray(ingredients) ? ingredients.join('\n') : ingredients;
+    const ingredientsString = Array.isArray(ingredients)
+      ? ingredients.join('\n')
+      : ingredients?.trim();
 
     // Create product
-    const productData = {
+    const product = new Product({
       name: name.trim(),
       category: category._id,
-      subcategory: subcategoryDoc._id, // ✅ Fixed reference
+      subcategory: subcategoryDoc._id,
       brand: brand._id,
       status: status || 'Active',
       createdAt: new Date(),
       updatedAt: new Date(),
-      variations: [],
       description: description?.trim(),
       images,
       thumbnail,
-      ingredients: ingredientsString?.trim(),
-      suitableFor
-    };
+      ingredients: ingredientsString,
+      suitableFor,
+      variations: []
+    });
 
-    const newProduct = new Product(productData);
-    await newProduct.save();
-
-    // Check SKU uniqueness globally
-    for (const v of parsedVariations) {
-      const exists = await Variant.findOne({ sku: v.sku.trim() });
-      if (exists) {
-        await Product.findByIdAndDelete(newProduct._id);
-        await cleanupAllFiles();
-        return res.status(400).json({ success: false, msg: `SKU '${v.sku}' already exists` });
-      }
-    }
+    await product.save({ session });
 
     // Create variants
     const variantIds = [];
     for (let i = 0; i < parsedVariations.length; i++) {
       const v = parsedVariations[i];
-      const variantData = {
-        product: newProduct._id,
+      const skuExists = await Variant.findOne({ sku: v.sku.trim() });
+      if (skuExists) throw new Error(`SKU already exists: ${v.sku}`);
+
+      const variant = new Variant({
+        product: product._id,
         attribute: v.attribute.trim(),
         value: v.value.trim(),
         sku: v.sku.trim(),
         unit: unit._id,
-        purchasePrice: parsedPurchasePrice,
+        purchasePrice: parsedPurchase,
         price: parseFloat(v.price),
         discountPrice: parseFloat(v.discountPrice || 0),
         stockQuantity: parseInt(v.stockQuantity || 0),
-        weightQuantity: parsedWeightQuantity,
+        weightQuantity: parsedWeight,
         status: 'Active',
         expiryDate: expiryDate ? new Date(expiryDate) : undefined,
         image: variationImages[i]
-      };
+      });
 
-      const newVariant = new Variant(variantData);
-      await newVariant.save();
-      variantIds.push(newVariant._id);
+      await variant.save({ session });
+      variantIds.push(variant._id);
     }
 
     // Link variants to product
-    if (variantIds.length > 0) {
-      await Product.findByIdAndUpdate(newProduct._id, {
-        $push: { variations: { $each: variantIds } }
-      });
-    }
+    product.variations.push(...variantIds);
+    await product.save({ session });
 
-    // Populate and respond
-    await newProduct.populate([
+    // Commit transaction
+    await session.commitTransaction();
+    session.endSession();
+
+    // Populate for response
+    await product.populate([
       { path: 'category', select: 'name' },
       { path: 'subcategory', select: 'subcategoryName' },
       { path: 'brand', select: 'name' },
-      {
-        path: 'variations',
-        select: 'attribute value sku price stockQuantity discountPrice image unit purchasePrice expiryDate status weightQuantity'
-      }
+      { path: 'variations', select: 'attribute value sku price stockQuantity discountPrice image unit purchasePrice expiryDate status weightQuantity' }
     ]);
-    await Variant.populate(newProduct.variations, { path: 'unit', select: 'unit_name' });
+    await Variant.populate(product.variations, { path: 'unit', select: 'unit_name' });
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       msg: 'Product created successfully',
-      product: newProduct
+      product
     });
+
   } catch (err) {
-    console.error('Product creation error:', err.message);
+    await session.abortTransaction();
+    session.endSession();
     await cleanupAllFiles();
-    res.status(400).json({ success: false, msg: err.message || 'Server error during product creation' });
+    console.error('Product creation error:', err.message);
+    return res.status(400).json({ success: false, msg: err.message });
   }
 };
-
 
 exports.getAllProducts = async (req, res) => {
   const { page = 1, limit = 10, category, subcategory, brand, status, name, lowStock } = req.query;
@@ -1068,6 +1042,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
