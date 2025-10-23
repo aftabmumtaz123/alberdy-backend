@@ -142,10 +142,7 @@ exports.createProduct = async (req, res) => {
   // Variation validation (now always at least one)
   for (let i = 0; i < parsedVariations.length; i++) {
     const v = parsedVariations[i];
-    if (!v.unit || !v.price) {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Variation ${i + 1} missing required fields (unit, price)` });
-    }
+   
 
     const varPrice = parseFloat(v.price);
     const varStock = parseInt(v.stockQuantity || 0);
@@ -1140,3 +1137,4 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
