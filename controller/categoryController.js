@@ -87,34 +87,40 @@ exports.getCategoryById =   async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error fetching category' });
   }
 }
-
-exports.updateCategory =  async (req, res) => {
+exports.updateCategory = async (req, res) => {
   const { name, description, status } = req.body;
- 
-  if (status && !['Active', 'Inactive'].includes(status)) { // Fixed validation logic
-    return res.status(400).json({ success: false, msg: 'Invalid status' });
-  }
-    const image = req.file ? req.file.path : null;
+
+
 
   try {
-    const category = await Category.findByIdAndUpdate(
-      req.params.id, 
-      { name, image, description, status }, 
-      { new: true, runValidators: true }
-    );
-    if (!category) {
+    // Fetch existing category
+    const existingCategory = await Category.findById(req.params.id);
+    if (!existingCategory) {
       return res.status(404).json({ success: false, msg: 'Category not found' });
     }
-    res.json({ 
+
+    // Use new image if uploaded, otherwise keep old one
+    const image = req.file ? req.file.path : existingCategory.image;
+
+    // Update fields
+    existingCategory.name = name ?? existingCategory.name;
+    existingCategory.description = description ?? existingCategory.description;
+    existingCategory.status = status ?? existingCategory.status;
+    existingCategory.image = image;
+
+    await existingCategory.save();
+
+    res.json({
       success: true,
       msg: 'Category updated successfully',
-      category
+      category: existingCategory
     });
   } catch (err) {
     console.error('Category update error:', err);
     res.status(500).json({ success: false, msg: 'Server error updating category' });
   }
-}
+};
+
 
 exports.deleteCategory =  async (req, res) => {
   try {
@@ -131,6 +137,7 @@ exports.deleteCategory =  async (req, res) => {
   }
 
 }
+
 
 
 
