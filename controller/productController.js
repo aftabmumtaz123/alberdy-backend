@@ -87,7 +87,7 @@ exports.createProduct = async (req, res) => {
   let parsedVariations = [];
   if (req.files && variants) {
     try {
-      parsedVariations = JSON.parse(variants);
+      parsedVariations = JSON.parse(variations);
       if (!Array.isArray(parsedVariations)) {
         throw new Error('Not an array');
       }
@@ -142,9 +142,9 @@ exports.createProduct = async (req, res) => {
   // Variation validation (now always at least one)
   for (let i = 0; i < parsedVariations.length; i++) {
     const v = parsedVariations[i];
-    if (!v.attribute || !v.value || !v.sku?.trim() || !v.unit || !v.price) {
+    if (!v.unit || !v.price) {
       await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Variation ${i + 1} missing required fields (attribute, value, sku, unit, price)` });
+      return res.status(400).json({ success: false, msg: `Variation ${i + 1} missing required fields (unit, price)` });
     }
 
     const varPrice = parseFloat(v.price);
@@ -168,13 +168,6 @@ exports.createProduct = async (req, res) => {
         await cleanupAllFiles();
         return res.status(400).json({ success: false, msg: `Variation ${i + 1} invalid expiryDate` });
       }
-    }
-
-    // Check for duplicate SKUs across variations
-    const skuExists = parsedVariations.some((vv, idx) => idx !== i && vv.sku.trim() === v.sku.trim());
-    if (skuExists) {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Duplicate SKU in variations` });
     }
   }
 
@@ -203,7 +196,7 @@ exports.createProduct = async (req, res) => {
     }
 
     // Check uniqueness (name + brand)
-    const existingProduct = await Product.findOne({ name: name.trim(), brand: brand._id });
+    const existingProduct = await Product.findOne({ name: name.trim(), brand: brand._id }).session(session);
     if (existingProduct) {
       await cleanupAllFiles();
       throw new Error('Product with this name already exists under this brand');
@@ -231,6 +224,28 @@ exports.createProduct = async (req, res) => {
     const newProduct = new Product(productData);
     await newProduct.validate();
     await newProduct.save({ session });
+
+    // Fill missing attribute/value
+    for (let i = 0; i < parsedVariations.length; i++) {
+      const v = parsedVariations[i];
+      if (!v.attribute?.trim()) v.attribute = 'Default';
+      if (!v.value?.trim()) v.value = 'Standard';
+    }
+
+    // Generate missing SKUs
+    for (let i = 0; i < parsedVariations.length; i++) {
+      const v = parsedVariations[i];
+      if (!v.sku?.trim()) {
+        v.sku = await generateSKU();
+      }
+    }
+
+    // Check for duplicate SKUs in variations
+    const trimmedSkus = parsedVariations.map(v => v.sku.trim());
+    if (new Set(trimmedSkus).size !== trimmedSkus.length) {
+      await cleanupAllFiles();
+      throw new Error('Duplicate SKU detected in variations');
+    }
 
     let variantIds = [];
     // Check global SKU uniqueness before creating
