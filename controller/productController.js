@@ -127,13 +127,7 @@ exports.createProduct = async (req, res) => {
     await cleanupAllFiles();
     return res.status(400).json({ success: false, msg: `Discount price (${parsedDiscountPrice}) must be less than or equal to sell price (${parsedPrice})` });
   }
-  if (expiryDate) {
-    const parsedExpiry = new Date(expiryDate);
-    if (isNaN(parsedExpiry.getTime()) || parsedExpiry <= new Date()) {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: 'Expiry date must be in the future' });
-    }
-  }
+  
   if (isNaN(parseFloat(weightQuantity)) || parseFloat(weightQuantity) <= 0) {
     await cleanupAllFiles();
     return res.status(400).json({ success: false, msg: 'Invalid weightQuantity' });
@@ -1115,6 +1109,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
