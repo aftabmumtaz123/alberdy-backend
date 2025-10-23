@@ -188,7 +188,7 @@ exports.createProduct = async (req, res) => {
     const category = await findCategoryByIdOrName(categoryValue);
     if (!category) throw new Error(`Category not found or inactive: ${categoryValue}`);
 
-    const subcategory = await findSubcategoryByIdOrName(subcate);
+    const subcategory = await findSubcategoryByIdOrName(subCategory);
     if (!subcategory) throw new Error(`Subcategory not found or inactive: ${subCategory}`);
 
     const brand = await findBrandByIdOrName(brandValue);
@@ -1065,6 +1065,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
