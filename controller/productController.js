@@ -919,6 +919,7 @@ exports.updateProduct = async (req, res) => {
           }
           const sampleVariant = currentProduct.variations[0];
           const addVariantIds = [];
+          let generatedSkus = [];
           for (let i = 0; i < parsedIncomingVariations.length; i++) {
             const varObj = parsedIncomingVariations[i];
             if (!varObj.unit || !varObj.price) {
@@ -939,12 +940,11 @@ exports.updateProduct = async (req, res) => {
               return res.status(400).json({ success: false, msg: `New variation ${i} invalid discountPrice` });
             }
             const newSku = varObj.sku?.trim() || await generateSKU();
-            // Check duplicate within new
-            const newSkus = parsedIncomingVariations.slice(0, i).map(v => v.sku?.trim() || await generateSKU());
-            if (newSkus.includes(newSku)) {
+            if (generatedSkus.includes(newSku)) {
               await cleanupAllNewFiles();
               return res.status(400).json({ success: false, msg: `Duplicate SKU in new variations` });
             }
+            generatedSkus.push(newSku);
             // Global SKU check
             const existingSku = await Variant.findOne({ sku: newSku });
             if (existingSku) {
