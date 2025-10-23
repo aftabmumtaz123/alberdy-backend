@@ -6,6 +6,7 @@ const path = require('path');
 const Product = require('../model/Product');
 const Variant = require('../model/variantProduct');
 const Category = require('../model/Category');
+
 const Subcategory = require('../model/subCategory');
 const Brand = require('../model/Brand');
 const Unit = require('../model/Unit');
@@ -70,16 +71,8 @@ exports.createProduct = async (req, res) => {
     brand: brandValue,
     ingredients,
     suitableFor,
-    stockQuantity,
-    discountPrice,
-    price,
-    purchasePrice,
-    unit: unitValue,
-    weightQuantity,
-    expiryDate,
     status,
-    sku,
-    variations
+    variants  // Changed from 'variations' to 'variants' to match incoming body
   } = req.body;
 
   // Handle file uploads
@@ -90,10 +83,10 @@ exports.createProduct = async (req, res) => {
 
   const variationImages = {};
   let parsedVariations = [];
-  if (req.files && variations) {
+  if (req.files && variants) {
     try {
-      parsedVariations = JSON.parse(variations);
-      if (!Array.isArray(parsedVariations)) throw new Error('Variations must be an array');
+      parsedVariations = JSON.parse(variants);
+      if (!Array.isArray(parsedVariations)) throw new Error('Variants must be an array');
     } catch {
       parsedVariations = [];
     }
@@ -115,38 +108,31 @@ exports.createProduct = async (req, res) => {
     }
   };
 
-  // Parse numeric fields safely
-  const parsedStock = parseInt(stockQuantity || 0);
-  const parsedPrice = parseFloat(price || 0);
-  const parsedDiscount = parseFloat(discountPrice || 0);
-  const parsedPurchase = parseFloat(purchasePrice || 0);
-  const parsedWeight = parseFloat(weightQuantity || 0);
-
-  if (isNaN(parsedStock) || parsedStock < 0) {
-    await cleanupAllFiles();
-    return res.status(400).json({ success: false, msg: 'Invalid stock quantity' });
-  }
-
-  // Default variation setup
-  const providedSku = sku?.trim() || null;
+  // Default variation setup if no variants provided
+  const providedSku = req.body.sku?.trim() || null;
   const randSKU = await generateSKU();
   if (parsedVariations.length === 0) {
     parsedVariations = [{
       attribute: 'Default',
       value: 'Standard',
       sku: providedSku || randSKU,
-      price: parsedPrice,
-      discountPrice: parsedDiscount,
-      stockQuantity: parsedStock
+      unit: req.body.unit,  // Use top-level unit if provided for default
+      weightQuantity: req.body.weightQuantity || 0,
+      price: req.body.price || 0,
+      discountPrice: req.body.discountPrice || 0,
+      purchasePrice: req.body.purchasePrice || 0,
+      stockQuantity: req.body.stockQuantity || 0,
+      expiryDate: req.body.expiryDate,
+      status: req.body.status || 'Active'
     }];
   }
 
   // Validate variations
   for (let i = 0; i < parsedVariations.length; i++) {
     const v = parsedVariations[i];
-    if (!v.attribute || !v.value || !v.sku?.trim()) {
+    if (!v.attribute || !v.value || !v.sku?.trim() || !v.unit || !v.price) {
       await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Variation ${i + 1} missing fields` });
+      return res.status(400).json({ success: false, msg: `Variation ${i + 1} missing required fields (attribute, value, sku, unit, price)` });
     }
 
     const dupSku = parsedVariations.some((vv, idx) => idx !== i && vv.sku.trim() === v.sku.trim());
@@ -161,7 +147,7 @@ exports.createProduct = async (req, res) => {
   session.startTransaction();
 
   try {
-    // Lookup dependencies
+    // Lookup dependencies (non-variant specific)
     const category = await findCategoryByIdOrName(categoryValue);
     if (!category) throw new Error(`Category not found: ${categoryValue}`);
 
@@ -170,9 +156,6 @@ exports.createProduct = async (req, res) => {
 
     const brand = await findBrandByIdOrName(brandValue);
     if (!brand) throw new Error(`Brand not found: ${brandValue}`);
-
-    const unit = await findUnitByIdOrName(unitValue);
-    if (!unit) throw new Error(`Unit not found: ${unitValue}`);
 
     // Check uniqueness
     const existingProduct = await Product.findOne({ name: name.trim(), brand: brand._id });
@@ -201,10 +184,15 @@ exports.createProduct = async (req, res) => {
 
     await product.save({ session });
 
-    // Create variants
+    // Create variants (unit lookup moved inside loop to handle per-variant units)
     const variantIds = [];
     for (let i = 0; i < parsedVariations.length; i++) {
       const v = parsedVariations[i];
+
+      // Lookup unit per variant
+      const unit = await findUnitByIdOrName(v.unit);
+      if (!unit) throw new Error(`Unit not found for variation ${i + 1}: ${v.unit}`);
+
       const skuExists = await Variant.findOne({ sku: v.sku.trim() });
       if (skuExists) throw new Error(`SKU already exists: ${v.sku}`);
 
@@ -214,13 +202,13 @@ exports.createProduct = async (req, res) => {
         value: v.value.trim(),
         sku: v.sku.trim(),
         unit: unit._id,
-        purchasePrice: parsedPurchase,
+        purchasePrice: parseFloat(v.purchasePrice || 0),
         price: parseFloat(v.price),
         discountPrice: parseFloat(v.discountPrice || 0),
         stockQuantity: parseInt(v.stockQuantity || 0),
-        weightQuantity: parsedWeight,
-        status: 'Active',
-        expiryDate: expiryDate ? new Date(expiryDate) : undefined,
+        weightQuantity: parseFloat(v.weightQuantity || 0),
+        status: v.status || 'Active',
+        expiryDate: v.expiryDate ? new Date(v.expiryDate) : undefined,
         image: variationImages[i]
       });
 
@@ -259,7 +247,6 @@ exports.createProduct = async (req, res) => {
     return res.status(400).json({ success: false, msg: err.message });
   }
 };
-
 exports.getAllProducts = async (req, res) => {
   const { page = 1, limit = 10, category, subcategory, brand, status, name, lowStock } = req.query;
   const filter = {};
@@ -1042,6 +1029,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
