@@ -88,6 +88,7 @@ exports.createProduct = async (req, res) => {
     brand: brandValue,
     ingredients,
     suitableFor,
+    stockQuantity,
     variations
   } = req.body;
 
@@ -1057,6 +1058,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
