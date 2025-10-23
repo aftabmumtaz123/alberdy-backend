@@ -82,18 +82,24 @@ exports.createProduct = async (req, res) => {
   const images = imagesFiles.map(file => file.path);
   const thumbnail = thumbnailFile ? thumbnailFile.path : null;
 
-  // Handle variation images: assume variants.images is an array of file objects if uploaded
-  const variationImages = {};
+  // Parse variants regardless of files
   let parsedVariations = [];
-  if (req.files && variants) {
+  if (variants) {
     try {
       parsedVariations = JSON.parse(variants);
       if (!Array.isArray(parsedVariations)) {
         throw new Error('Not an array');
       }
+      console.log('DEBUG: Parsed variations:', parsedVariations); // Remove in prod
     } catch (e) {
+      console.error('Parsing variants error:', e);
       parsedVariations = [];
     }
+  }
+
+  // Handle variation images separately
+  const variationImages = {};
+  if (req.files && parsedVariations.length > 0) {
     for (let i = 0; i < parsedVariations.length; i++) {
       const fieldName = `variation_images_${i}`;
       if (req.files[fieldName]) {
@@ -123,6 +129,10 @@ exports.createProduct = async (req, res) => {
 
   // Handle default variant if no variations provided
   if (parsedVariations.length === 0) {
+    if (!unitValue) {
+      await cleanupAllFiles();
+      return res.status(400).json({ success: false, msg: 'Unit is required for default variation' });
+    }
     const defaultSku = sku?.trim() || await generateSKU();
     parsedVariations = [{
       attribute: 'Default',
@@ -142,7 +152,10 @@ exports.createProduct = async (req, res) => {
   // Variation validation (now always at least one)
   for (let i = 0; i < parsedVariations.length; i++) {
     const v = parsedVariations[i];
-   
+    if (!v.unit || !v.price) {
+      await cleanupAllFiles();
+      return res.status(400).json({ success: false, msg: `Variation ${i + 1} missing required fields (unit, price)` });
+    }
 
     const varPrice = parseFloat(v.price);
     const varStock = parseInt(v.stockQuantity || 0);
@@ -1137,4 +1150,3 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
-
