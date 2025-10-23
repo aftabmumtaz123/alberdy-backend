@@ -103,10 +103,7 @@ exports.createProduct = async (req, res) => {
 
 
   
-  if (!['Active', 'Inactive'].includes(status)) {
-    await cleanupAllFiles();
-    return res.status(400).json({ success: false, msg: 'Invalid status' });
-  }
+
   const parsedStockQuantity = parseInt(stockQuantity || 0);
   if (isNaN(parsedStockQuantity) || parsedStockQuantity < 0) {
     await cleanupAllFiles();
@@ -1095,6 +1092,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
