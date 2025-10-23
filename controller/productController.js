@@ -1,283 +1,313 @@
-DEBUG: Incoming Product Body: [Object: null prototype] {
-  name: 'Rerum ipsum minima ',
-  category: '68e78279d17dbca44924b0cf',
-  subcategory: '68f5dbb90372b228a2abcac3',
-  brand: '68e7a0a02bd0e251bbda7590',
-  ingredients: '<p>These are ingredients.</p>',
-  description: '<p>This is a description</p>',
-  suitableFor: 'All Ages',
-  variants: '[{"attribute":"","value":"","sku":"","weightQuantity":250,"unit":"68e76b54a1f1972da22df7f9","price":66,"discountPrice":59,"purchasePrice":54.97,"stockQuantity":18,"expiryDate":"2025-12-31","status":"Active"}]'
-}
-Product creation error: Unit not found: undefined
-
-// productController.js
-const fs = require('fs').promises;
-const mongoose = require('mongoose');
+// product controller 
+const fs = require('fs').promises; // For async file cleanup
 const path = require('path');
 
 const Product = require('../model/Product');
-const Variant = require('../model/variantProduct');
+const Variant = require('../model/Variants_product');
 const Category = require('../model/Category');
-
-const Subcategory = require('../model/subCategory');
+const Subcategory = require('../model/Subcategory');
 const Brand = require('../model/Brand');
-const Unit = require('../model/Unit');
+const Unit = require('../model/Unit'); // Adjust path as needed
+const mongoose = require('mongoose');
 
-// ========== Utility Lookup Functions ========== //
+// Flexible lookups (Enhanced with logging and status check)
 const findCategoryByIdOrName = async (value) => {
   if (!value) return null;
-  const trimmed = value.toString().trim();
-  if (mongoose.Types.ObjectId.isValid(trimmed)) return Category.findById(trimmed);
-  return Category.findOne({ name: trimmed, status: 'Active' });
+  const trimmedValue = value.toString().trim();
+  if (mongoose.Types.ObjectId.isValid(trimmedValue)) {
+    return await Category.findById(trimmedValue);
+  }
+  return await Category.findOne({ name: trimmedValue, status: 'Active' });
 };
 
 const findSubcategoryByIdOrName = async (value) => {
   if (!value) return null;
-  const trimmed = value.toString().trim();
+  const trimmedValue = value.toString().trim();
+  console.log('DEBUG: Attempting subcategory lookup for value:', trimmedValue); // Remove in prod
+  console.log('DEBUG: Is valid ObjectId?', mongoose.Types.ObjectId.isValid(trimmedValue)); // Remove in prod
+
   let subDoc;
-  if (mongoose.Types.ObjectId.isValid(trimmed)) {
-    subDoc = await Subcategory.findById(trimmed);
+  if (mongoose.Types.ObjectId.isValid(trimmedValue)) {
+    subDoc = await Subcategory.findById(trimmedValue);
+    console.log('DEBUG: Raw findById result:', subDoc ? 'Found' : 'Null'); // Remove in prod
   } else {
-    subDoc = await Subcategory.findOne({ subcategoryName: trimmed, status: 'Active' });
+    // Fallback to name if ID invalid
+    subDoc = await Subcategory.findOne({ subcategoryName: trimmedValue, status: 'Active' });
+    console.log('DEBUG: Raw name search result:', subDoc ? 'Found' : 'Null'); // Remove in prod
   }
-  if (subDoc && subDoc.status === 'Active') {
-    return subDoc.populate('parent_category_id', 'name');
+
+  if (subDoc) {
+    // Optional: Enforce Active status even for ID lookups
+    if (subDoc.status !== 'Active') {
+      console.log('DEBUG: Subcategory found but Inactive:', subDoc._id); // Remove in prod
+    }
+    return await subDoc.populate('parent_category_id', 'name');
   }
   return null;
 };
 
 const findBrandByIdOrName = async (value) => {
   if (!value) return null;
-  const trimmed = value.toString().trim();
-  if (mongoose.Types.ObjectId.isValid(trimmed)) return Brand.findById(trimmed);
-  return Brand.findOne({ name: trimmed, status: 'Active' });
+  const trimmedValue = value.toString().trim();
+  if (mongoose.Types.ObjectId.isValid(trimmedValue)) return await Brand.findById(trimmedValue);
+  return await Brand.findOne({ name: trimmedValue, status: 'Active' });
 };
 
 const findUnitByIdOrName = async (value) => {
   if (!value) return null;
-  const trimmed = value.toString().trim();
-  if (mongoose.Types.ObjectId.isValid(trimmed)) return Unit.findById(trimmed);
-  return Unit.findOne({ unit_name: trimmed, unit_status: 'enable' });
+  const trimmedValue = value.toString().trim();
+  if (mongoose.Types.ObjectId.isValid(trimmedValue)) return await Unit.findById(trimmedValue);
+  return await Unit.findOne({ unit_name: trimmedValue, unit_status: 'enable' });
 };
 
-// ========== Auto-increment SKU Generator ========== //
-const generateSKU = async () => {
-  const lastVariant = await Variant.findOne().sort({ createdAt: -1 });
-  let nextNumber = 1;
-  if (lastVariant && lastVariant.sku) {
-    const match = lastVariant.sku.match(/SKU-NUM-(\d+)/);
-    if (match) nextNumber = parseInt(match[1], 10) + 1;
-  }
-  return `SKU-NUM-${String(nextNumber).padStart(3, '0')}`;
-};
 
-// ========== Main Controller ========== //
 exports.createProduct = async (req, res) => {
-  console.log('DEBUG: Incoming Product Body:', req.body); // Optional, remove in production
+  console.log('DEBUG: Full req.body:', req.body); // Remove in prod
+  const { name, category: categoryValue, description, subCategory: subcategoryValueFromCamel, subcategory: subcategoryValueFromSnake, brand: brandValue, weightQuantity, unit: unitValue, purchasePrice, price, discountPrice, stockQuantity, expiryDate, sku, ingredients, suitableFor, status = 'Active', variations } = req.body;
 
-  const {
-    name,
-    category: categoryValue,
-    description,
-    subcategory,
-    brand: brandValue,
-    ingredients,
-    suitableFor,
-    stockQuantity,
-    discountPrice,
-    price,
-    purchasePrice,
-    unit: unitValue,
-    weightQuantity,
-    expiryDate,
-    status,
-    sku,
-    variations
-  } = req.body;
+  const subcategoryValue = subcategoryValueFromCamel || subcategoryValueFromSnake;
 
-  // Handle file uploads
-  const imagesFiles = req.files?.images || [];
-  const thumbnailFile = req.files?.thumbnail ? req.files.thumbnail[0] : null;
-  const images = imagesFiles.map(f => f.path);
+  // Handle multi-field uploads: images (array) and thumbnail (single)
+  const imagesFiles = req.files && req.files['images'] ? req.files['images'] : [];
+  const thumbnailFile = req.files && req.files['thumbnail'] ? req.files['thumbnail'][0] : null;
+  const images = imagesFiles.map(file => file.path);
   const thumbnail = thumbnailFile ? thumbnailFile.path : null;
 
+  // Handle variation images: assume variations.images is an array of file objects if uploaded
   const variationImages = {};
   let parsedVariations = [];
   if (req.files && variations) {
     try {
       parsedVariations = JSON.parse(variations);
-      if (!Array.isArray(parsedVariations)) throw new Error('Variations must be an array');
-    } catch {
+      if (!Array.isArray(parsedVariations)) {
+        throw new Error('Not an array');
+      }
+    } catch (e) {
       parsedVariations = [];
     }
     for (let i = 0; i < parsedVariations.length; i++) {
       const fieldName = `variation_images_${i}`;
-      if (req.files[fieldName]) variationImages[i] = req.files[fieldName][0].path;
+      if (req.files[fieldName]) {
+        variationImages[i] = req.files[fieldName][0].path; // Single image for variant
+      }
     }
   }
 
-  // Helper for file cleanup
+  // Consolidated cleanup helper
   const cleanupAllFiles = async () => {
-    const files = [
-      ...imagesFiles.map(f => f.path),
-      thumbnailFile?.path,
-      ...Object.values(variationImages)
-    ].filter(Boolean);
-    for (const file of files) {
-      try { await fs.unlink(file); } catch {}
+    const allFiles = [...imagesFiles, thumbnailFile, ...Object.values(variationImages).filter(Boolean)].filter(f => f);
+    for (const file of allFiles) {
+      try { await fs.unlink(file); } catch { }
     }
   };
 
-  // Parse numeric fields safely
-  const parsedStock = parseInt(stockQuantity || 0);
-  const parsedPrice = parseFloat(price || 0);
-  const parsedDiscount = parseFloat(discountPrice || 0);
-  const parsedPurchase = parseFloat(purchasePrice || 0);
-  const parsedWeight = parseFloat(weightQuantity || 0);
-
-  if (isNaN(parsedStock) || parsedStock < 0) {
+  // Validation for base product
+  if (suitableFor && !['Puppy', 'Adult', 'Senior', 'All Ages'].includes(suitableFor)) {
     await cleanupAllFiles();
-    return res.status(400).json({ success: false, msg: 'Invalid stock quantity' });
+    return res.status(400).json({ success: false, msg: 'Invalid suitableFor' });
+  }
+  
+  if (!['Active', 'Inactive'].includes(status)) {
+    await cleanupAllFiles();
+    return res.status(400).json({ success: false, msg: 'Invalid status' });
+  }
+  const parsedStockQuantity = parseInt(stockQuantity || 0);
+  if (isNaN(parsedStockQuantity) || parsedStockQuantity < 0) {
+    await cleanupAllFiles();
+    return res.status(400).json({ success: false, msg: 'Stock quantity must be non-negative' });
+  }
+  const parsedDiscountPrice = parseFloat(discountPrice || 0);
+  const parsedPrice = parseFloat(price);
+  const parsedPurchasePrice = parseFloat(purchasePrice);
+  if (isNaN(parsedPrice) || parsedPrice <= 0 || isNaN(parsedPurchasePrice) || parsedPurchasePrice <= 0) {
+    await cleanupAllFiles();
+    return res.status(400).json({ success: false, msg: 'Invalid price or purchasePrice' });
+  }
+  if (discountPrice !== undefined && (isNaN(parsedDiscountPrice) || parsedDiscountPrice > parsedPrice)) {
+    await cleanupAllFiles();
+    return res.status(400).json({ success: false, msg: `Discount price (${parsedDiscountPrice}) must be less than or equal to sell price (${parsedPrice})` });
+  }
+ 
+  if (isNaN(parseFloat(weightQuantity)) || parseFloat(weightQuantity) <= 0) {
+    await cleanupAllFiles();
+    return res.status(400).json({ success: false, msg: 'Invalid weightQuantity' });
   }
 
-  // Default variation setup
-  const providedSku = sku?.trim() || null;
-  const randSKU = await generateSKU();
+  // Handle default variant if no variations provided
   if (parsedVariations.length === 0) {
+    if (!sku || sku.trim() === '') {
+      await cleanupAllFiles();
+      return res.status(400).json({ success: false, msg: 'SKU required for default variant when no variations provided' });
+    }
     parsedVariations = [{
       attribute: 'Default',
       value: 'Standard',
-      sku: providedSku || randSKU,
-      price: parsedPrice,
-      discountPrice: parsedDiscount,
-      stockQuantity: parsedStock
+      sku: sku.trim(),
+      price: price,
+      discountPrice: discountPrice,
+      stockQuantity: stockQuantity
     }];
   }
 
-  // Validate variations
+  // Variation validation (now always at least one)
   for (let i = 0; i < parsedVariations.length; i++) {
-    const v = parsedVariations[i];
-    if (!v.attribute || !v.value || !v.sku?.trim()) {
+    const varObj = parsedVariations[i];
+    if (!varObj.attribute || !varObj.value || !varObj.sku || varObj.sku.trim() === '') {
       await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Variation ${i + 1} missing fields` });
+      return res.status(400).json({ success: false, msg: `Variation ${i} missing required fields: attribute, value, or sku` });
     }
-
-    const dupSku = parsedVariations.some((vv, idx) => idx !== i && vv.sku.trim() === v.sku.trim());
-    if (dupSku) {
+    const varPrice = parseFloat(varObj.price);
+    const varStock = parseInt(varObj.stockQuantity || 0);
+    if (isNaN(varPrice) || varPrice <= 0 || isNaN(varStock) || varStock < 0) {
       await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Duplicate SKU detected in variations` });
+      return res.status(400).json({ success: false, msg: `Variation ${i} invalid price or stock` });
+    }
+    const varDiscount = parseFloat(varObj.discountPrice || 0);
+    if (varObj.discountPrice !== undefined && (isNaN(varDiscount) || varDiscount > varPrice)) {
+      await cleanupAllFiles();
+      return res.status(400).json({ success: false, msg: `Variation ${i} invalid discountPrice` });
+    }
+    // Check for duplicate SKUs across variations
+    const skuExists = parsedVariations.some((v, idx) => idx !== i && v.sku.trim() === varObj.sku.trim());
+    if (skuExists) {
+      await cleanupAllFiles();
+      return res.status(400).json({ success: false, msg: `Duplicate SKU in variations` });
     }
   }
 
-  // Transaction for consistency
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
-    // Lookup dependencies
+    // Lookups
     const category = await findCategoryByIdOrName(categoryValue);
-    if (!category) throw new Error(`Category not found: ${categoryValue}`);
-
-    const subcategoryDoc = await findSubcategoryByIdOrName(subcategory);
-    if (!subcategoryDoc) throw new Error(`Subcategory not found: ${subcategory}`);
-
-    const brand = await findBrandByIdOrName(brandValue);
-    if (!brand) throw new Error(`Brand not found: ${brandValue}`);
-
-    const unit = await findUnitByIdOrName(unitValue);
-    if (!unit) throw new Error(`Unit not found: ${unitValue}`);
-
-    // Check uniqueness
-    const existingProduct = await Product.findOne({ name: name.trim(), brand: brand._id });
-    if (existingProduct) throw new Error('Product already exists for this brand');
-
-    const ingredientsString = Array.isArray(ingredients)
-      ? ingredients.join('\n')
-      : ingredients?.trim();
-
-    // Create product
-    const product = new Product({
-      name: name.trim(),
-      category: category._id,
-      subcategory: subcategoryDoc._id,
-      brand: brand._id,
-      status: status || 'Active',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      description: description?.trim(),
-      images,
-      thumbnail,
-      ingredients: ingredientsString,
-      suitableFor,
-      variations: []
-    });
-
-    await product.save({ session });
-
-    // Create variants
-    const variantIds = [];
-    for (let i = 0; i < parsedVariations.length; i++) {
-      const v = parsedVariations[i];
-      const skuExists = await Variant.findOne({ sku: v.sku.trim() });
-      if (skuExists) throw new Error(`SKU already exists: ${v.sku}`);
-
-      const variant = new Variant({
-        product: product._id,
-        attribute: v.attribute.trim(),
-        value: v.value.trim(),
-        sku: v.sku.trim(),
-        unit: unit._id,
-        purchasePrice: parsedPurchase,
-        price: parseFloat(v.price),
-        discountPrice: parseFloat(v.discountPrice || 0),
-        stockQuantity: parseInt(v.stockQuantity || 0),
-        weightQuantity: parsedWeight,
-        status: 'Active',
-        expiryDate: expiryDate ? new Date(expiryDate) : undefined,
-        image: variationImages[i]
-      });
-
-      await variant.save({ session });
-      variantIds.push(variant._id);
+    if (!category) {
+      await cleanupAllFiles();
+      return res.status(400).json({ success: false, msg: `Category not found for value: ${categoryValue}` });
     }
 
-    // Link variants to product
-    product.variations.push(...variantIds);
-    await product.save({ session });
+    console.log('DEBUG: Subcategory value before lookup:', subcategoryValue); // Remove in prod
+    const subcategory = await findSubcategoryByIdOrName(subcategoryValue);
+    if (!subcategory) {
+      await cleanupAllFiles();
+      return res.status(400).json({ success: false, msg: `Subcategory not found for value: ${subcategoryValue}` });
+    }
 
-    // Commit transaction
-    await session.commitTransaction();
-    session.endSession();
+    const brand = await findBrandByIdOrName(brandValue);
+    if (!brand) {
+      await cleanupAllFiles();
+      return res.status(400).json({ success: false, msg: `Brand not found for value: ${brandValue}` });
+    }
 
-    // Populate for response
-    await product.populate([
+    const unit = await findUnitByIdOrName(unitValue);
+    if (!unit) {
+      await cleanupAllFiles();
+      return res.status(400).json({ success: false, msg: `Unit not found for value: ${unitValue}` });
+    }
+
+    // Uniqueness check (name + brand)
+    const existingProduct = await Product.findOne({ name: name.trim(), brand: brand._id });
+    if (existingProduct) {
+      await cleanupAllFiles();
+      return res.status(400).json({ success: false, msg: 'Product with this name already exists under this brand' });
+    }
+
+    // Convert ingredients array to string if needed
+    const ingredientsString = Array.isArray(ingredients) ? ingredients.join('\n') : ingredients;
+
+    const productData = {
+      name: name.trim(),
+      category: category._id,
+      subcategory: subcategory._id,
+      brand: brand._id,
+      status,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      variations: [] 
+    };
+    if (ingredientsString) productData.ingredients = ingredientsString.trim();
+    if (suitableFor) productData.suitableFor = suitableFor;
+    if (images.length > 0) productData.images = images;
+    if (thumbnail) productData.thumbnail = thumbnail;
+    if (description) productData.description = description.trim();
+
+    const newProduct = new Product(productData);
+    await newProduct.validate();
+    await newProduct.save();
+
+    let variantIds = [];
+    // Check global SKU uniqueness before creating
+    for (const varObj of parsedVariations) {
+      const existingVariant = await Variant.findOne({ sku: varObj.sku.trim() });
+      if (existingVariant) {
+        await cleanupAllFiles();
+        // Also cleanup product if variants fail
+        await Product.findByIdAndDelete(newProduct._id);
+        if (newProduct.images && newProduct.images.length > 0) {
+          for (const img of newProduct.images) {
+            try { await fs.unlink(img); } catch { }
+          }
+        }
+        if (newProduct.thumbnail) try { await fs.unlink(newProduct.thumbnail); } catch { }
+        return res.status(400).json({ success: false, msg: `SKU '${varObj.sku}' already exists` });
+      }
+    }
+
+    // Create variants
+    for (let i = 0; i < parsedVariations.length; i++) {
+      const varObj = parsedVariations[i];
+      const variantData = {
+        product: newProduct._id,
+        attribute: varObj.attribute.trim(),
+        value: varObj.value.trim(),
+        sku: varObj.sku.trim(),
+        unit: unit._id,
+        purchasePrice: parsedPurchasePrice,
+        price: parseFloat(varObj.price),
+        discountPrice: parseFloat(varObj.discountPrice || 0),
+        stockQuantity: parseInt(varObj.stockQuantity || 0),
+        weightQuantity: parseFloat(weightQuantity),
+        status: 'Active'
+      };
+      if (expiryDate) variantData.expiryDate = new Date(expiryDate);
+      const imagePath = variationImages[i];
+      if (imagePath) variantData.image = imagePath;
+
+      const newVariant = new Variant(variantData);
+      await newVariant.validate();
+      await newVariant.save();
+      variantIds.push(newVariant._id);
+    }
+
+    // Add to product
+    if (variantIds.length > 0) {
+      await Product.findByIdAndUpdate(newProduct._id, { $push: { variations: { $each: variantIds } } });
+    }
+
+    await newProduct.populate([
       { path: 'category', select: 'name' },
       { path: 'subcategory', select: 'subcategoryName' },
       { path: 'brand', select: 'name' },
       { path: 'variations', select: 'attribute value sku price stockQuantity discountPrice image unit purchasePrice expiryDate status weightQuantity' }
     ]);
-    await Variant.populate(product.variations, { path: 'unit', select: 'unit_name' });
+    if (variantIds.length > 0) {
+      await Variant.populate(newProduct.variations, { path: 'unit', select: 'unit_name' });
+    }
 
-    return res.status(201).json({
+    res.status(201).json({
       success: true,
       msg: 'Product created successfully',
-      product
+      product: newProduct
     });
-
   } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
+    console.error('Product creation error:', err.message || err); // Enhanced logging
     await cleanupAllFiles();
-    console.error('Product creation error:', err.message);
-    return res.status(400).json({ success: false, msg: err.message });
+    if (err.name === 'MongoServerError' && err.code === 11000) { // More reliable check
+      return res.status(400).json({ success: false, msg: `Duplicate data detected: ${err.errmsg || 'Check SKU or product name/brand uniqueness'}` });
+    }
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({ success: false, msg: `Validation error: ${Object.values(err.errors).map(e => e.message).join(', ')}` });
+    }
+    res.status(500).json({ success: false, msg: 'Server error during product creation', details: err.message || 'Unknown error' });
   }
 };
-
-
-
-
-
-
 
 
 exports.getAllProducts = async (req, res) => {
@@ -661,18 +691,15 @@ exports.getProductById = async (req, res) => {
   }
 };
 
-
-
 exports.updateProduct = async (req, res) => {
-  console.log('DEBUG: Update req.body:', req.body); // Remove in prod
-  const { name, description, category: categoryValue, subcategory: subCategory, brand: brandValue, weightQuantity, unit: unitValue, purchasePrice, price, discountPrice, stockQuantity, expiryDate, ingredients, suitableFor, status, variations: incomingVariations, variationOperation, variationIndex } = req.body;
+  const { name, description, category: categoryValue, subcategory: subcategoryValue, brand: brandValue, weightQuantity, unit: unitValue, purchasePrice, price, discountPrice, stockQuantity, expiryDate, ingredients, suitableFor, status, variations: incomingVariations, variationOperation, variationIndex } = req.body;
 
   const newImagesFiles = req.files && req.files['images'] ? req.files['images'] : [];
   const newThumbnailFile = req.files && req.files['thumbnail'] ? req.files['thumbnail'][0] : null;
   const newImages = newImagesFiles.map(file => file.path);
   const newThumbnail = newThumbnailFile ? newThumbnailFile.path : undefined;
 
-  
+  // Handle variation images for add/update
   const variationImages = {};
   if (variationOperation) {
     let parsedIncoming = [];
@@ -700,7 +727,7 @@ exports.updateProduct = async (req, res) => {
     }
   }
 
-  
+  // Consolidated cleanup helper
   const cleanupAllNewFiles = async () => {
     const allNewFiles = [...newImagesFiles, newThumbnailFile, ...Object.values(variationImages).filter(Boolean)].filter(f => f);
     for (const file of allNewFiles) {
@@ -708,7 +735,15 @@ exports.updateProduct = async (req, res) => {
     }
   };
 
-
+  // Validation (similar to create, but optional)
+  if (status !== undefined && !['Active', 'Inactive'].includes(status)) {
+    await cleanupAllNewFiles();
+    return res.status(400).json({ success: false, msg: 'Invalid status' });
+  }
+  if (suitableFor !== undefined && !['Puppy', 'Adult', 'Senior', 'All Ages'].includes(suitableFor)) {
+    await cleanupAllNewFiles();
+    return res.status(400).json({ success: false, msg: 'Invalid suitableFor' });
+  }
   const parsedStockQuantity = stockQuantity !== undefined ? parseInt(stockQuantity) : NaN;
   if (stockQuantity !== undefined && (isNaN(parsedStockQuantity) || parsedStockQuantity < 0)) {
     await cleanupAllNewFiles();
@@ -729,7 +764,13 @@ exports.updateProduct = async (req, res) => {
     await cleanupAllNewFiles();
     return res.status(400).json({ success: false, msg: 'Invalid discountPrice' });
   }
-
+  if (expiryDate !== undefined) {
+    const parsedExpiry = new Date(expiryDate);
+    if (isNaN(parsedExpiry.getTime()) || parsedExpiry <= new Date()) {
+      await cleanupAllNewFiles();
+      return res.status(400).json({ success: false, msg: 'Expiry date must be in the future' });
+    }
+  }
   if (weightQuantity !== undefined && (isNaN(parseFloat(weightQuantity)) || parseFloat(weightQuantity) <= 0)) {
     await cleanupAllNewFiles();
     return res.status(400).json({ success: false, msg: 'Invalid weightQuantity' });
@@ -756,11 +797,11 @@ exports.updateProduct = async (req, res) => {
         return res.status(400).json({ success: false, msg: `Category not found for value: ${categoryValue}` });
       }
     }
-    if (subCategory !== undefined) {
-      subcategory = await findSubcategoryByIdOrName(subcategory);
+    if (subcategoryValue !== undefined) {
+      subcategory = await findSubcategoryByIdOrName(subcategoryValue);
       if (!subcategory) {
         await cleanupAllNewFiles();
-        return res.status(400).json({ success: false, msg: `Subcategory not found for value: ${subcategory}` });
+        return res.status(400).json({ success: false, msg: `Subcategory not found for value: ${subcategoryValue}` });
       }
     }
     if (brandValue !== undefined) {
@@ -796,7 +837,7 @@ exports.updateProduct = async (req, res) => {
       return res.status(400).json({ success: false, msg: `Discount price (${finalDiscountPrice}) must be less than or equal to sell price` });
     }
 
-    
+    // Uniqueness check if name or brand is being updated
     if (name !== undefined || brandValue !== undefined) {
       const checkName = name !== undefined ? name.trim() : currentProduct.name;
       const checkBrandId = brandValue !== undefined ? brandDoc._id : currentProduct.brand;
@@ -811,7 +852,7 @@ exports.updateProduct = async (req, res) => {
     if (name !== undefined) updateData.name = name.trim();
     if (description !== undefined) updateData.description = description.trim();
     if (categoryValue !== undefined) updateData.category = category._id;
-    if (subCategory !== undefined) updateData.subcategory = subcategory._id;
+    if (subcategoryValue !== undefined) updateData.subcategory = subcategory._id;
     if (brandValue !== undefined) updateData.brand = brandDoc._id;
     if (ingredients !== undefined) updateData.ingredients = Array.isArray(ingredients) ? ingredients.join('\n') : ingredients.trim();
     if (suitableFor !== undefined) updateData.suitableFor = suitableFor;
@@ -826,7 +867,7 @@ exports.updateProduct = async (req, res) => {
     }
     updateData.updatedAt = new Date().toISOString();
 
-    
+    // Bulk update shared fields across all variants if base fields provided (no variationOperation)
     if (purchasePrice !== undefined || price !== undefined || discountPrice !== undefined || stockQuantity !== undefined || weightQuantity !== undefined || expiryDate !== undefined || unitValue !== undefined) {
       const bulkUpdate = { $set: {} };
       if (purchasePrice !== undefined) bulkUpdate.$set.purchasePrice = finalPurchasePrice;
@@ -1062,32 +1103,3 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
