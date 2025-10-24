@@ -252,15 +252,17 @@ router.delete('/:id', authMiddleware, requireRole(['Super Admin','Manager']), as
     if (order.status === 'delivered' || order.paymentStatus === 'paid')
       return res.status(400).json({ success: false, msg: 'Cannot delete delivered/paid orders' });
 
-    // restore stock
-    for (const itm of order.items) {
-      if (itm.variant) {
-        await Variant.findByIdAndUpdate(itm.variant, { $inc: { stockQuantity: itm.quantity } });
+   if (order.status === 'pending') {
+      for (const item of order.items) {
+        if (item.variant) {
+          await Variant.findByIdAndUpdate(item.variant, { $inc: { stockQuantity: item.quantity } });
+        }
       }
+      await Order.findByIdAndDelete(id);
+      res.json({ success: true, data: order, msg: `Order ${order.orderNumber} deleted successfully` });
+    } else {
+      return res.status(400).json({ success: false, msg: 'Only pending orders can be deleted' });
     }
-
-    await Order.findByIdAndDelete(id);
-    res.json({ success: true, data: order, msg: `Order ${order.orderNumber} deleted` });
   } catch (err) {
     res.status(500).json({ success: false, msg: 'Server error', details: err.message });
   }
@@ -341,6 +343,7 @@ router.get('/track/:identifier', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
