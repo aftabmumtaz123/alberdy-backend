@@ -153,7 +153,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin','Manager','Customer'
 });
 
 /* -------------------------- GET ONE ORDER -------------------------- */
-router.get('/:id', authMiddleware, requireRole(['Super Admin','Manager','Customer']), async (req, res) => {
+router.get('/:id', authMiddleware, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
       .populate('items.product', 'name thumbnail images')
@@ -343,6 +343,7 @@ router.get('/track/:identifier', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
