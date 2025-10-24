@@ -238,7 +238,7 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin','Manager']), async
 });
 
 /* -------------------------- DELETE ORDER (restore stock) -------------------------- */
-router.delete('/:id', authMiddleware, requireRole(['Super Admin','Manager', 'Customer']), async (req, res) => {
+router.delete('/:id', authMiddleware, requireRole(['Super Admin','Manager']), async (req, res) => {
   try {
     const { id } = req.params;
     if (!mongoose.Types.ObjectId.isValid(id))
@@ -343,6 +343,7 @@ router.get('/track/:identifier', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
