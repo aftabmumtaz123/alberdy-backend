@@ -179,7 +179,7 @@ router.get('/', authMiddleware, requireRole(['Super Admin','Manager','Customer']
 
     const orders = await Order.find(query)
       .populate('items.product', 'name thumbnail images')
-      .populate('items.variant', 'attribute value sku price discountPrice stockQuantity image')
+      .populate('items.variant', 'attribute value sku price discountPrice effectivePrice total stockQuantity image product')
       .populate('user', 'name email phone')
       .sort({ createdAt: -1 })
       .skip((page - 1) * parseInt(limit))
@@ -343,4 +343,5 @@ router.get('/track/:identifier', async (req, res) => {
 });
 
 module.exports = router;
+
 
