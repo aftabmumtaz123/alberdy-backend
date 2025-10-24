@@ -161,8 +161,6 @@ router.get('/:id', authMiddleware, async (req, res) => {
       .populate('user', 'name email phone');
 
     if (!order) return res.status(404).json({ success: false, msg: 'Order not found' });
-    if (req.user.role === 'Customer' && order.user.toString() !== req.user.id)
-      return res.status(403).json({ success: false, msg: 'Access denied' });
 
     res.json({ success: true, data: order });
   } catch (err) {
@@ -343,6 +341,7 @@ router.get('/track/:identifier', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
