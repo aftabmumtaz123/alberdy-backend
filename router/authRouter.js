@@ -224,41 +224,79 @@ router.get('/api/auth/users/:id', authMiddleware, async (req, res) => {
     console.error('Get user error:', err);
     res.status(500).json({ success: false, msg: 'Server error fetching user' });
   }
-});
-// Update User Route (with address handling)
-router.put('/api/auth/users/:id', authMiddleware, async (req, res) => {
+});router.put('/api/auth/users/:id', authMiddleware, async (req, res) => {
   try {
-    const { name, email, role, phone, address, status } = req.body;
-    // Address is required during update: must be provided and complete (all fields non-empty)
-    let validAddress = undefined;
-    if (address) {
-      if (typeof address === 'object' && address !== null && address.street && address.city && address.state && address.zip) {
+    const { name, email, role, phone, status } = req.body;
+
+    // --- Address Handling ---
+    let validAddress;
+    if (req.body.address) {
+      let address = req.body.address;
+
+      // If coming as string (e.g. from FormData), parse it
+      if (typeof address === 'string') {
+        try {
+          address = JSON.parse(address);
+        } catch (err) {
+          return res.status(400).json({ success: false, msg: 'Invalid address JSON format' });
+        }
+      }
+
+      // Validate address object
+      if (
+        typeof address === 'object' &&
+        address !== null &&
+        address.street &&
+        address.city &&
+        address.state &&
+        address.zip
+      ) {
         validAddress = {
           street: address.street.trim(),
           city: address.city.trim(),
           state: address.state.trim(),
-          zip: address.zip.trim()
+          zip: address.zip.trim(),
         };
       } else {
-        return res.status(400).json({ success: false, msg: 'Complete address (street, city, state, zip) is required during update and must be a valid object' });
+        return res.status(400).json({
+          success: false,
+          msg: 'Address must include street, city, state, and zip fields',
+        });
       }
-    } else {
-      return res.status(400).json({ success: false, msg: 'Address is required during update' });
     }
-    const user = await User.findByIdAndUpdate(
-      req.params.id,
-      { name, email, role, phone, address: validAddress, status, updatedAt: new Date() },
-      { new: true, runValidators: true, select: '-password -__v' }
-    );
+
+    // --- Prepare update object dynamically ---
+    const updateFields = {};
+    if (name) updateFields.name = name;
+    if (email) updateFields.email = email;
+    if (role) updateFields.role = role;
+    if (phone) updateFields.phone = phone;
+    if (status) updateFields.status = status;
+    if (validAddress) updateFields.address = validAddress;
+    updateFields.updatedAt = new Date();
+
+    // --- Update user ---
+    const user = await User.findByIdAndUpdate(req.params.id, updateFields, {
+      new: true,
+      runValidators: true,
+      select: '-password -__v',
+    });
+
     if (!user) {
       return res.status(404).json({ success: false, msg: 'User not found' });
     }
-    res.json({ success: true, msg: 'User updated successfully', data: user });
+
+    res.json({
+      success: true,
+      msg: 'User updated successfully',
+      data: user,
+    });
   } catch (err) {
     console.error('Update user error:', err);
     res.status(500).json({ success: false, msg: 'Server error updating user' });
   }
 });
+
 
 
 router.delete('/api/auth/users/:id', authMiddleware, async (req, res) => {
@@ -274,3 +312,4 @@ router.delete('/api/auth/users/:id', authMiddleware, async (req, res) => {
   }
 });
 module.exports = router;
+
