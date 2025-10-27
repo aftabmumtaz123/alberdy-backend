@@ -120,10 +120,7 @@ exports.createProduct = async (req, res) => {
 
   for (let i = 0; i < parsedVariations.length; i++) {
     const varObj = parsedVariations[i];
-    if (!varObj.attribute || !varObj.value) {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Variation ${i} missing required fields: attribute or value` });
-    }
+  
     const varPrice = parseFloat(varObj.price);
     const varStock = parseInt(varObj.stockQuantity);
     const varDiscount = parseFloat(varObj.discountPrice || 0);
@@ -776,9 +773,9 @@ exports.updateProduct = async (req, res) => {
     if (parsedVariations.length > 0) {
       for (let i = 0; i < parsedVariations.length; i++) {
         const variantData = parsedVariations[i];
-        if (!variantData.sku || !variantData.attribute || !variantData.value) {
+        if (!variantData.sku) {
           await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
-          return res.status(400).json({ success: false, msg: `Variation ${i} missing required fields: sku, attribute, or value` });
+          return res.status(400).json({ success: false, msg: `Variation ${i} missing required fields: sku` });
         }
 
         const varPrice = parseFloat(variantData.price);
