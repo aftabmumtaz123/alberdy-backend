@@ -5,7 +5,7 @@ const variantSchema = new mongoose.Schema({
   product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true }, // Reference to parent product
   attribute: { type: String }, // e.g., 'Size', 'Color'
   value: { type: String }, // e.g., 'Large', 'Red'
-  sku: { type: String, required: true, unique: true }, // Unique SKU
+  sku: { type: String, unique: true }, // Unique SKU
   unit: { type: mongoose.Schema.Types.ObjectId, ref: 'Unit', required: true },
   purchasePrice: { type: Number, required: true },
   price: { type: Number, required: true },
@@ -31,4 +31,5 @@ variantSchema.pre('save', function(next) {
 });
 
 module.exports = mongoose.model('Variant', variantSchema);
+
 
