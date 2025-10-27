@@ -773,10 +773,7 @@ exports.updateProduct = async (req, res) => {
     if (parsedVariations.length > 0) {
       for (let i = 0; i < parsedVariations.length; i++) {
         const variantData = parsedVariations[i];
-        if (!variantData.sku) {
-          await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
-          return res.status(400).json({ success: false, msg: `Variation ${i} missing required fields: sku` });
-        }
+       
 
         const varPrice = parseFloat(variantData.price);
         const varStock = parseInt(variantData.stockQuantity);
@@ -942,3 +939,4 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
