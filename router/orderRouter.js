@@ -42,7 +42,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin','Manager','Customer'
     // ---- basic validation ----
     if (!items?.length) return res.status(400).json({ success: false, msg: 'Order items required' });
     if (!paymentMethod) return res.status(400).json({ success: false, msg: 'Payment method required' });
-    if (!shippingAddress?.street || !shippingAddress?.city || !shippingAddress?.zip ||
+    if (!shippingAddress?.street || !shippingAddress?.city || !shippingAddress?.email || !shippingAddress?.zip ||
         !shippingAddress?.fullName || !shippingAddress?.phone) {
       return res.status(400).json({ success: false, msg: 'Complete shipping address required' });
     }
@@ -343,6 +343,7 @@ router.get('/track/:identifier', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
