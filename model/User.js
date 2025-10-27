@@ -10,6 +10,7 @@ const userSchema = new mongoose.Schema({
     address: {
     street: { type: String },
     city: { type: String },
+    email: { type: String },
     state: { type: String },
     zip: { type: String },
   },
@@ -42,4 +43,5 @@ userSchema.methods.comparePassword = async function(password) {
 
 
 module.exports = mongoose.model('User', userSchema);
+
 
