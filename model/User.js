@@ -8,10 +8,10 @@ const userSchema = new mongoose.Schema({
   role: { type: String, enum: ['Super Admin', 'Manager', 'Staff', 'Customer'], required: true, default: 'Customer' },
   phone: { type: String, default: '' },
     address: {
-    street: { type: String, required: true },
-    city: { type: String, required: true },
-    state: { type: String, required: true },
-    zip: { type: String, required: true },
+    street: { type: String },
+    city: { type: String },
+    state: { type: String },
+    zip: { type: String },
   },
   petType: { type: String, enum: ['Dog', 'Cat', 'Bird', 'Fish', 'Multiple'] }, // For customers
   status: { type: String, enum: ['Active', 'Inactive', 'Blocked'], default: 'Active' },
@@ -42,3 +42,4 @@ userSchema.methods.comparePassword = async function(password) {
 
 
 module.exports = mongoose.model('User', userSchema);
+
