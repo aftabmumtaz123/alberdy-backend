@@ -1,211 +1,150 @@
 const Product = require('../model/Product');
-const Order = require('../model/Order');        // ← ADD THIS
-const User = require('../model/User');          // ← ADD THIS (if not already)
+const Order = require('../model/Order');
+const User = require('../model/User');
 const moment = require('moment');
 
 exports.getDashboard = async (req, res) => {
   try {
     const { period = 'monthly', limit = 5 } = req.query;
+
+    // Validate period
     if (!['daily', 'weekly', 'monthly'].includes(period)) {
       return res.status(400).json({ error: 'Invalid period: daily, weekly, or monthly' });
     }
 
+    // Build date filters
     const now = moment();
-
-    // ---------- 1. DATE RANGES ----------
     let startDate, endDate, prevStartDate, prevEndDate;
     if (period === 'daily') {
       startDate = now.startOf('day').toDate();
-      endDate   = now.endOf('day').toDate();
-      const prev = moment(startDate).subtract(1, 'day');
-      prevStartDate = prev.startOf('day').toDate();
-      prevEndDate   = prev.endOf('day').toDate();
+      endDate = now.endOf('day').toDate();
+      prevStartDate = moment(startDate).subtract(1, 'day').startOf('day').toDate();
+      prevEndDate = moment(startDate).subtract(1, 'day').endOf('day').toDate();
     } else if (period === 'weekly') {
       startDate = now.startOf('week').toDate();
-      endDate   = now.endOf('week').toDate();
-      const prev = moment(startDate).subtract(1, 'week');
-      prevStartDate = prev.startOf('week').toDate();
-      prevEndDate   = prev.endOf('week').toDate();
-    } else {
+      endDate = now.endOf('week').toDate();
+      prevStartDate = moment(startDate).subtract(1, 'week').startOf('week').toDate();
+      prevEndDate = moment(startDate).subtract(1, 'week').endOf('week').toDate();
+    } else { // monthly
       startDate = now.startOf('month').toDate();
-      endDate   = now.endOf('month').toDate();
-      const prev = moment(startDate).subtract(1, 'month');
-      prevStartDate = prev.startOf('month').toDate();
-      prevEndDate   = prev.endOf('month').toDate();
+      endDate = now.endOf('month').toDate();
+      prevStartDate = moment(startDate).subtract(1, 'month').startOf('month').toDate();
+      prevEndDate = moment(startDate).subtract(1, 'month').endOf('month').toDate();
     }
 
-    // ---------- 2. ALL-TIME TOTALS ----------
-    const [totalProductsAll, totalOrdersAll, totalCustomersAll] = await Promise.all([
+    // All-time totals
+    const [totalProductsAll, fullTotalOrders, totalCustomersAll] = await Promise.all([
       Product.countDocuments(),
       Order.countDocuments(),
       User.countDocuments({ role: 'Customer' })
     ]);
 
-    // ---------- 3. PERIOD-SPECIFIC AGGREGATIONS ----------
-    const [
-      periodOrdersAgg,
-      periodNewCustomers,
-      lowStockResult,          // <-- NEW
-      recentOrders,
-      currentRevenue,
-      prevRevenue,
-      prevNewCustomers
-    ] = await Promise.all([
-      // … (order breakdown) – unchanged …
+    // Period-specific data (parallel queries)
+    const [periodOrdersAgg, periodNewCustomers, lowStockAlerts, recentOrders, currentRevenue, prevRevenue, prevNewCustomers] = await Promise.all([
+      // Period Orders with breakdown (match schema enums: pending, delivered, cancelled; ignore others)
       Order.aggregate([
         { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
         { $group: { _id: '$status', count: { $sum: 1 } } }
       ]).then(results => {
         const breakdown = { pending: 0, delivered: 0, cancelled: 0 };
-        let total = 0;
         results.forEach(r => {
           if (['pending', 'delivered', 'cancelled'].includes(r._id)) {
             breakdown[r._id] = r.count;
           }
-          total += r.count;
         });
+        const total = results.reduce((sum, r) => sum + r.count, 0);
         return { total, breakdown };
       }),
 
-      User.countDocuments({ role: 'Customer', createdAt: { $gte: startDate, $lte: endDate } }),
+      // Period New Customers (using User model)
+      User.countDocuments({ 
+        role: 'Customer',
+        createdAt: { $gte: startDate, $lte: endDate } 
+      }),
 
-      // ---------- LOW-STOCK PIPELINE ----------
-    Product.aggregate([
-  // 1. Pull variants
-  {
-    $lookup: {
-      from: 'variants',
-      let: { varIds: { $ifNull: ['$variations', []] } },
-      pipeline: [
-        { $match: { $expr: { $in: ['$_id', '$$varIds'] } } }
-      ],
-      as: 'variants'
-    }
-  },
+      // Low Stock Alerts (stockQuantity < 10)
+      Product.find({ stockQuantity: { $lt: 10, $gt: -1 } })
+        .select('name sku stockQuantity')
+        .sort({ stockQuantity: 1 })
+        .limit(4),
 
-  // 2. Sum stock across variants
-  {
-    $addFields: {
-      totalStock: { $sum: '$variants.stockQuantity' }
-    }
-  },
-
-  // 3. Filter low stock
-  { $match: { totalStock: { $lt: 10, $gt: -1 } } },
-
-  // 4. Sort by lowest stock
-  { $sort: { totalStock: 1 } },
-
-  // 5. Facet: alerts (top 4) + total count
-  {
-    $facet: {
-      alerts: [
-        { $limit: 4 },
-        {
-  $project: {
-    name: 1,
-    sku: {
-      $ifNull: [
-        '$sku',
-        {
-          $concat: [
-            'SKU-',
-            {
-              $substrCP: [
-                { $toString: '$_id' },
-                -4,
-                4  
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    unitsLeft: '$totalStock',
-    thumbnail: { $arrayElemAt: ['$images', 0] }
-  }
-}
-      ],
-      count: [{ $count: 'total' }]
-    }
-  }
-]),
-
+      // Recent Orders (last N)
       Order.find()
-        .populate('user', 'name')
+        .populate('user', 'name') // Use 'user' ref to 'User'
         .populate('items.product', 'name')
         .sort({ createdAt: -1 })
         .limit(parseInt(limit))
         .select('orderNumber user items total status createdAt'),
 
+      // Current Revenue (sum total for delivered orders in period)
       Order.aggregate([
-        { $match: { createdAt: { $gte: startDate, $lte: endDate }, status: 'delivered' } },
+        { $match: { 
+          createdAt: { $gte: startDate, $lte: endDate }, 
+          status: 'delivered' 
+        } },
         { $group: { _id: null, total: { $sum: '$total' } } }
-      ]).then(r => r[0]?.total || 0),
+      ]).then(results => results[0]?.total || 0),
 
+      // Prev Revenue
       Order.aggregate([
-        { $match: { createdAt: { $gte: prevStartDate, $lte: prevEndDate }, status: 'delivered' } },
+        { $match: { 
+          createdAt: { $gte: prevStartDate, $lte: prevEndDate }, 
+          status: 'delivered' 
+        } },
         { $group: { _id: null, total: { $sum: '$total' } } }
-      ]).then(r => r[0]?.total || 0),
+      ]).then(results => results[0]?.total || 0),
 
-      User.countDocuments({ role: 'Customer', createdAt: { $gte: prevStartDate, $lte: prevEndDate } })
+      // Prev Period New Customers
+      User.countDocuments({ 
+        role: 'Customer',
+        createdAt: { $gte: prevStartDate, $lte: prevEndDate } 
+      })
     ]);
 
-    // ---------- 4. FORMAT LOW-STOCK ----------
-    const lowStockCount   = lowStockResult[0]?.count[0]?.total ?? 0;
-    const lowStockAlerts  = lowStockResult[0]?.alerts ?? [];
-
-    // ---------- 5. RECENT ORDERS ----------
-    const formattedRecentOrders = recentOrders.map(o => ({
-      orderId: o.orderNumber?.startsWith('#ORD-')
-        ? o.orderNumber
-        : `#ORD-${String(o._id).slice(-3).padStart(3, '0')}`,
-      customer: o.user?.name || 'Unknown',
-      product: o.items[0]?.product?.name || 'N/A',
-      amount: o.total,
-      status: o.status.charAt(0).toUpperCase() + o.status.slice(1),
-      date: moment(o.createdAt).format('YYYY-MM-DD')
+    // Recent Orders mapping (match UI: #ORD-001 format if orderNumber is like that; capitalize status)
+    const formattedRecentOrders = recentOrders.map(order => ({
+      orderId: order.orderNumber?.startsWith('#ORD-') ? order.orderNumber : `#ORD-${String(order._id).slice(-3).padStart(3, '0')}`,
+      customer: order.user?.name || 'Unknown',
+      product: order.items[0]?.product?.name || 'N/A',
+      amount: order.total,
+      status: order.status.charAt(0).toUpperCase() + order.status.slice(1),
+      date: moment(order.createdAt).format('YYYY-MM-DD')
     }));
 
-    // ---------- 6. GROWTH ----------
-    const revenueGrowth = prevRevenue > 0
-      ? ((currentRevenue - prevRevenue) / prevRevenue * 100).toFixed(1)
-      : 12.5;
-    const customerGrowth = prevNewCustomers > 0
-      ? ((periodNewCustomers - prevNewCustomers) / prevNewCustomers * 100).toFixed(1)
-      : 12;
+    // Low Stock mapping (assume sku exists; fallback if not)
+    const formattedLowStock = lowStockAlerts.map(p => ({
+      name: p.name,
+      sku: p.sku || `SKU-${String(p._id).slice(-4)}`,
+      unitsLeft: p.stockQuantity
+    }));
 
-    // ---------- 7. RESPONSE ----------
+    // Growth Calculations (match UI: +8%, +15%, +12%, +12.5%; use dynamic but fallback to UI values if no prev data)
+    const revenueGrowth = prevRevenue > 0 ? ((currentRevenue - prevRevenue) / prevRevenue * 100).toFixed(1) : 12.5;
+    const customerGrowth = prevNewCustomers > 0 ? ((periodNewCustomers - prevNewCustomers) / prevNewCustomers * 100).toFixed(1) : 12;
+    const productGrowth = '+8%'; // Placeholder; implement historical if needed
+    const orderGrowth = '+15%'; // Placeholder
+
+    const dashboardData = {
+      totalProducts: totalProductsAll,
+      productGrowth,
+      totalOrders: fullTotalOrders,
+      orderBreakdown: periodOrdersAgg.breakdown,
+      orderGrowth,
+      totalCustomers: totalCustomersAll,
+      customerGrowth: `${customerGrowth > 0 ? '+' : ''}${customerGrowth}%`,
+      revenue: currentRevenue,
+      revenueGrowth: `${revenueGrowth > 0 ? '+' : ''}${revenueGrowth}%`,
+      revenuePeriod: period.charAt(0).toUpperCase() + period.slice(1),
+      lowStockAlerts: formattedLowStock,
+      recentOrders: formattedRecentOrders
+    };
+
     res.json({
       success: true,
-      data: {
-        totalProducts: totalProductsAll,
-        productGrowth: '+8%',                     // placeholder – implement if you have historic data
-        totalOrders: totalOrdersAll,
-        orderBreakdown: periodOrdersAgg.breakdown,
-        orderGrowth: '+15%',                      // placeholder
-        totalCustomers: totalCustomersAll,
-        customerGrowth: `${customerGrowth > 0 ? '+' : ''}${customerGrowth}%`,
-        revenue: currentRevenue,
-        revenueGrowth: `${revenueGrowth > 0 ? '+' : ''}${revenueGrowth}%`,
-        revenuePeriod: period.charAt(0).toUpperCase() + period.slice(1),
-
-        // <<< LOW-STOCK SECTION >>>
-        lowStockCount,
-        lowStockAlerts,        // array of { name, sku, unitsLeft, thumbnail }
-
-        recentOrders: formattedRecentOrders
-      }
+      data: dashboardData
     });
   } catch (error) {
     console.error('Dashboard error:', error);
     res.status(500).json({ error: error.message });
   }
 };
-
-
-
-
-
-
-
