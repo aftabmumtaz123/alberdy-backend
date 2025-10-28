@@ -72,7 +72,7 @@ exports.getDashboard = async (req, res) => {
           $lookup: {
             from: 'variants',
             let: { varIds: { $ifNull: ['$variations', []] } },
-            pipeline: [{ $match: { $expr: { $in: ['$_id', '$$varIds'] } } } },
+            pipeline: [{ $match: { $expr: { $in: ['$_id', '$$varIds'] } } } }},
             as: 'variants'
           }
         },
@@ -175,3 +175,4 @@ exports.getDashboard = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
