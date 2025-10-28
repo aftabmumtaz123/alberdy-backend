@@ -123,7 +123,7 @@ exports.getDashboard = async (req, res) => {
       count: [{ $count: 'total' }]
     }
   }
-])
+]),
 
       Order.find()
         .populate('user', 'name')
@@ -196,6 +196,7 @@ exports.getDashboard = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
 
 
 
