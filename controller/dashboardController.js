@@ -102,23 +102,29 @@ exports.getDashboard = async (req, res) => {
       alerts: [
         { $limit: 4 },
         {
-          $project: {
-            name: 1,
-            sku: {
-              $ifNull: [
-                '$sku',
-                {
-                  $concat: [
-                    'SKU-',
-                    { $substrCP: [{ $toString: '$_id' }, -4, -1] }
-                  ]
-                }
+  $project: {
+    name: 1,
+    sku: {
+      $ifNull: [
+        '$sku',
+        {
+          $concat: [
+            'SKU-',
+            {
+              $substrCP: [
+                { $toString: '$_id' },
+                -4,
+                4  
               ]
-            },
-            unitsLeft: '$totalStock',
-            thumbnail: { $arrayElemAt: ['$images', 0] }
-          }
+            }
+          ]
         }
+      ]
+    },
+    unitsLeft: '$totalStock',
+    thumbnail: { $arrayElemAt: ['$images', 0] }
+  }
+}
       ],
       count: [{ $count: 'total' }]
     }
@@ -196,6 +202,7 @@ exports.getDashboard = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
 
 
 
