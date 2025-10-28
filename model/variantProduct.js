@@ -21,7 +21,6 @@ const variantSchema = new mongoose.Schema({
 
 // Indexes
 variantSchema.index({ product: 1 });
-variantSchema.index({ sku: 1 }, { unique: true });
 variantSchema.index({ stockQuantity: 1 }); // Added index for stock queries
 
 // Pre-save hook to update timestamp
@@ -31,5 +30,6 @@ variantSchema.pre('save', function(next) {
 });
 
 module.exports = mongoose.model('Variant', variantSchema);
+
 
 
