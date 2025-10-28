@@ -1,6 +1,6 @@
 const Product = require('../model/Product');
-const Order = require('../model/Order');
-const User = require('../model/User');
+const Order = require('../model/Order');        // ← ADD THIS
+const User = require('../model/User');          // ← ADD THIS (if not already)
 const moment = require('moment');
 
 exports.getDashboard = async (req, res) => {
@@ -196,6 +196,7 @@ exports.getDashboard = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
 
 
 
