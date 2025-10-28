@@ -1,4 +1,8 @@
-// GET /api/dashboard
+const Product = require('../model/Product');
+const Order = require('../model/Order');
+const User = require('../model/User');
+const moment = require('moment');
+
 exports.getDashboard = async (req, res) => {
   try {
     const { period = 'monthly', limit = 5 } = req.query;
@@ -175,5 +179,6 @@ exports.getDashboard = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
 
 
