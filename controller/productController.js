@@ -224,12 +224,22 @@ exports.createProduct = async (req, res) => {
         updatedAt: new Date()
       };
 
+if (varObj.expiryDate) {
+  const expiry = new Date(varObj.expiryDate);
 
-   if (new Date(varObj.expiryDate) <= Date.now()) {
-  return res.status(400).json({ message: "Please provide an expiry date in the future" });
-} else {
-  variantData.expiryDate = new Date(varObj.expiryDate);
+  // Check if it's a valid date
+  if (isNaN(expiry.getTime())) {
+    return res.status(400).json({ success: false, msg: `Variation ${i}: Invalid expiry date format` });
+  }
+
+  // Check if it's in the past
+  if (expiry.getTime() <= Date.now()) {
+    return res.status(400).json({ success: false, msg: `Variation ${i}: Expiry date must be in the future` });
+  }
+
+  variantData.expiryDate = expiry;
 }
+
 
       
       const imagePath = variationImages[i];
@@ -947,6 +957,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
