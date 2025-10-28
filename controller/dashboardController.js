@@ -70,43 +70,60 @@ exports.getDashboard = async (req, res) => {
       User.countDocuments({ role: 'Customer', createdAt: { $gte: startDate, $lte: endDate } }),
 
       // ---------- LOW-STOCK PIPELINE ----------
-      Product.aggregate([
-        // 1. Pull variants into the product document
+    Product.aggregate([
+  // 1. Pull variants
+  {
+    $lookup: {
+      from: 'variants',
+      let: { varIds: { $ifNull: ['$variations', []] } },
+      pipeline: [
+        { $match: { $expr: { $in: ['$_id', '$$varIds'] } } }
+      ],
+      as: 'variants'
+    }
+  },
+
+  // 2. Sum stock across variants
+  {
+    $addFields: {
+      totalStock: { $sum: '$variants.stockQuantity' }
+    }
+  },
+
+  // 3. Filter low stock
+  { $match: { totalStock: { $lt: 10, $gt: -1 } } },
+
+  // 4. Sort by lowest stock
+  { $sort: { totalStock: 1 } },
+
+  // 5. Facet: alerts (top 4) + total count
+  {
+    $facet: {
+      alerts: [
+        { $limit: 4 },
         {
-          $lookup: {
-            from: 'variants',
-            let: { varIds: { $ifNull: ['$variations', []] } },
-            pipeline: [{ $match: { $expr: { $in: ['$_id', '$$varIds'] } } }],
-            as: 'variants'
-          }
-        },
-        // 2. Compute total stock
-        {
-          $addFields: {
-            totalStock: { $sum: '$variants.stockQuantity' }
-          }
-        },
-        // 3. Filter low-stock
-        { $match: { totalStock: { $lt: 10, $gt: -1 } } },
-        // 4. Sort & limit for the UI card
-        { $sort: { totalStock: 1 } },
-        // 5. Parallel count (we need the total count separately)
-        { $facet: {
-            alerts: [
-              { $limit: 4 },
-              {
-                $project: {
-                  name: 1,
-                  sku: { $ifNull: ['$sku', { $concat: ['SKU-', { $substr: ['$_id', -4, -1] }] }] },
-                  unitsLeft: '$totalStock',
-                  thumbnail: { $arrayElemAt: ['$images', 0] }   // first image as thumbnail
+          $project: {
+            name: 1,
+            sku: {
+              $ifNull: [
+                '$sku',
+                {
+                  $concat: [
+                    'SKU-',
+                    { $substrCP: [{ $toString: '$_id' }, -4, -1] }
+                  ]
                 }
-              }
-            ],
-            count: [{ $count: 'total' }]
+              ]
+            },
+            unitsLeft: '$totalStock',
+            thumbnail: { $arrayElemAt: ['$images', 0] }
           }
         }
-      ]),
+      ],
+      count: [{ $count: 'total' }]
+    }
+  }
+])
 
       Order.find()
         .populate('user', 'name')
@@ -179,6 +196,7 @@ exports.getDashboard = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
 
 
 
