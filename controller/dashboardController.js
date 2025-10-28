@@ -1,7 +1,8 @@
-const Product = require('../model/Product');
+const Variant = require('../model/VariantProduct');
 const Order = require('../model/Order');
 const User = require('../model/User');
 const moment = require('moment');
+const Product = require('../model/Product');
 
 exports.getDashboard = async (req, res) => {
   try {
@@ -63,11 +64,11 @@ exports.getDashboard = async (req, res) => {
       }),
 
       // Low Stock Alerts (stockQuantity < 10)
-      Product.find({ stockQuantity: { $lt: 10, $gt: -1 } })
-        .select('name sku stockQuantity')
-        .sort({ stockQuantity: 1 })
-        .limit(4),
-
+    Variant.find({ stockQuantity: { $lt: 10, $gt: -1 } })
+  .populate('product', 'name sku')          // get product name & sku
+  .select('sku stockQuantity image product attribute value')
+  .sort({ stockQuantity: 1 })
+  .limit(4),
       // Recent Orders (last N)
       Order.find()
         .populate('user', 'name') // Use 'user' ref to 'User'
@@ -112,10 +113,11 @@ exports.getDashboard = async (req, res) => {
     }));
 
     // Low Stock mapping (assume sku exists; fallback if not)
-    const formattedLowStock = lowStockAlerts.map(p => ({
-      name: p.name,
-      sku: p.sku || `SKU-${String(p._id).slice(-4)}`,
-      unitsLeft: p.stockQuantity
+   const formattedLowStock = lowStockAlerts.map(v => ({
+      name: `${v.product?.name || 'N/A'} (${v.attribute || ''}: ${v.value || ''})`,
+      sku: v.sku || `SKU-${String(v._id).slice(-4)}`,
+      unitsLeft: v.stockQuantity,
+      image: v.image || null
     }));
 
     // Growth Calculations (match UI: +8%, +15%, +12%, +12.5%; use dynamic but fallback to UI values if no prev data)
