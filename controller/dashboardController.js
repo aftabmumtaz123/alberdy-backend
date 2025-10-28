@@ -1,4 +1,4 @@
-const Variant = require('../model/VariantProduct');
+const Variant = require('../model/variantProduct');
 const Order = require('../model/Order');
 const User = require('../model/User');
 const moment = require('moment');
@@ -150,3 +150,4 @@ exports.getDashboard = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
