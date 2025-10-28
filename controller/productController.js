@@ -223,7 +223,15 @@ exports.createProduct = async (req, res) => {
         createdAt: new Date(),
         updatedAt: new Date()
       };
-      if (varObj.expiryDate) variantData.expiryDate = new Date(varObj.expiryDate);
+
+
+      if (new Date(varObj.expiryDate) <= Date.now()) {
+        return res.status(400).json({"Please expiry date should be in future" });
+      }
+      else{
+        variantData.expiryDate = new Date(varObj.expiryDate);
+      }
+      
       const imagePath = variationImages[i];
       if (imagePath) variantData.image = imagePath;
 
@@ -939,4 +947,5 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
