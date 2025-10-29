@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 // Updated Product Schema - Base entity for product details, variations hold pricing/stock
 const productSchema = new mongoose.Schema({
-  name: { type: String, required: true },
+  name: { type: String, required: true, unique: true },
   category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
   subcategory: { type: mongoose.Schema.Types.ObjectId, ref: 'Subcategory', required: true },
   brand: { type: mongoose.Schema.Types.ObjectId, ref: 'Brand', required: true },
@@ -23,4 +23,5 @@ productSchema.index({ brand: 1 });
 productSchema.index({ name: 1, brand: 1 }, { unique: true });
 
 module.exports = mongoose.model('Product', productSchema);
+
 
