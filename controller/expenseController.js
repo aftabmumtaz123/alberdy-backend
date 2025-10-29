@@ -81,19 +81,34 @@ if (!moment(parsedDate).isValid()) {
 
 
 
-
 exports.updateExpense = async (req, res) => {
   try {
-    const { id } = req.params;
+    const { id } = req.params; // this will be expenseId (custom ID)
 
-    const expense = await Expense.findById(id);
+    // Find expense using expenseId, not _id
+    const expense = await Expense.findOne({ expenseId: id });
     if (!expense) {
       return res.status(404).json({ success: false, msg: "Expense not found" });
     }
 
-    const parsedDate = req.body.expenseDate ? new Date(req.body.expenseDate) : expense.expenseDate;
-    const parsedAmount = req.body.amount ? parseFloat(req.body.amount) : expense.amount;
+    // Parse values safely
+    const parsedDate = req.body.expenseDate
+      ? new Date(req.body.expenseDate)
+      : expense.expenseDate;
 
+    if (isNaN(parsedDate.getTime())) {
+      return res.status(400).json({ success: false, msg: "Invalid expense date" });
+    }
+
+    const parsedAmount = req.body.amount
+      ? parseFloat(req.body.amount)
+      : expense.amount;
+
+    if (parsedAmount <= 0) {
+      return res.status(400).json({ success: false, msg: "Amount must be greater than 0" });
+    }
+
+    // Update fields
     expense.expenseDate = parsedDate;
     expense.category = req.body.category || expense.category;
     expense.branch = req.body.branch || expense.branch;
@@ -101,9 +116,13 @@ exports.updateExpense = async (req, res) => {
     expense.note = req.body.note || expense.note;
 
     await expense.save();
-    await expense.populate('category', 'name status branch');
+    await expense.populate("category", "name status branch");
 
-    res.json({ success: true, msg: "Expense updated successfully", data: expense });
+    res.json({
+      success: true,
+      msg: "Expense updated successfully",
+      data: expense,
+    });
   } catch (error) {
     res.status(400).json({ success: false, msg: error.message });
   }
@@ -187,5 +206,6 @@ exports.deleteExpense = async (req, res) => {
   }
 
 };
+
 
 
