@@ -1,16 +1,24 @@
 const mongoose = require('mongoose');
 const { Schema } = mongoose;
+const moment = require('moment');
 
-// Helper for sequential expense ID
+// ✅ Helper to generate a unique Expense ID
 const generateExpenseId = async () => {
+  // Get total count
   const count = await mongoose.connection.db.collection('expenses').countDocuments();
-  return `E${String(count + 1).padStart(6, '0')}`;
+  
+  // Add timestamp for uniqueness
+  const datePart = moment().format('YYYYMMDD-HHmmss');
+  
+  // Combine into unique readable ID
+  return `E${String(count + 1).padStart(6, '0')}-${datePart}`;
 };
 
 const expenseSchema = new Schema({
   expenseId: {
     type: String,
     unique: true,
+    index: true,
   },
   expenseDate: {
     type: Date,
@@ -27,7 +35,7 @@ const expenseSchema = new Schema({
   amount: {
     type: Number,
     required: true,
-    min: 0.01 // > 0
+    min: 0.01
   },
   note: {
     type: String,
@@ -35,10 +43,10 @@ const expenseSchema = new Schema({
     maxlength: 500
   }
 }, {
-  timestamps: true // createdAt and updatedAt as Date (UTC)
+  timestamps: true
 });
 
-// Pre-save for expenseId
+// ✅ Generate a unique expenseId before saving
 expenseSchema.pre('save', async function(next) {
   if (!this.expenseId) {
     this.expenseId = await generateExpenseId();
@@ -46,15 +54,12 @@ expenseSchema.pre('save', async function(next) {
   next();
 });
 
-// Optional: Pre-save for local timestamps (uncomment if needed)
-const moment = require('moment');
-expenseSchema.pre('save', function(next) {
-  if (this.isNew || this.isModified()) {
-    this.createdAt = moment().local().toISOString();
-    this.updatedAt = moment().local().toISOString();
-  }
-  next();
-});
-
+// ✅ Optional local timestamp format (readable when viewed)
+expenseSchema.methods.toJSON = function() {
+  const obj = this.toObject();
+  obj.createdAt = moment(obj.createdAt).local().format('YYYY-MM-DD HH:mm:ss');
+  obj.updatedAt = moment(obj.updatedAt).local().format('YYYY-MM-DD HH:mm:ss');
+  return obj;
+};
 
 module.exports = mongoose.model('Expense', expenseSchema);
