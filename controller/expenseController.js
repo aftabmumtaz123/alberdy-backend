@@ -78,58 +78,37 @@ if (!moment(parsedDate).isValid()) {
   }
 };
 
-// PUT /api/expenses/:id - Update Expense (preserve expenseId)
+
+
+
+
 exports.updateExpense = async (req, res) => {
   try {
     const { id } = req.params;
-    const { expenseDate, category, branch, amount, note } = req.body;
 
-    // Fetch existing to preserve expenseId
-    const existingExpense = await Expense.findById(id);
-    if (!existingExpense) return res.status(404).json({ error: 'Expense not found' });
-
-    // // Validate category if provided
-    // if (category) {
-    //   const categoryDoc = await ExpenseCategory.findById(category);
-    //   if (!categoryDoc) {
-    //     return res.status(400).json({ error: 'Category does not exist' });
-    //   }
-    // }
-
-    // Validate expenseDate if provided
-    let updateData = { note };
-    if (expenseDate !== undefined) {
-      const parsedDate = moment(expenseDate).toDate();
-      if (!moment(parsedDate).isValid()) {
-        return res.status(400).json({ error: 'Invalid expense date format' });
-      }
-      const today = moment().startOf('day').toDate();
-      if (parsedDate > today) {
-        return res.status(400).json({ error: 'Expense date cannot be in the future' });
-      }
-      updateData.expenseDate = parsedDate;
+    const expense = await Expense.findById(id);
+    if (!expense) {
+      return res.status(404).json({ success: false, msg: "Expense not found" });
     }
-    if (amount !== undefined) {
-      const parsedAmount = parseFloat(amount);
-      if (parsedAmount <= 0) {
-        return res.status(400).json({ error: 'Amount must be greater than 0' });
-      }
-      updateData.amount = parsedAmount;
-    }
-    // if (category !== undefined) updateData.category = category;
 
-    const expense = await Expense.findByIdAndUpdate(id, { $set: updateData }, { new: true, runValidators: true })
-      .populate('category', 'name status branch');
+    const parsedDate = req.body.expenseDate ? new Date(req.body.expenseDate) : expense.expenseDate;
+    const parsedAmount = req.body.amount ? parseFloat(req.body.amount) : expense.amount;
 
-    res.json({
-      success: true,
-      data: expense // expenseId preserved
-    });
+    expense.expenseDate = parsedDate;
+    expense.category = req.body.category || expense.category;
+    expense.branch = req.body.branch || expense.branch;
+    expense.amount = parsedAmount;
+    expense.note = req.body.note || expense.note;
+
+    await expense.save();
+    await expense.populate('category', 'name status branch');
+
+    res.json({ success: true, msg: "Expense updated successfully", data: expense });
   } catch (error) {
-    console.error('Update expense error:', error);
-    res.status(400).json({ error: error.message });
+    res.status(400).json({ success: false, msg: error.message });
   }
 };
+
 
 
 
@@ -208,4 +187,5 @@ exports.deleteExpense = async (req, res) => {
   }
 
 };
+
 
