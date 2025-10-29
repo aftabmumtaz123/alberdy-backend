@@ -13,14 +13,15 @@ subCategorySchema.index({ status: 1 });
 
 // Optional: Auto-add to parent's subcategories array on save
 subCategorySchema.post('save', async function(doc) {
-  const Category = require('./category'); // Import here to avoid circular
-  await Category.findByIdAndUpdate(doc.category, { $addToSet: { subcategories: doc._id } });
+  const Category = require('./Category'); // Import here to avoid circular
+  await Category.findByIdAndUpdate(doc.Category, { $addToSet: { subcategories: doc._id } });
 });
 
 // Optional: Remove from parent on delete
 subCategorySchema.post('remove', async function(doc) {
-  const Category = require('./category');
-  await Category.findByIdAndUpdate(doc.category, { $pull: { subcategories: doc._id } });
+  const Category = require('./Category');
+  await Category.findByIdAndUpdate(doc.Category, { $pull: { subcategories: doc._id } });
 });
+
 
 module.exports = mongoose.model('Subcategory', subCategorySchema);
