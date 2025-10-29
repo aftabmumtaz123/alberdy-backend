@@ -227,14 +227,11 @@ exports.createProduct = async (req, res) => {
 if (varObj.expiryDate) {
   const expiry = new Date(varObj.expiryDate);
 
-  // Check if it's a valid date
-  if (isNaN(expiry.getTime())) {
-    return res.status(400).json({ success: false, msg: `Variation ${i}: Invalid expiry date format` });
-  }
+ 
 
   // Check if it's in the past
   if (expiry.getTime() <= Date.now()) {
-    return res.status(400).json({ success: false, msg: `Variation ${i}: Expiry date must be in the future` });
+    return res.status(400).json({ success: false, msg: `Variation ${i+1}: Expiry date must be in the future` });
   }
 
   variantData.expiryDate = expiry;
@@ -827,7 +824,13 @@ exports.updateProduct = async (req, res) => {
           variant.weightQuantity = varWeightQuantity;
           variant.status = variantData.status || 'Active';
           variant.updatedAt = new Date();
-          if (variantData.expiryDate) variant.expiryDate = new Date(variantData.expiryDate);
+          if (variantData.expiryDate) {
+            const expiry = new Date(variantData.expiryDate)
+            if (expiry.getTime() <= Date.now()) {
+              return res.status(400).json({ success: false, msg: `Variation ${i+1}: Expiry date must be in the future` });
+            }
+            variant.expiryDate = expiry
+          }; 
           if (variationImages[i]) variant.image = variationImages[i];
         } else {
           // Create new variant
@@ -957,6 +960,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
