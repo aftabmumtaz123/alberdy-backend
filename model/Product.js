@@ -11,7 +11,7 @@ const productSchema = new mongoose.Schema({
   images: [{ type: String }],
   thumbnail: { type: String },
   description: { type: String },
-  status: { type: String, enum: ['Active', 'Inactive', 'Expired'], default: 'Active' },
+  status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
   variations: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Variant' }], // Array of Variant refs (each "product instance")
   createdAt: { type: String },
   updatedAt: { type: String }
@@ -23,5 +23,6 @@ productSchema.index({ brand: 1 });
 productSchema.index({ name: 1, brand: 1 }, { unique: true });
 
 module.exports = mongoose.model('Product', productSchema);
+
 
 
