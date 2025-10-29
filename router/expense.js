@@ -12,7 +12,8 @@ const requireRole = (roles) => (req, res, next) => {
 router.post('/',  auth,  requireRole(['Super Admin', 'Manager']), expenseController.createExpense);
 router.get('/',  auth,  requireRole(['Super Admin', 'Manager']), expenseController.getExpenses);
 router.get('/:id',  auth,  requireRole(['Super Admin', 'Manager']), expenseController.getExpenseById);
-router.put('/:id',  auth,  requireRole(['Super Admin', 'Manager']), expenseController.updateExpense);
+router.put('/:id',  auth,  requireRole(['Super Admin', 'Manager']), expenseController.updateExpense );
 router.delete('/:id',  auth,  requireRole(['Super Admin', 'Manager']), expenseController.deleteExpense);
+
 
 module.exports = router;
