@@ -19,7 +19,7 @@ const generateExpenseId = async () => {
 // POST /api/expenses - Add Expense
 exports.createExpense = async (req, res) => {
   try {
-    const { expenseDate, category, amount, note } = req.body;
+    const { expenseDate, category, amount, branch, note } = req.body;
 
     // Validate category exists
     // const categoryDoc = await ExpenseCategory.findById(category);
@@ -49,6 +49,7 @@ if (!moment(parsedDate).isValid()) {
       expenseId, // Set here
       expenseDate: parsedDate,
       category,
+      branch,
       amount: parsedAmount,
       note
     });
@@ -70,7 +71,7 @@ if (!moment(parsedDate).isValid()) {
 exports.updateExpense = async (req, res) => {
   try {
     const { id } = req.params;
-    const { expenseDate, category, amount, note } = req.body;
+    const { expenseDate, category, branch, amount, note } = req.body;
 
     // Fetch existing to preserve expenseId
     const existingExpense = await Expense.findById(id);
@@ -107,7 +108,7 @@ exports.updateExpense = async (req, res) => {
     // if (category !== undefined) updateData.category = category;
 
     const expense = await Expense.findByIdAndUpdate(id, { $set: updateData }, { new: true, runValidators: true })
-      .populate('category', 'name status');
+      .populate('category', 'name status branch');
 
     res.json({
       success: true,
@@ -194,4 +195,5 @@ exports.deleteExpense = async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+
 };
