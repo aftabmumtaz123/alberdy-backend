@@ -6,12 +6,23 @@ const moment = require('moment-timezone'); // For date handling
 
 
 // Helper for sequential expense ID (moved here for reliability)
+
 const generateExpenseId = async () => {
   try {
-    const count = await Expense.countDocuments(); // Simpler than db.collection
-    return `E${String(count + 1).padStart(6, '0')}`;
+    // Count all documents (for incremental part)
+    const count = await Expense.countDocuments();
+
+    // Format date as YYYYMMDD (for uniqueness per day)
+    const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+
+    // Add a random 3-digit number for extra uniqueness
+    const randomPart = Math.floor(100 + Math.random() * 900);
+
+    // Example: E000123-20251023-482
+    const expenseId = `E${String(count + 1).padStart(6, '0')}-${datePart}-${randomPart}`;
+
+    return expenseId;
   } catch (error) {
-    console.error('ID generation error:', error);
     throw new Error('Failed to generate expense ID');
   }
 };
@@ -197,3 +208,4 @@ exports.deleteExpense = async (req, res) => {
   }
 
 };
+
