@@ -9,17 +9,14 @@ const variantSchema = new mongoose.Schema({
   },
   attribute: {
     type: String,
-    required: true,
     trim: true
   },
   value: {
     type: String,
-    required: true,
     trim: true
   },
   sku: {
     type: String,
-    required: true,
     unique: true,
     trim: true
   },
@@ -151,3 +148,4 @@ variantSchema.pre('updateMany', function (next) {
 
 // Export Model
 module.exports = mongoose.model('Variant', variantSchema);
+
