@@ -16,6 +16,10 @@ const expenseSchema = new Schema({
     type: Date,
     required: true
   },
+  branch: {
+    type: String,
+    required: true
+  },
   category: {
     type: String,
     required: true
@@ -51,5 +55,6 @@ expenseSchema.pre('save', function(next) {
   }
   next();
 });
+
 
 module.exports = mongoose.model('Expense', expenseSchema);
