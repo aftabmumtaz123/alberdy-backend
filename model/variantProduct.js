@@ -72,7 +72,7 @@ const variantSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['Active', 'Inactive', 'Expired'],
+    enum: ['Active', 'Inactive'],
     default: 'Active'
   },
   createdAt: {
@@ -100,10 +100,10 @@ variantSchema.pre('save', function (next) {
 
   // Auto-set status
   if (this.expiryDate && this.expiryDate.getTime() < Date.now()) {
-    this.status = 'Expired';
+    this.status = 'Inactive';
   } else if (!this.expiryDate || this.expiryDate.getTime() >= Date.now()) {
     // Only change to Active if it was Expired (avoid overriding manual 'Inactive')
-    if (this.status === 'Expired') {
+    if (this.status === 'Inactive') {
       this.status = 'Active';
     }
   }
@@ -122,11 +122,11 @@ variantSchema.pre('findOneAndUpdate', async function (next) {
     const newExpiry = new Date(update.expiryDate);
 
     if (newExpiry.getTime() < Date.now()) {
-      this.set({ status: 'Expired' });
+      this.set({ status: 'Inactive' });
     } else {
       // Only revert to Active if currently Expired
       const docToUpdate = await this.model.findOne(this.getQuery());
-      if (docToUpdate && docToUpdate.status === 'Expired') {
+      if (docToUpdate && docToUpdate.status === 'Inactive') {
         this.set({ status: 'Active' });
       }
     }
@@ -148,4 +148,5 @@ variantSchema.pre('updateMany', function (next) {
 
 // Export Model
 module.exports = mongoose.model('Variant', variantSchema);
+
 
