@@ -3,6 +3,7 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const User = require('../model/User');
+const Order = require('../model/Order');
 const JWT_SECRET = process.env.JWT_SECRET; // Fallback for dev; use env in prod
 const REFRESH_SECRET = process.env.REFRESH_SECRET; // Fallback for dev; use env in prod
 const authMiddleware = require('../middleware/auth');
@@ -379,6 +380,7 @@ router.delete('/api/auth/users/:id', authMiddleware, async (req, res) => {
   }
 });
 module.exports = router;
+
 
 
 
