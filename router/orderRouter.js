@@ -197,48 +197,80 @@ router.get('/', authMiddleware, requireRole(['Super Admin','Manager','Customer']
   }
 });
 
+
+        
 /* -------------------------- UPDATE ORDER -------------------------- */
 router.put('/:id', authMiddleware, requireRole(['Super Admin','Manager']), async (req, res) => {
   try {
     const { id } = req.params;
-    const { shippingAddress, notes, paymentStatus, deliveryAssigned, deliveryDate,
-            status, orderTrackingNumber } = req.body;
+    const { shippingAddress, notes, paymentStatus, status, orderTrackingNumber } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ success: false, msg: 'Invalid order ID' });
 
+    const order = await Order.findById(id);
+    if (!order)
+      return res.status(404).json({ success: false, msg: 'Order not found' });
+
     const update = {};
+
+    // 1️⃣ Update allowed fields
     if (shippingAddress) update.shippingAddress = shippingAddress;
     if (notes) update.notes = notes;
-    if (paymentStatus) update.paymentStatus = paymentStatus;
-    if (deliveryAssigned) update.deliveryAssigned = deliveryAssigned;
-    if (deliveryDate) update.deliveryDate = new Date(deliveryDate);
-    if (status) update.status = status;
     if (orderTrackingNumber) update.orderTrackingNumber = orderTrackingNumber;
 
-    if (!Object.keys(update).length)
-      return res.status(400).json({ success: false, msg: 'No fields to update' });
+    // 2️⃣ Handle Order Status Logic
+    if (status) {
+      const validStatuses = ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', 'returned'];
+      if (!validStatuses.includes(status))
+        return res.status(400).json({ success: false, msg: `Invalid status: ${status}` });
 
-    if (update.status && !['pending','confirmed','shipped','delivered','cancelled'].includes(update.status))
-      return res.status(400).json({ success: false, msg: 'Invalid status' });
+      update.status = status;
 
-    if (update.orderTrackingNumber) {
-      const exists = await Order.findOne({ orderTrackingNumber: update.orderTrackingNumber, _id: { $ne: id } });
-      if (exists) return res.status(400).json({ success: false, msg: 'Tracking number already used' });
+      // Business Logic:
+      if (status === 'confirmed' && order.paymentMethod === 'COD') {
+        update.paymentStatus = 'unpaid'; // COD confirmation allowed without payment
+      } else if (status === 'delivered') {
+        update.paymentStatus = 'paid'; // Payment considered received after delivery
+      } else if (status === 'cancelled') {
+        update.paymentStatus = 'unpaid'; // Cancelled orders always unpaid
+      }
     }
 
-    const order = await Order.findByIdAndUpdate(id, { $set: update }, { new: true, runValidators: true })
+    // 3️⃣ Restrict manual paymentStatus override unless valid
+    if (paymentStatus) {
+      if (paymentStatus === 'paid' && order.status !== 'delivered') {
+        return res.status(400).json({
+          success: false,
+          msg: 'Payment can only be marked as paid after delivery'
+        });
+      }
+      if (order.status === 'cancelled' && paymentStatus === 'paid') {
+        return res.status(400).json({
+          success: false,
+          msg: 'Cancelled orders cannot have payment marked as paid'
+        });
+      }
+      update.paymentStatus = paymentStatus;
+    }
+
+    // 4️⃣ Save update
+    const updatedOrder = await Order.findByIdAndUpdate(id, { $set: update }, { new: true, runValidators: true })
       .populate('items.product', 'name thumbnail images')
       .populate('items.variant', 'attribute value sku price discountPrice stockQuantity image')
       .populate('user', 'name email phone');
 
-    if (!order) return res.status(404).json({ success: false, msg: 'Order not found' });
-
-    res.json({ success: true, data: order, msg: `Order ${order.orderNumber} updated` });
+    res.json({
+      success: true,
+      data: updatedOrder,
+      msg: `Order ${updatedOrder.orderNumber} updated successfully`
+    });
   } catch (err) {
+    console.error('Order update error:', err);
     res.status(500).json({ success: false, msg: 'Server error', details: err.message });
   }
 });
+
 
 /* -------------------------- DELETE ORDER (restore stock) -------------------------- */
 router.delete('/:id', authMiddleware, requireRole(['Super Admin','Manager']), async (req, res) => {
@@ -346,6 +378,7 @@ router.get('/track/:identifier', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
