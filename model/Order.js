@@ -31,7 +31,7 @@ const orderSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ['pending','confirmed','shipped','delivered','cancelled'],
+      enum: ['pending','confirmed', 'processing' ,'shipped','delivered','cancelled', 'returned'],
       default: 'pending'
     },
 
@@ -46,7 +46,7 @@ const orderSchema = new mongoose.Schema(
     },
 
     paymentMethod: { type: String, enum: ['COD','online'], required: true },
-    paymentStatus: { type: String, enum: ['pending','paid','failed'], default: 'pending' },
+    paymentStatus: { type: String, enum: ['pending','paid', 'unpaid','refunded'], default: 'unpaid' },
 
     notes: { type: String }
   },
@@ -58,4 +58,5 @@ orderSchema.index({ status: 1 });
 orderSchema.index({ 'items.product': 1 });
 
 module.exports = mongoose.model('Order', orderSchema);
+
 
