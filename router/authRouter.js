@@ -68,6 +68,7 @@ router.post('/api/auth/login', async (req, res) => {
         id: updatedUser._id,
         name: updatedUser.name,
         role: updatedUser.role,
+        role: updatedUser.phone,
         address: updatedUser.address,
         email: updatedUser.email
       }
@@ -315,5 +316,6 @@ router.delete('/api/auth/users/:id', authMiddleware, async (req, res) => {
   }
 });
 module.exports = router;
+
 
 
