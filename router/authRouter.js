@@ -64,14 +64,7 @@ router.post('/api/auth/login', async (req, res) => {
     res.json({
       success: true,
       accessToken, // For immediate use
-      user: {
-        id: updatedUser._id,
-        name: updatedUser.name,
-        role: updatedUser.role,
-        role: updatedUser.phone,
-        address: updatedUser.address,
-        email: updatedUser.email
-      }
+      user:  updatedUser
     });
   } catch (err) {
     console.error('Login error:', err);
@@ -316,6 +309,7 @@ router.delete('/api/auth/users/:id', authMiddleware, async (req, res) => {
   }
 });
 module.exports = router;
+
 
 
 
