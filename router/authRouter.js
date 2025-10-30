@@ -224,9 +224,11 @@ router.get('/api/auth/users/:id', authMiddleware, async (req, res) => {
     console.error('Get user error:', err);
     res.status(500).json({ success: false, msg: 'Server error fetching user' });
   }
-});router.put('/api/auth/users/:id', authMiddleware, async (req, res) => {
+});
+
+router.put('/api/auth/users/:id', authMiddleware, async (req, res) => {
   try {
-    const { name, email, role, phone, status } = req.body;
+    const { name, email, role, phone, status, petType } = req.body;
 
     // --- Address Handling ---
     let validAddress;
@@ -272,6 +274,7 @@ router.get('/api/auth/users/:id', authMiddleware, async (req, res) => {
     if (role) updateFields.role = role;
     if (phone) updateFields.phone = phone;
     if (status) updateFields.status = status;
+    if (petType) updateFields.petType = petType;
     if (validAddress) updateFields.address = validAddress;
     updateFields.updatedAt = new Date();
 
@@ -312,4 +315,5 @@ router.delete('/api/auth/users/:id', authMiddleware, async (req, res) => {
   }
 });
 module.exports = router;
+
 
