@@ -199,7 +199,7 @@ router.get('/api/auth/users', authMiddleware, async (req, res) => {
         $lookup: {
           from: 'orders', // Ensure this matches your Order collection name in DB
           localField: '_id',
-          foreignField: 'customer', // Field in Order that references User._id
+          foreignField: 'user', // Field in Order that references User._id
           as: 'orders'
         }
       },
@@ -274,7 +274,7 @@ router.get('/api/auth/users/:id', authMiddleware, async (req, res) => {
     }
 
     // Count orders for this customer
-    const ordersCount = await Order.countDocuments({ customer: user._id });
+    const ordersCount = await Order.countDocuments({ user: user._id });
 
     // Build response with ordersCount
     const response = {
@@ -380,6 +380,7 @@ router.delete('/api/auth/users/:id', authMiddleware, async (req, res) => {
   }
 });
 module.exports = router;
+
 
 
 
