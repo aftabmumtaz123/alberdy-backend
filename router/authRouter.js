@@ -174,21 +174,70 @@ router.post('/api/auth/logout', authMiddleware, async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error during logout' });
   }
 });
+
+
+
 router.get('/api/auth/users', authMiddleware, async (req, res) => {
   try {
     const { page = 1, limit = 10, status, name } = req.query;
-    const query = {
-      role: 'Customer'
-    };
-    if (status) query.status = status;
-    if (name) query.name = { $regex: name, $options: 'i' };
+
     const pageNum = Math.max(parseInt(page), 1);
     const limitNum = Math.max(parseInt(limit), 1);
-    const total = await User.countDocuments(query);
-    const users = await User.find(query)
-      .sort({ createdAt: -1 })
-      .skip((pageNum - 1) * limitNum)
-      .limit(limitNum);
+
+    // Base match for role and filters
+    const matchStage = { role: 'Customer' };
+    if (status) matchStage.status = status;
+    if (name) matchStage.name = { $regex: name, $options: 'i' };
+
+    // Aggregation pipeline
+    const usersAggregation = await User.aggregate([
+      { $match: matchStage },
+
+      // Lookup orders
+      {
+        $lookup: {
+          from: 'orders', // Ensure this matches your Order collection name in DB
+          localField: '_id',
+          foreignField: 'customer', // Field in Order that references User._id
+          as: 'orders'
+        }
+      },
+
+      // Add orders count
+      {
+        $addFields: {
+          ordersCount: { $size: '$orders' }
+        }
+      },
+
+      // Project: exclude full orders array, keep only needed fields
+      {
+        $project: {
+          orders: 0,
+          password: 0, // Always exclude password
+          __v: 0
+        }
+      },
+
+      // Sort by latest
+      { $sort: { createdAt: -1 } },
+
+      // Facet for pagination and total count
+      {
+        $facet: {
+          data: [
+            { $skip: (pageNum - 1) * limitNum },
+            { $limit: limitNum }
+          ],
+          total: [{ $count: 'count' }]
+        }
+      }
+    ]);
+
+    // Extract results
+    const total = usersAggregation[0]?.total[0]?.count || 0;
+    const users = usersAggregation[0]?.data || [];
+
     res.json({
       success: true,
       data: users,
@@ -206,19 +255,40 @@ router.get('/api/auth/users', authMiddleware, async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error fetching users' });
   }
 });
-// 👤 Get single user by ID
+
+
+
+
+
 router.get('/api/auth/users/:id', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select('-password -__v');
     if (!user) {
       return res.status(404).json({ success: false, msg: 'User not found' });
     }
-    res.json({ success: true, data: user });
+
+    // Optional: Restrict to only 'Customer' role
+    if (user.role !== 'Customer') {
+      return res.status(403).json({ success: false, msg: 'Access denied. Only customers can be viewed with order details.' });
+    }
+
+    // Count orders for this customer
+    const ordersCount = await Order.countDocuments({ customer: user._id });
+
+    // Build response with ordersCount
+    const response = {
+      ...user.toObject(),
+      ordersCount
+    };
+
+    res.json({ success: true, data: response });
   } catch (err) {
     console.error('Get user error:', err);
     res.status(500).json({ success: false, msg: 'Server error fetching user' });
   }
 });
+
+
 
 router.put('/api/auth/users/:id', authMiddleware, async (req, res) => {
   try {
@@ -309,6 +379,7 @@ router.delete('/api/auth/users/:id', authMiddleware, async (req, res) => {
   }
 });
 module.exports = router;
+
 
 
 
