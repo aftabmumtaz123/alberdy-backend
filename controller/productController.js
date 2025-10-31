@@ -127,11 +127,11 @@ exports.createProduct = async (req, res) => {
     const varWeightQuantity = parseFloat(varObj.weightQuantity);
     if (isNaN(varPrice) || varPrice <= 0 || isNaN(varStock) || varStock < 0 || isNaN(varWeightQuantity) || varWeightQuantity <= 0) {
       await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Variation ${i} invalid price, stock, or weightQuantity` });
+      return res.status(400).json({ success: false, msg: `Variation for ${i+1} invalid price, stock, or weightQuantity` });
     }
     if (varObj.discountPrice !== undefined && (isNaN(varDiscount) || varDiscount > varPrice)) {
       await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Variation ${i} invalid discountPrice` });
+      return res.status(400).json({ success: false, msg: `Variation for ${i+1} invalid discountPrice` });
     }
 
     if (!varObj.sku || varObj.sku.trim() === '') {
@@ -157,25 +157,25 @@ exports.createProduct = async (req, res) => {
     const category = await findCategoryByIdOrName(categoryValue);
     if (!category) {
       await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Category not found for value: ${categoryValue}` });
+      return res.status(400).json({ success: false, msg: `Category not found` });
     }
 
     const subcategory = await findSubcategoryByIdOrName(subcategoryValue);
     if (!subcategory) {
       await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Subcategory not found for value: ${subcategoryValue}` });
+      return res.status(400).json({ success: false, msg: `Subcategory not found` });
     }
 
     const brand = await findBrandByIdOrName(brandValue);
     if (!brand) {
       await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Brand not found for value: ${brandValue}` });
+      return res.status(400).json({ success: false, msg: `Brand not found` });
     }
 
     const unit = await findUnitByIdOrName(parsedVariations[0].unit);
     if (!unit) {
       await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Unit not found for value: ${parsedVariations[0].unit}` });
+      return res.status(400).json({ success: false, msg: `Unit not found` });
     }
 
     const existingProduct = await Product.findOne({ name: name.trim(), brand: brand._id });
@@ -796,11 +796,11 @@ exports.updateProduct = async (req, res) => {
         const varWeightQuantity = parseFloat(variantData.weightQuantity);
         if (isNaN(varPrice) || varPrice <= 0 || isNaN(varStock) || varStock < 0 || isNaN(varWeightQuantity) || varWeightQuantity <= 0) {
           await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
-          return res.status(400).json({ success: false, msg: `Variation ${i} invalid price, stock, or weightQuantity` });
+          return res.status(400).json({ success: false, msg: `Variation ${i+1} invalid price, stock, or weightQuantity` });
         }
         if (variantData.discountPrice !== undefined && (isNaN(varDiscount) || varDiscount > varPrice)) {
           await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
-          return res.status(400).json({ success: false, msg: `Variation ${i} invalid discountPrice` });
+          return res.status(400).json({ success: false, msg: `Variation ${i+1} invalid discountPrice` });
         }
 
         const unit = await findUnitByIdOrName(variantData.unit);
@@ -960,6 +960,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
