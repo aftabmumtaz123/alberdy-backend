@@ -87,10 +87,7 @@ exports.createAppConfiguration = async (req, res) => {
     if (existingConfig) {
       return res.status(400).json({
         success: false,
-        msg: 'Configuration with this App Name
-          
-        
-        already exists',
+        msg: 'Configuration with this App Name already exists',
       });
     }
 
@@ -313,4 +310,5 @@ exports.updateAppConfiguration = async (req, res) => {
     });
   }
 };
+
 
