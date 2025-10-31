@@ -13,7 +13,7 @@ exports.createBrand = async (req, res) => {
     return res.status(400).json({ success: false, msg: 'Brand code is required' });
   }
   if (!brandName) {
-    return res.status(400).json({ success: false, msg: 'Brand brandName is required' });
+    return res.status(400).json({ success: false, msg: 'Brand Brand Name is required' });
   }
   if (!image) {
     return res.status(400).json({ success: false, msg: 'Please select a brand logo/image' });
@@ -30,7 +30,7 @@ exports.createBrand = async (req, res) => {
     }
     const existingBybrandName = await Brand.findOne({ brandName });
     if (existingBybrandName) {
-      return res.status(400).json({ success: false, msg: 'Brand with this brandName already exists' });
+      return res.status(400).json({ success: false, msg: 'Brand with this Brand Name already exists' });
     }
 
     const brandData = {
@@ -143,7 +143,7 @@ exports.updateBrand = async (req, res) => {
       } else {
         const existingBybrandName = await Brand.findOne({ brandName });
         if (existingBybrandName) {
-          return res.status(400).json({ success: false, msg: 'Brand with this brandName already exists' });
+          return res.status(400).json({ success: false, msg: 'Brand with this Brand Name already exists' });
         }
         updateData.brandName = brandName;
       }
@@ -210,4 +210,5 @@ exports.deleteBrand = async (req, res) => {
     console.error('Brand delete error:', err);
     res.status(500).json({ success: false, msg: 'Server error deleting brand' });
   }
+
 };
