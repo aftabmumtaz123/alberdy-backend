@@ -16,7 +16,7 @@ exports.createAppConfiguration = async (req, res) => {
     if (!req.body) {
       return res.status(400).json({
         success: false,
-        message: 'Request body is missing',
+        msg: 'Request body is missing',
       });
     }
 
@@ -40,7 +40,7 @@ exports.createAppConfiguration = async (req, res) => {
     if (!appName || !primaryColor || !secondaryColor) {
       return res.status(400).json({
         success: false,
-        message: 'appName, primaryColor, and secondaryColor are required',
+        msg: 'App Name, Primary Color, and Secondary Color are required',
       });
     }
 
@@ -49,13 +49,13 @@ exports.createAppConfiguration = async (req, res) => {
     if (!validateColor(primaryColor)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid primaryColor format (e.g., #FF0000 or rgba(43, 32, 32, 1))',
+        msg: 'Invalid Primary Color format (e.g., #FF0000 or rgba(43, 32, 32, 1))',
       });
     }
     if (!validateColor(secondaryColor)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid secondaryColor format (e.g., #123456 or rgba(49, 38, 48, 1))',
+        msg: 'Invalid Secondary Color format (e.g., #123456 or rgba(49, 38, 48, 1))',
       });
     }
 
@@ -64,7 +64,7 @@ exports.createAppConfiguration = async (req, res) => {
     if (!validateUrl(facebook) || !validateUrl(instagram) || !validateUrl(youtube) || !validateUrl(linkedin)) {
       return res.status(400).json({
         success: false,
-        message: 'Social links must be valid URLs if provided',
+        msg: 'Social links must be valid URLs if provided',
       });
     }
 
@@ -72,13 +72,13 @@ exports.createAppConfiguration = async (req, res) => {
     if (contactEmails && !Array.isArray(contactEmails)) {
       return res.status(400).json({
         success: false,
-        message: 'contactEmails must be an array',
+        msg: 'contactEmails must be an array',
       });
     }
     if (supportPhones && !Array.isArray(supportPhones)) {
       return res.status(400).json({
         success: false,
-        message: 'supportPhones must be an array',
+        msg: 'supportPhones must be an array',
       });
     }
 
@@ -87,7 +87,10 @@ exports.createAppConfiguration = async (req, res) => {
     if (existingConfig) {
       return res.status(400).json({
         success: false,
-        message: 'Configuration with this appName already exists',
+        msg: 'Configuration with this App Name
+          
+        
+        already exists',
       });
     }
 
@@ -110,7 +113,7 @@ exports.createAppConfiguration = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Configuration created successfully',
+      msg: 'Configuration created successfully',
       configuration,
     });
   } catch (error) {
@@ -122,18 +125,18 @@ exports.createAppConfiguration = async (req, res) => {
     if (error.name === 'ValidationError') {
       return res.status(400).json({
         success: false,
-        message: error.message,
+        msg: error.msg,
       });
     } else if (error.name === 'MongoError' && error.code === 11000) {
       return res.status(400).json({
         success: false,
-        message: 'Duplicate key error (e.g., appName already exists)',
+        msg: 'Duplicate key error (e.g., appName already exists)',
       });
     } else {
       console.error('Error creating configuration:', error);
       return res.status(500).json({
         success: false,
-        message: 'Internal server error',
+        msg: 'Internal server error',
       });
     }
   }
@@ -150,21 +153,21 @@ exports.getAppConfigurationById = async (req, res) => {
     if (!configuration) {
       return res.status(404).json({
         success: false,
-        message: "Configuration not found",
+        msg: "Configuration not found",
       });
     }
 
     res.status(200).json({
       success: true,
-      message: "Configuration fetched successfully",
+      msg: "Configuration fetched successfully",
       configuration,
     });
   } catch (error) {
     console.error("Error fetching configuration:", error);
     res.status(500).json({
       success: false,
-      message: "Internal server error",
-      error: error.message, // include error for debugging in dev
+      msg: "Internal server error",
+      error: error.msg, // include error for debugging in dev
     });
   }
 };
@@ -178,7 +181,7 @@ exports.updateAppConfiguration = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid configuration ID",
+        msg: "Invalid configuration ID",
       });
     }
 
@@ -205,7 +208,7 @@ exports.updateAppConfiguration = async (req, res) => {
     if (!existingConfig) {
       return res.status(404).json({
         success: false,
-        message: "Configuration not found",
+        msg: "Configuration not found",
       });
     }
 
@@ -217,7 +220,7 @@ exports.updateAppConfiguration = async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message:
+        msg:
           "appName, primaryColor, and secondaryColor cannot be empty",
       });
     }
@@ -228,13 +231,13 @@ exports.updateAppConfiguration = async (req, res) => {
     if (contactEmails && !Array.isArray(contactEmails)) {
       return res.status(400).json({
         success: false,
-        message: "contactEmails must be an array",
+        msg: "contactEmails must be an array",
       });
     }
     if (supportPhones && !Array.isArray(supportPhones)) {
       return res.status(400).json({
         success: false,
-        message: "supportPhones must be an array",
+        msg: "supportPhones must be an array",
       });
     }
 
@@ -244,7 +247,7 @@ exports.updateAppConfiguration = async (req, res) => {
       if (duplicateConfig) {
         return res.status(400).json({
           success: false,
-          message:
+          msg:
             "Configuration with this appName already exists",
         });
       }
@@ -289,7 +292,7 @@ exports.updateAppConfiguration = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Configuration updated successfully",
+      msg: "Configuration updated successfully",
       configuration: updatedConfig,
     });
   } catch (error) {
@@ -305,8 +308,9 @@ exports.updateAppConfiguration = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: "Internal server error",
-      error: error.message,
+      msg: "Internal server error",
+      error: error.msg,
     });
   }
 };
+
