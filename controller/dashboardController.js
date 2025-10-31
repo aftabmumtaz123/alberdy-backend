@@ -10,7 +10,7 @@ exports.getDashboard = async (req, res) => {
 
     // Validate period
     if (!['daily', 'weekly', 'monthly'].includes(period)) {
-      return res.status(400).json({ error: 'Invalid period: daily, weekly, or monthly' });
+      return res.status(400).json({ msg: 'Invalid period: daily, weekly, or monthly' });
     }
 
     // Build date filters
@@ -143,6 +143,7 @@ exports.getDashboard = async (req, res) => {
 
     res.json({
       success: true,
+      msg: "Fetched Successfully",
       data: dashboardData
     });
   } catch (error) {
@@ -150,4 +151,5 @@ exports.getDashboard = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
 
