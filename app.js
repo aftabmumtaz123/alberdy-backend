@@ -53,6 +53,7 @@ const dashboardRoutes = require('./router/dashboard');
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/offer', require('./router/offer'));
 app.use('/api/orders', require('./router/orderRouter')); 
+app.use('/api/contact', require("./router/contactUs")) // Contact Us routes
 app.use('/', require('./router/authRouter')); 
 app.use('/api/variants', require('./router/variant'));
 
@@ -62,3 +63,4 @@ app.get("/",(req,res)=>{
 
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
