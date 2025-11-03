@@ -715,11 +715,6 @@ exports.getProductById = async (req, res) => {
   }
 };
 
-const fs = require('fs').promises;
-const Product = require('../model/Product');
-const Variant = require('../model/Variant');
-const { findCategoryByIdOrName, findSubcategoryByIdOrName, findBrandByIdOrName, findUnitByIdOrName } = require('../utils/helpers'); // Adjust path as needed
-
 exports.updateProduct = async (req, res) => {
   const cleanupAllFiles = async (files = [], varImgs = {}) => {
     const all = [...files, ...Object.values(varImgs).filter(Boolean)].filter(f => f?.path);
