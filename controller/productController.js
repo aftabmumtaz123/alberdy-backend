@@ -923,6 +923,7 @@ exports.updateProduct = async (req, res) => {
           unit: unit._id,
           purchasePrice: parseFloat(v.purchasePrice),
           price,
+          status,
           discountPrice: finalDiscount,
           stockQuantity,
           weightQuantity,
