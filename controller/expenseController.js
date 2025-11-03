@@ -5,17 +5,13 @@ const moment = require('moment-timezone'); // For date handling
 
 
 
-// Helper for sequential expense ID (moved here for reliability)
 
 const generateExpenseId = async () => {
   try {
-    // Count all documents (for incremental part)
     const count = await Expense.countDocuments();
 
-    // Format date as YYYYMMDD (for uniqueness per day)
     const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
-    // Add a random 3-digit number for extra uniqueness
     const randomPart = Math.floor(100 + Math.random() * 900);
 
     // Example: E000123-20251023-482
