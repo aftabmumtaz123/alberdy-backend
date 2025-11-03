@@ -955,32 +955,48 @@ exports.updateProduct = async (req, res) => {
         const oldVariantImg = existingVariant?.image ?? null;
 
         if (existingVariant) {
-          // UPDATE existing
-          try {
-            savedVariant = await Variant.findOneAndUpdate(
-              { _id: existingVariant._id },
-              { $set: variantUpdate },
-              { new: true, runValidators: true }
-            );
+         let savedVariant;
 
-            // delete old image if replaced
-            if (oldVariantImg && variationImages[i] && oldVariantImg !== variationImages[i]) {
-              try { await fs.unlink(oldVariantImg); } catch {}
-            }
-          } catch (ve) {
-            await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
-            return res.status(400).json({ success: false, msg: `Variant validation failed: ${ve.message}` });
-          }
-        } else {
-          // CREATE new
-          const newVar = new Variant({ ...variantUpdate, createdAt: new Date() });
-          try {
-            await newVar.validate();
-            savedVariant = await newVar.save();
-          } catch (ve) {
-            await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
-            return res.status(400).json({ success: false, msg: `Variant validation failed: ${ve.message}` });
-          }
+if (existingVariant) {
+  // --- STEP 1: Load full doc ---
+  const variantDoc = await Variant.findById(existingVariant._id);
+
+  // --- STEP 2: Apply updates ---
+  Object.assign(variantDoc, variantUpdate);
+
+  // --- STEP 3: Validate + Save (this.price is now the NEW price) ---
+  try {
+    await variantDoc.validate(); // This triggers schema validators with NEW values
+    savedVariant = await variantDoc.save();
+  } catch (ve) {
+    await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
+    return res.status(400).json({
+      success: false,
+      msg: `Variant validation failed: ${ve.message}`,
+    });
+  }
+
+  // Delete old image if replaced
+  if (oldVariantImg && variationImages[i] && oldVariantImg !== variationImages[i]) {
+    try { await fs.unlink(oldVariantImg); } catch {}
+  }
+} else {
+  // --- CREATE NEW ---
+  const newVariant = new Variant({
+    ...variantUpdate,
+    createdAt: new Date(),
+  });
+  try {
+    await newVariant.validate();
+    savedVariant = await newVariant.save();
+  } catch (ve) {
+    await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
+    return res.status(400).json({
+      success: false,
+      msg: `Variant validation failed: ${ve.message}`,
+    });
+  }
+}
         }
 
         variantIds.push(savedVariant._id);
