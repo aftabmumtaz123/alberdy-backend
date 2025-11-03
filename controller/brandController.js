@@ -1,4 +1,3 @@
-// Brand Controller CRUD (updated: controllers/brandController.js)
 const Brand = require('../model/Brand'); // Adjust path as needed
 const mongoose = require('mongoose');
 const fs = require('fs'); // For image handling if needed
