@@ -242,7 +242,7 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin','Manager']), async
       if (paymentStatus === 'paid' && order.status !== 'delivered') {
         return res.status(400).json({
           success: false,
-          msg: 'Payment can only be marked as paid after delivery'
+          msg: 'COD payment can only be marked after delivery.'
         });
       }
       if (order.status === 'cancelled' && paymentStatus === 'paid') {
