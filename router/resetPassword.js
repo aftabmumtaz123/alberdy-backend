@@ -67,11 +67,12 @@ router.post('/send-otp', sendOtpLimiter, async (req, res) => {
 
     user.resetPasswordOTP = hashedOTP;
     user.resetPasswordExpire = Date.now() + 5 * 60 * 1000; // 5 minutes expiry
+    user.isOtpVerified = false; // Reset OTP verification status
     await user.save();
 
-    const savedUser = await User.findById(user._id).select('resetPasswordOTP resetPasswordExpire email');
+    const savedUser = await User.findById(user._id).select('resetPasswordOTP resetPasswordExpire email isOtpVerified');
     console.log(
-      `[DEBUG] Send-OTP POST-SAVE: Stored OTP hash="${savedUser.resetPasswordOTP}" | Expiry=${savedUser.resetPasswordExpire} | For email=${savedUser.email} | Generated OTP="${otp}"`
+      `[DEBUG] Send-OTP POST-SAVE: Stored OTP hash="${savedUser.resetPasswordOTP}" | Expiry=${savedUser.resetPasswordExpire} | For email=${savedUser.email} | Generated OTP="${otp}" | isOtpVerified=${savedUser.isOtpVerified}`
     );
 
     const mailOptions = {
@@ -97,7 +98,7 @@ router.post('/send-otp', sendOtpLimiter, async (req, res) => {
   }
 });
 
-// 2. Verify OTP and Email
+// 2. Verify OTP
 router.post('/verify-otp', verifyOtpLimiter, async (req, res) => {
   try {
     let { email, otp } = req.body;
@@ -123,6 +124,9 @@ router.post('/verify-otp', verifyOtpLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid or expired OTP, or email mismatch' });
     }
 
+    user.isOtpVerified = true;
+    await user.save();
+
     res.status(200).json({
       success: true,
       message: 'OTP verified successfully. Proceed to reset password.',
@@ -133,12 +137,11 @@ router.post('/verify-otp', verifyOtpLimiter, async (req, res) => {
   }
 });
 
-
+// 3. Reset Password
 router.put('/reset-password', resetPasswordLimiter, async (req, res) => {
   try {
     const { email, password, cPassword } = req.body;
 
-    // Validate input
     if (!email || !password || !cPassword) {
       return res.status(400).json({
         success: false,
@@ -146,7 +149,6 @@ router.put('/reset-password', resetPasswordLimiter, async (req, res) => {
       });
     }
 
-    // Check if passwords match
     if (password !== cPassword) {
       return res.status(400).json({
         success: false,
@@ -154,7 +156,6 @@ router.put('/reset-password', resetPasswordLimiter, async (req, res) => {
       });
     }
 
-    // Validate password strength
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
     if (!passwordRegex.test(password)) {
       return res.status(400).json({
@@ -164,30 +165,34 @@ router.put('/reset-password', resetPasswordLimiter, async (req, res) => {
       });
     }
 
-    // Find user by email
-    const user = await User.findOne({ email });
+    const user = await User.findOne({
+      email,
+      isOtpVerified: true,
+      resetPasswordExpire: { $gt: Date.now() },
+    });
+
     if (!user) {
       return res.status(400).json({
         success: false,
-        message: 'User with this email does not exist',
+        message: 'OTP not verified, expired, or email mismatch',
       });
     }
 
-    // Hash new password
-    const salt = await bcrypt.genSalt(12);
+    const salt = await bcrypt.genSalt(10); // Match User model salt rounds
     user.password = await bcrypt.hash(password, salt);
+    user.resetPasswordOTP = undefined;
+    user.resetPasswordExpire = undefined;
+    user.isOtpVerified = false;
     await user.save();
 
-    // Generate JWT token
     const payload = { user: { id: user._id } };
     const authToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '5h' });
 
-    // Send response
     res.status(200).json({
       success: true,
       message: 'Password reset successful. You are now logged in.',
       token: authToken,
-      user: { id: user._id, email: user.email },
+      user: { id: user._id, email: user.email, name: user.name, role: user.role },
     });
   } catch (error) {
     console.error('Reset password error:', error);
