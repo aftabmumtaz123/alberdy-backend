@@ -165,6 +165,7 @@ router.put('/reset-password', resetPasswordLimiter, async (req, res) => {
       });
     }
 
+
     const user = await User.findOne({
       email,
       isOtpVerified: true,
@@ -178,8 +179,8 @@ router.put('/reset-password', resetPasswordLimiter, async (req, res) => {
       });
     }
 
-    const salt = await bcrypt.genSalt(10); // Match User model salt rounds
-    user.password = await bcrypt.hash(password, salt);
+    
+    user.password = password;
     user.resetPasswordOTP = undefined;
     user.resetPasswordExpire = undefined;
     user.isOtpVerified = false;
