@@ -142,7 +142,6 @@ exports.getAppConfigurationById = async (req, res) => {
   try {
 
    
-    //
     // Find configuration
     const configuration = await Configuration.find().lean(); 
     // .lean() returns a plain JS object (faster, no mongoose overhead if no methods needed)
