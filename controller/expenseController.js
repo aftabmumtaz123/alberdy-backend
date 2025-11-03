@@ -129,7 +129,6 @@ exports.updateExpense = async (req, res) => {
 
 
 
-// GET /api/expenses - List Expenses (filters: id/expenseId, category, startDate, endDate)
 exports.getExpenses = async (req, res) => {
   try {
     const { id, category, startDate, endDate, page = 1, limit = 10 } = req.query;
@@ -153,7 +152,6 @@ exports.getExpenses = async (req, res) => {
       Expense.countDocuments(filter)
     ]);
 
-    // Add SL for table display
     const slOffset = skip;
     expenses.forEach((exp, index) => {
       exp.sl = slOffset + index + 1;
@@ -169,7 +167,6 @@ exports.getExpenses = async (req, res) => {
   }
 };
 
-// GET /api/expenses/:id - View Expense Details
 exports.getExpenseById = async (req, res) => {
   try {
     const { id } = req.params; // Assumes _id, but can check expenseId if needed
@@ -186,7 +183,6 @@ exports.getExpenseById = async (req, res) => {
 };
 
 
-// DELETE /api/expenses/:id - Delete Expense
 exports.deleteExpense = async (req, res) => {
   try {
     const { id } = req.params;

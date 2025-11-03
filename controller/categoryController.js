@@ -81,7 +81,7 @@ exports.getCategoryById =   async (req, res) => {
     if (!category) {
       return res.status(404).json({ success: false, msg: 'Category not found' });
     }
-    res.json({ success: true, category }); // Now subcategories: [{ _id: "...", name: "Dry Food", status: "Active" }, ...]
+    res.json({ success: true, category });
   } catch (err) {
     console.error('Category get error:', err);
     res.status(500).json({ success: false, msg: 'Server error fetching category' });
@@ -93,16 +93,13 @@ exports.updateCategory = async (req, res) => {
 
 
   try {
-    // Fetch existing category
     const existingCategory = await Category.findById(req.params.id);
     if (!existingCategory) {
       return res.status(404).json({ success: false, msg: 'Category not found' });
     }
 
-    // Use new image if uploaded, otherwise keep old one
     const image = req.file ? req.file.path : existingCategory.image;
 
-    // Update fields
     existingCategory.name = name ?? existingCategory.name;
     existingCategory.description = description ?? existingCategory.description;
     existingCategory.status = status;
@@ -128,7 +125,6 @@ exports.deleteCategory =  async (req, res) => {
     if (!category) {
       return res.status(404).json({ success: false, msg: 'Category not found' });
     }
-    // Cascade delete subcategories
     await Subcategory.deleteMany({ category: req.params.id });
     res.json({ success: true, msg: 'Category deleted successfully' });
   } catch (err) {
