@@ -39,9 +39,9 @@ const offerSchema = new mongoose.Schema({
     required: true,
     enum: {
       values: ['active', 'inactive'],
-      default: 'active',
       message: 'Status must be active or inactive'
-    }
+    },
+    default: 'active'
   }
 }, {
   timestamps: true
@@ -58,5 +58,21 @@ offerSchema.pre('save', function(next) {
   }
   next();
 });
+
+offerSchema.pre('save', function(next) {
+  const currentDate = new Date();
+  if (this.endDate && this.endDate < currentDate) {
+    this.status = 'inactive';
+  }
+  next();
+});
+
+offerSchema.statics.updateExpiredOffers = async function() {
+  const currentDate = new Date();
+  await this.updateMany(
+    { endDate: { $lt: currentDate }, status: 'active' },
+    { $set: { status: 'inactive' } }
+  );
+};
 
 module.exports = mongoose.model('Offer', offerSchema);

@@ -148,7 +148,6 @@ router.put('/reset-password', resetPasswordLimiter, async (req, res) => {
     if (otp.length !== 6 || isNaN(otp)) {
       return res.status(400).json({ success: false, message: 'OTP must be a 6-digit number' });
     }
-==
     if (password !== cPassword) {
       return res.status(400).json({ success: false, message: 'Passwords do not match' });
     }
