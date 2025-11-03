@@ -193,7 +193,7 @@ exports.updateAppConfiguration = async (req, res) => {
       instagram,
       youtube,
       street_address,
-      zip_code
+      zip_code,
       linkedin,
     } = req.body;
 
