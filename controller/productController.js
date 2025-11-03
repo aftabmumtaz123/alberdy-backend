@@ -715,6 +715,7 @@ exports.getProductById = async (req, res) => {
   }
 };
 
+
 exports.updateProduct = async (req, res) => {
   const cleanupAllFiles = async (files = [], varImgs = {}) => {
     const all = [...files, ...Object.values(varImgs).filter(Boolean)].filter(f => f?.path);
@@ -779,6 +780,8 @@ exports.updateProduct = async (req, res) => {
         if (req.files?.[field]) variationImages[i] = req.files[field][0].path;
       }
     }
+
+    // Enum……
 
     // Enum validations
     if (suitableFor && !['Puppy', 'Adult', 'Senior', 'All Ages'].includes(suitableFor)) {
@@ -900,7 +903,7 @@ exports.updateProduct = async (req, res) => {
           return res.status(400).json({ success: false, msg: `Unit not found: ${v.unit}` });
         }
 
-        // Build update object (exclude status to let middleware handle it)
+        // Build update object
         const variantUpdate = {
           product: productId,
           attribute: v.attribute.trim(),
@@ -931,13 +934,11 @@ exports.updateProduct = async (req, res) => {
             variantUpdate.expiryDate = exp;
           }
         } else if (existingVariant) {
-          // Retain existing expiryDate if not provided
           variantUpdate.expiryDate = existingVariant.expiryDate;
         }
 
-        // Handle variant-specific status (optional)
+        // Handle status
         if (v.status && ['Active', 'Inactive'].includes(v.status)) {
-          // Allow manual status override, but validate against expiryDate
           const expiryDate = variantUpdate.expiryDate ? new Date(variantUpdate.expiryDate) : null;
           if (expiryDate && expiryDate.getTime() < Date.now() && v.status === 'Active') {
             await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
@@ -946,7 +947,7 @@ exports.updateProduct = async (req, res) => {
               msg: `Variation ${i + 1}: Cannot set status to Active with expired expiryDate`,
             });
           }
-          variantUpdate.status = v.status;
+          variantUpdate.status = v.status; // Respect manual status
         }
 
         if (variationImages[i]) variantUpdate.image = variationImages[i];
@@ -960,7 +961,7 @@ exports.updateProduct = async (req, res) => {
           Object.assign(variantDoc, variantUpdate);
           try {
             await variantDoc.validate();
-            savedVariant = await variantDoc.save(); // Triggers pre('save') middleware
+            savedVariant = await variantDoc.save();
           } catch (ve) {
             await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
             return res.status(400).json({
@@ -978,7 +979,7 @@ exports.updateProduct = async (req, res) => {
           const newVariant = new Variant({ ...variantUpdate, createdAt: new Date() });
           try {
             await newVariant.validate();
-            savedVariant = await newVariant.save(); // Triggers pre('save') middleware
+            savedVariant = await newVariant.save();
           } catch (ve) {
             await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
             return res.status(400).json({
@@ -1023,7 +1024,7 @@ exports.updateProduct = async (req, res) => {
       existingProduct.variations = variantIds;
     }
 
-    // Update product stockQuantity based on active variants
+    // Update product stockQuantity
     const activeVariants = await Variant.find({
       product: productId,
       status: 'Active',
@@ -1080,8 +1081,6 @@ exports.updateProduct = async (req, res) => {
 };
 
 
-
-
 exports.deleteProduct = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id).populate('variations');
@@ -1114,3 +1113,4 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
