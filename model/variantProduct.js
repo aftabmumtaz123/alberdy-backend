@@ -1,39 +1,38 @@
 const mongoose = require('mongoose');
 
-// Variant Schema
 const variantSchema = new mongoose.Schema({
   product: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Product',
-    required: true
+    required: true,
   },
   attribute: {
     type: String,
-    trim: true
+    trim: true,
   },
   value: {
     type: String,
-    trim: true
+    trim: true,
   },
   sku: {
     type: String,
     unique: true,
-    trim: true
+    trim: true,
   },
   unit: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Unit',
-    required: true
+    required: true,
   },
   purchasePrice: {
     type: Number,
     required: true,
-    min: 0
+    min: 0,
   },
   price: {
     type: Number,
     required: true,
-    min: 0
+    min: 0,
   },
   discountPrice: {
     type: Number,
@@ -43,110 +42,107 @@ const variantSchema = new mongoose.Schema({
       validator: function (value) {
         return value <= this.price;
       },
-      message: 'Discount price cannot exceed regular price'
-    }
+      message: 'Discount price cannot exceed regular price',
+    },
   },
   stockQuantity: {
     type: Number,
     required: true,
     default: 0,
-    min: 0
+    min: 0,
   },
   expiryDate: {
     type: Date,
     validate: {
       validator: function (value) {
-        return !value || value >= new Date(); // Allow null or future date
+        return !value || value >= new Date();
       },
-      message: 'Expiry date must be in the future'
-    }
+      message: 'Expiry date must be in the future',
+    },
   },
   weightQuantity: {
     type: Number,
     required: true,
-    min: 0
+    min: 0,
   },
   image: {
     type: String,
-    trim: true
+    trim: true,
   },
   status: {
     type: String,
     enum: ['Active', 'Inactive'],
-    default: 'Active'
+    default: 'Active',
   },
   createdAt: {
     type: Date,
-    default: Date.now
+    default: Date.now,
   },
   updatedAt: {
     type: Date,
-    default: Date.now
-  }
+    default: Date.now,
+  },
 });
 
 // Indexes
 variantSchema.index({ product: 1 });
 variantSchema.index({ sku: 1 });
 variantSchema.index({ stockQuantity: 1 });
-variantSchema.index({ expiryDate: 1 }); // Helps with expiration queries
+variantSchema.index({ expiryDate: 1 });
 
-// ————————————————————————————————————————
-// 1. PRE-SAVE: Auto-set status based on expiryDate
-// ————————————————————————————————————————
+// Pre-save: Auto-set status based on expiryDate
 variantSchema.pre('save', function (next) {
-  // Update timestamp
   this.updatedAt = Date.now();
-
-  // Auto-set status
   if (this.expiryDate && this.expiryDate.getTime() < Date.now()) {
     this.status = 'Inactive';
   } else if (!this.expiryDate || this.expiryDate.getTime() >= Date.now()) {
-    // Only change to Active if it was Expired (avoid overriding manual 'Inactive')
     if (this.status === 'Inactive') {
       this.status = 'Active';
     }
   }
-
   next();
 });
 
-// ————————————————————————————————————————
-// 2. PRE-UPDATE: Handle findOneAndUpdate, updateOne, etc.
-// ————————————————————————————————————————
+// Pre-findOneAndUpdate: Handle updates
 variantSchema.pre('findOneAndUpdate', async function (next) {
   const update = this.getUpdate();
-
-  // If expiryDate is being updated
   if (update.expiryDate !== undefined) {
     const newExpiry = new Date(update.expiryDate);
-
     if (newExpiry.getTime() < Date.now()) {
       this.set({ status: 'Inactive' });
     } else {
-      // Only revert to Active if currently Expired
       const docToUpdate = await this.model.findOne(this.getQuery());
       if (docToUpdate && docToUpdate.status === 'Inactive') {
         this.set({ status: 'Active' });
       }
     }
   }
-
-  // Always update `updatedAt`
   this.set({ updatedAt: new Date() });
-
   next();
 });
 
-// ————————————————————————————————————————
-// 3. PRE-UPDATE MANY: For bulk operations (optional)
-// ————————————————————————————————————————
+// Pre-updateMany: Handle bulk updates
 variantSchema.pre('updateMany', function (next) {
   this.set({ updatedAt: new Date() });
   next();
 });
 
-// Export Model
+// Static method to update expired variants
+variantSchema.statics.updateExpiredVariants = async function () {
+  try {
+    const result = await this.updateMany(
+      {
+        expiryDate: { $lt: new Date() },
+        status: { $ne: 'Inactive' }, // Only update if not already Inactive
+      },
+      { $set: { status: 'Inactive', updatedAt: new Date() } }
+    );
+    console.log(`Updated ${result.modifiedCount} expired variants to Inactive`);
+    return result;
+  } catch (error) {
+    console.error('Error updating expired variants:', error);
+    throw error;
+  }
+};
+
 module.exports = mongoose.model('Variant', variantSchema);
-
-
