@@ -715,35 +715,33 @@ exports.getProductById = async (req, res) => {
   }
 };
 
+const fs = require('fs').promises;
+const Product = require('../model/Product');
+const Variant = require('../model/Variant');
+const { findCategoryByIdOrName, findSubcategoryByIdOrName, findBrandByIdOrName, findUnitByIdOrName } = require('../utils/helpers'); // Adjust path as needed
 
 exports.updateProduct = async (req, res) => {
-  // ---------------------------------------------------------------
-  // 1. Define cleanup helper at the TOP (outside try/catch)
-  // ---------------------------------------------------------------
   const cleanupAllFiles = async (files = [], varImgs = {}) => {
-    const all = [
-      ...files,
-      ...Object.values(varImgs).filter(Boolean)
-    ].filter(f => f?.path);
+    const all = [...files, ...Object.values(varImgs).filter(Boolean)].filter(f => f?.path);
     for (const f of all) {
-      try { await fs.unlink(f.path || f); } catch (e) { /* ignore */ }
+      try {
+        await fs.unlink(f.path || f);
+      } catch (e) {
+        /* ignore */
+      }
     }
   };
 
   try {
     const productId = req.params.id;
 
-    // -----------------------------------------------------------------
-    // 2. Load existing product
-    // -----------------------------------------------------------------
+    // Load existing product
     const existingProduct = await Product.findById(productId).populate('variations');
     if (!existingProduct) {
       return res.status(404).json({ success: false, msg: 'Product not found' });
     }
 
-    // -----------------------------------------------------------------
-    // 3. Parse body
-    // -----------------------------------------------------------------
+    // Parse body
     const {
       name,
       category: categoryValue,
@@ -756,13 +754,11 @@ exports.updateProduct = async (req, res) => {
       variations,
     } = req.body;
 
-    // -----------------------------------------------------------------
-    // 4. Handle file uploads
-    // -----------------------------------------------------------------
-    const imagesFiles   = req.files?.['images']   ?? [];
+    // Handle file uploads
+    const imagesFiles = req.files?.['images'] ?? [];
     const thumbnailFile = req.files?.['thumbnail']?.[0] ?? null;
-    const newImages     = imagesFiles.map(f => f.path);
-    const newThumbnail  = thumbnailFile ? thumbnailFile.path : null;
+    const newImages = imagesFiles.map(f => f.path);
+    const newThumbnail = thumbnailFile ? thumbnailFile.path : null;
 
     const variationImages = {};
     let parsedVariations = [];
@@ -789,9 +785,7 @@ exports.updateProduct = async (req, res) => {
       }
     }
 
-    // -----------------------------------------------------------------
-    // 5. Enum validations
-    // -----------------------------------------------------------------
+    // Enum validations
     if (suitableFor && !['Puppy', 'Adult', 'Senior', 'All Ages'].includes(suitableFor)) {
       await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
       return res.status(400).json({ success: false, msg: 'Invalid suitableFor' });
@@ -801,9 +795,7 @@ exports.updateProduct = async (req, res) => {
       return res.status(400).json({ success: false, msg: 'Invalid status' });
     }
 
-    // -----------------------------------------------------------------
-    // 6. Resolve references
-    // -----------------------------------------------------------------
+    // Resolve references
     if (categoryValue) {
       const cat = await findCategoryByIdOrName(categoryValue);
       if (!cat) {
@@ -829,41 +821,40 @@ exports.updateProduct = async (req, res) => {
       existingProduct.brand = br._id;
     }
 
-    // -----------------------------------------------------------------
-    // 7. Update product fields
-    // -----------------------------------------------------------------
-    existingProduct.name        = name ? name.trim() : existingProduct.name;
+    // Update product fields
+    existingProduct.name = name ? name.trim() : existingProduct.name;
     existingProduct.ingredients = ingredients
       ? (Array.isArray(ingredients) ? ingredients.join('\n') : ingredients).trim()
       : existingProduct.ingredients;
     existingProduct.suitableFor = suitableFor ?? existingProduct.suitableFor;
     existingProduct.description = description ? description.trim() : existingProduct.description;
-    existingProduct.status      = status ?? existingProduct.status;
-    existingProduct.updatedAt   = new Date();
+    existingProduct.status = status ?? existingProduct.status;
+    existingProduct.updatedAt = new Date();
 
-    const oldImages    = existingProduct.images ?? [];
+    const oldImages = existingProduct.images ?? [];
     const oldThumbnail = existingProduct.thumbnail ?? null;
-    if (newImages.length)    existingProduct.images    = newImages;
-    if (newThumbnail)        existingProduct.thumbnail = newThumbnail;
+    if (newImages.length) existingProduct.images = newImages;
+    if (newThumbnail) existingProduct.thumbnail = newThumbnail;
 
-    // -----------------------------------------------------------------
-    // 8. Process variants
-    // -----------------------------------------------------------------
+    // Process variants
     const variantIds = [];
 
     if (parsedVariations.length) {
       for (let i = 0; i < parsedVariations.length; i++) {
         const v = parsedVariations[i];
 
-        // --- Core fields ---
-        const price          = parseFloat(v.price);
-        const stockQuantity  = parseInt(v.stockQuantity, 10);
+        // Core fields
+        const price = parseFloat(v.price);
+        const stockQuantity = parseInt(v.stockQuantity, 10);
         const weightQuantity = parseFloat(v.weightQuantity);
 
         if (
-          isNaN(price)          || price <= 0 ||
-          isNaN(stockQuantity)  || stockQuantity < 0 ||
-          isNaN(weightQuantity) || weightQuantity <= 0
+          isNaN(price) ||
+          price <= 0 ||
+          isNaN(stockQuantity) ||
+          stockQuantity < 0 ||
+          isNaN(weightQuantity) ||
+          weightQuantity <= 0
         ) {
           await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
           return res.status(400).json({
@@ -872,7 +863,7 @@ exports.updateProduct = async (req, res) => {
           });
         }
 
-        // --- discountPrice ---
+        // Discount price
         let inputDiscount = v.discountPrice;
         let discount = 0;
         if (inputDiscount !== undefined) {
@@ -886,19 +877,19 @@ exports.updateProduct = async (req, res) => {
           }
         }
 
-        // --- Find existing variant ---
+        // Find existing variant
         let existingVariant = null;
         if (v.sku) {
           existingVariant = await Variant.findOne({ sku: v.sku.trim() });
         }
 
-        // --- Final discountPrice ---
+        // Final discount price
         let finalDiscount = discount;
         if (existingVariant && inputDiscount === undefined) {
           finalDiscount = existingVariant.discountPrice ?? 0;
         }
 
-        // --- Validate discount ≤ price ---
+        // Validate discount ≤ price
         if (finalDiscount > price) {
           await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
           return res.status(400).json({
@@ -907,14 +898,14 @@ exports.updateProduct = async (req, res) => {
           });
         }
 
-        // --- Unit ---
+        // Unit
         const unit = await findUnitByIdOrName(v.unit);
         if (!unit) {
           await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
           return res.status(400).json({ success: false, msg: `Unit not found: ${v.unit}` });
         }
 
-        // --- Build update object ---
+        // Build update object (exclude status to let middleware handle it)
         const variantUpdate = {
           product: productId,
           attribute: v.attribute.trim(),
@@ -923,13 +914,13 @@ exports.updateProduct = async (req, res) => {
           unit: unit._id,
           purchasePrice: parseFloat(v.purchasePrice),
           price,
-          status,
           discountPrice: finalDiscount,
           stockQuantity,
           weightQuantity,
           updatedAt: new Date(),
         };
 
+        // Handle expiryDate
         if (v.expiryDate !== undefined) {
           if (v.expiryDate === null) {
             variantUpdate.expiryDate = null;
@@ -944,42 +935,60 @@ exports.updateProduct = async (req, res) => {
             }
             variantUpdate.expiryDate = exp;
           }
+        } else if (existingVariant) {
+          // Retain existing expiryDate if not provided
+          variantUpdate.expiryDate = existingVariant.expiryDate;
+        }
+
+        // Handle variant-specific status (optional)
+        if (v.status && ['Active', 'Inactive'].includes(v.status)) {
+          // Allow manual status override, but validate against expiryDate
+          const expiryDate = variantUpdate.expiryDate ? new Date(variantUpdate.expiryDate) : null;
+          if (expiryDate && expiryDate.getTime() < Date.now() && v.status === 'Active') {
+            await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
+            return res.status(400).json({
+              success: false,
+              msg: `Variation ${i + 1}: Cannot set status to Active with expired expiryDate`,
+            });
+          }
+          variantUpdate.status = v.status;
         }
 
         if (variationImages[i]) variantUpdate.image = variationImages[i];
 
-        // --- SAVE / UPDATE ---
+        // Save/Update variant
         let savedVariant;
         const oldVariantImg = existingVariant?.image ?? null;
 
         if (existingVariant) {
-          // === CRITICAL FIX: Use find + save to make validator see NEW price ===
           const variantDoc = await Variant.findById(existingVariant._id);
           Object.assign(variantDoc, variantUpdate);
           try {
-            await variantDoc.validate(); // ← this.price = NEW price
-            savedVariant = await variantDoc.save();
+            await variantDoc.validate();
+            savedVariant = await variantDoc.save(); // Triggers pre('save') middleware
           } catch (ve) {
             await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
             return res.status(400).json({
               success: false,
-              msg: `Variant validation failed: ${ve.message}`,
+              msg: `Variant ${i + 1} validation failed: ${ve.message}`,
             });
           }
 
           if (oldVariantImg && variationImages[i] && oldVariantImg !== variationImages[i]) {
-            try { await fs.unlink(oldVariantImg); } catch {}
+            try {
+              await fs.unlink(oldVariantImg);
+            } catch {}
           }
         } else {
           const newVariant = new Variant({ ...variantUpdate, createdAt: new Date() });
           try {
             await newVariant.validate();
-            savedVariant = await newVariant.save();
+            savedVariant = await newVariant.save(); // Triggers pre('save') middleware
           } catch (ve) {
             await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
             return res.status(400).json({
               success: false,
-              msg: `Variant validation failed: ${ve.message}`,
+              msg: `Variant ${i + 1} validation failed: ${ve.message}`,
             });
           }
         }
@@ -987,17 +996,21 @@ exports.updateProduct = async (req, res) => {
         variantIds.push(savedVariant._id);
       }
 
-      // --- Cleanup old product images ---
+      // Cleanup old product images
       if (newImages.length && oldImages.length) {
         for (const img of oldImages) {
-          try { await fs.unlink(img); } catch {}
+          try {
+            await fs.unlink(img);
+          } catch {}
         }
       }
       if (newThumbnail && oldThumbnail && newThumbnail !== oldThumbnail) {
-        try { await fs.unlink(oldThumbnail); } catch {}
+        try {
+          await fs.unlink(oldThumbnail);
+        } catch {}
       }
 
-      // --- Delete removed variants ---
+      // Delete removed variants
       const currentIds = existingProduct.variations.map(v => v._id.toString());
       const newIds = variantIds.map(id => id.toString());
       const toDelete = currentIds.filter(id => !newIds.includes(id));
@@ -1005,7 +1018,9 @@ exports.updateProduct = async (req, res) => {
       for (const vid of toDelete) {
         const v = await Variant.findById(vid);
         if (v?.image) {
-          try { await fs.unlink(v.image); } catch {}
+          try {
+            await fs.unlink(v.image);
+          } catch {}
         }
         await Variant.findByIdAndDelete(vid);
       }
@@ -1013,10 +1028,17 @@ exports.updateProduct = async (req, res) => {
       existingProduct.variations = variantIds;
     }
 
-    // --- Save product ---
+    // Update product stockQuantity based on active variants
+    const activeVariants = await Variant.find({
+      product: productId,
+      status: 'Active',
+    });
+    existingProduct.stockQuantity = activeVariants.reduce((sum, v) => sum + v.stockQuantity, 0);
+
+    // Save product
     await existingProduct.save();
 
-    // --- Return populated ---
+    // Return populated product
     const populated = await Product.findById(productId).populate([
       { path: 'category', select: 'name' },
       { path: 'subcategory', select: 'subcategoryName' },
@@ -1037,15 +1059,11 @@ exports.updateProduct = async (req, res) => {
       data: populated,
     });
   } catch (err) {
-    // ---------------------------------------------------------------
-    // Final cleanup — NOW `cleanupAllFiles` is in scope!
-    // ---------------------------------------------------------------
     const files = [
       ...(req.files?.['images'] ?? []),
       ...(req.files?.['thumbnail'] ? [req.files['thumbnail'][0]] : []),
     ];
     await cleanupAllFiles(files, {});
-
     if (err.name === 'MongoServerError' && err.code === 11000) {
       return res.status(400).json({
         success: false,
@@ -1058,7 +1076,6 @@ exports.updateProduct = async (req, res) => {
         msg: `Validation: ${Object.values(err.errors).map(e => e.message).join(', ')}`,
       });
     }
-
     return res.status(500).json({
       success: false,
       msg: 'Server error',
