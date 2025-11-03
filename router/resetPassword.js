@@ -133,25 +133,28 @@ router.post('/verify-otp', verifyOtpLimiter, async (req, res) => {
   }
 });
 
+
 router.put('/reset-password', resetPasswordLimiter, async (req, res) => {
   try {
-    let { email, otp, password, cPassword } = req.body;
+    const { email, password, cPassword } = req.body;
 
-    if (!email || !otp || !password || !cPassword) {
+    // Validate input
+    if (!email || !password || !cPassword) {
       return res.status(400).json({
         success: false,
-        message: 'Email, OTP, password, and confirm password are required',
+        message: 'Email, password, and confirm password are required',
       });
     }
 
-    otp = String(otp).trim();
-    if (otp.length !== 6 || isNaN(otp)) {
-      return res.status(400).json({ success: false, message: 'OTP must be a 6-digit number' });
-    }
+    // Check if passwords match
     if (password !== cPassword) {
-      return res.status(400).json({ success: false, message: 'Passwords do not match' });
+      return res.status(400).json({
+        success: false,
+        message: 'Passwords do not match',
+      });
     }
 
+    // Validate password strength
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
     if (!passwordRegex.test(password)) {
       return res.status(400).json({
@@ -161,27 +164,25 @@ router.put('/reset-password', resetPasswordLimiter, async (req, res) => {
       });
     }
 
-    const hashedOTP = crypto.createHash('sha256').update(otp).digest('hex');
-
-    const user = await User.findOne({
-      email,
-      resetPasswordOTP: hashedOTP,
-      resetPasswordExpire: { $gt: Date.now() },
-    });
-
+    // Find user by email
+    const user = await User.findOne({ email });
     if (!user) {
-      return res.status(400).json({ success: false, message: 'Invalid or expired OTP, or email mismatch' });
+      return res.status(400).json({
+        success: false,
+        message: 'User with this email does not exist',
+      });
     }
 
+    // Hash new password
     const salt = await bcrypt.genSalt(12);
     user.password = await bcrypt.hash(password, salt);
-    user.resetPasswordOTP = undefined;
-    user.resetPasswordExpire = undefined;
     await user.save();
 
+    // Generate JWT token
     const payload = { user: { id: user._id } };
     const authToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '5h' });
 
+    // Send response
     res.status(200).json({
       success: true,
       message: 'Password reset successful. You are now logged in.',
@@ -190,7 +191,10 @@ router.put('/reset-password', resetPasswordLimiter, async (req, res) => {
     });
   } catch (error) {
     console.error('Reset password error:', error);
-    res.status(500).json({ success: false, message: 'Server error. Please try again later.' });
+    res.status(500).json({
+      success: false,
+      message: 'Server error. Please try again later.',
+    });
   }
 });
 
