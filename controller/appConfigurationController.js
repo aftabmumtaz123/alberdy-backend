@@ -192,6 +192,8 @@ exports.updateAppConfiguration = async (req, res) => {
       facebook,
       instagram,
       youtube,
+      street_address,
+      zip_code
       linkedin,
     } = req.body;
 
@@ -259,6 +261,8 @@ exports.updateAppConfiguration = async (req, res) => {
       supportPhones: supportPhones ?? existingConfig.supportPhones,
       facebook: facebook ?? existingConfig.facebook,
       instagram: instagram ?? existingConfig.instagram,
+      street_address: street_address?? existingConfig.street_address,
+      zip_code: zip_code?? existingConfig.zip_code,
       youtube: youtube ?? existingConfig.youtube,
       linkedin: linkedin ?? existingConfig.linkedin,
     };
