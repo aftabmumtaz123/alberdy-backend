@@ -27,20 +27,7 @@ exports.createSupplier = async (req, res) => {
     if (!supplierCode) {
       req.body.supplierCode = `SUP-${randomCode}`;
     }
-
-   
-    if (email && !/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,})+$/.test(email)) {
-      errors.email = 'Invalid email address format';
-    }
-
-    if (phone && !/^\+?[0-9]{10,15}$/.test(phone)) {
-      errors.phone = 'Invalid phone number format';
-    }
-
-    const allowedTypes = ['Electronics', 'Grocery', 'Clothing', 'Accessories', 'Furniture', 'Other'];
-    if (!supplierType || !allowedTypes.includes(supplierType)) {
-      errors.supplierType = 'Supplier type must be one of: ' + allowedTypes.join(', ');
-    }
+  
 
     const allowedStatus = ['Active', 'Inactive'];
     if (status && !allowedStatus.includes(status)) {
