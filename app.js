@@ -19,9 +19,6 @@ app.set('trust proxy', 1);
 
 const Offer = require('./model/Offer');
 
-
-const cron = require('cron');
-
 // Daily at midnight: Recompute all product stockQuantity and update expired variants
 cron.schedule('0 0 * * *', async () => {
   try {
