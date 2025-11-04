@@ -3,7 +3,6 @@ const cors = require('cors');
 const cron = require('node-cron');
 const Variant = require('./model/variantProduct')
 require('dotenv').config();
-// Require models at the top for better organization
 const categoryRoutes = require('./router/categories'); // Import routes
 const productRoutes = require('./router/products'); // Import routes
 const morgan = require('morgan');
@@ -19,7 +18,6 @@ app.set('trust proxy', 1);
 
 const Offer = require('./model/Offer');
 
-// Daily at midnight: Recompute all product stockQuantity and update expired variants
 cron.schedule('0 0 * * *', async () => {
   try {
     await Offer.updateExpiredOffers();
