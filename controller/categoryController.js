@@ -98,7 +98,7 @@ exports.updateCategory = async (req, res) => {
       return res.status(404).json({ success: false, msg: 'Category not found' });
     }
 
-    const image = req.file ===  ? req.file.path : existingCategory.image;
+    const image = req.file ? req.file.path : existingCategory.image;
 
 
     existingCategory.name = name ?? existingCategory.name;

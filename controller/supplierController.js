@@ -21,7 +21,6 @@ exports.createSupplier = async (req, res) => {
       errors.supplierName = 'Supplier name is required and must be at least 2 characters long';
     }
 
-    //Auto Generated code validation
 
     const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
     if (!supplierCode) {
