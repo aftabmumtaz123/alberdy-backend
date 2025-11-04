@@ -1,7 +1,7 @@
-const ReportController = require('../controller/reportsController');
+const ReportController = require('./reportController');
 const router = require('express').Router();
 
-router.get('/sales', ReportController.getSalesReport);
+router.get('/sales', ReportController.getSalesByPeriods);
 router.get('/most-sold', ReportController.getMostSoldProducts);
 router.get('/orders-by-status', ReportController.getOrdersByStatus);
 router.get('/low-stock', ReportController.getLowStockProducts);
