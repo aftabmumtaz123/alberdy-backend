@@ -30,7 +30,7 @@ class ReportController {
 
   static async getSalesByPeriods(req, res) {
     try {
-      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 56, second: 0, millisecond: 0 });
+      const now = moment.tz('Asia/Karachi').set({ hour: 13, minute: 0, second: 0, millisecond: 0 });
 
       const [dailyData, weeklyData, monthlyData] = await Promise.all([
         ReportController.calculateSalesPeriod('daily', now),
@@ -82,7 +82,7 @@ class ReportController {
 
   static async getMostSoldProducts(req, res) {
     try {
-      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 56, second: 0, millisecond: 0 });
+      const now = moment.tz('Asia/Karachi').set({ hour: 13, minute: 0, second: 0, millisecond: 0 });
 
       const [dailyData, weeklyData, monthlyData] = await Promise.all([
         ReportController.calculateMostSoldPeriod('daily', now),
@@ -210,49 +210,28 @@ class ReportController {
 
   static async getOrdersByStatus(req, res) {
     try {
-      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 56, second: 0, millisecond: 0 });
+      const now = moment.tz('Asia/Karachi').set({ hour: 13, minute: 0, second: 0, millisecond: 0 });
 
-      const [dailyData, weeklyData, monthlyData] = await Promise.all([
-        ReportController.calculateOrdersByStatusPeriod('daily', now),
-        ReportController.calculateOrdersByStatusPeriod('weekly', now),
-        ReportController.calculateOrdersByStatusPeriod('monthly', now)
-      ]);
+      const [start, end] = ReportController.getDateRange('monthly', now);
 
-      const data = {
-        daily: dailyData,
-        weekly: weeklyData,
-        monthly: monthlyData
-      };
+      const ordersAgg = await Order.aggregate([
+        { $match: { createdAt: { $gte: start, $lte: end } } },
+        { $group: { _id: '$status', count: { $sum: 1 }, totalRevenue: { $sum: '$total' } } }
+      ]).then(results => {
+        const totalOrders = results.reduce((sum, r) => sum + r.count, 0);
+        const data = results.map(r => ({
+          status: r._id || 'unknown',
+          totalOrders: r.count,
+          percentage: totalOrders > 0 ? ((r.count / totalOrders) * 100).toFixed(2) : 0,
+          revenue: parseFloat(r.totalRevenue.toFixed(2))
+        }));
+        return data;
+      });
 
-      res.json({ success: true, msg: 'Fetched Successfully', data });
+      res.json({ success: true, msg: 'Fetched Successfully', data: ordersAgg });
     } catch (error) {
       res.status(500).json({ success: false, msg: 'Server error', details: error.message });
     }
-  }
-
-  static async calculateOrdersByStatusPeriod(period, now) {
-    const [start, end] = ReportController.getDateRange(period, now);
-
-    const ordersAgg = await Order.aggregate([
-      { $match: { createdAt: { $gte: start, $lte: end } } },
-      { $group: { _id: '$status', count: { $sum: 1 } } }
-    ]).then(results => {
-      const breakdown = { pending: 0, delivered: 0, cancelled: 0 };
-      results.forEach(r => {
-        if (['pending', 'delivered', 'cancelled'].includes(r._id)) {
-          breakdown[r._id] = r.count;
-        }
-      });
-      const total = results.reduce((sum, r) => sum + r.count, 0);
-      return { total, breakdown };
-    });
-
-    return {
-      total: ordersAgg.total,
-      breakdown: ordersAgg.breakdown,
-      period: period.charAt(0).toUpperCase() + period.slice(1),
-      dateRange: `${moment.tz(start, 'Asia/Karachi').format('MMM DD, YYYY')} - ${moment.tz(end, 'Asia/Karachi').format('MMM DD, YYYY')}`
-    };
   }
 
   static async getLowStockProducts(req, res) {
@@ -278,7 +257,7 @@ class ReportController {
 
   static async getExpiredProducts(req, res) {
     try {
-      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 56, second: 0, millisecond: 0 }).toDate();
+      const now = moment.tz('Asia/Karachi').set({ hour: 13, minute: 0, second: 0, millisecond: 0 }).toDate();
 
       const expired = await Variant.find({ expiryDate: { $lt: now } })
         .populate('product', 'name')
@@ -299,7 +278,7 @@ class ReportController {
 
   static async getRevenueByCategory(req, res) {
     try {
-      const [start, end] = ReportController.getDateRange('monthly', moment.tz('Asia/Karachi').set({ hour: 12, minute: 56, second: 0, millisecond: 0 }));
+      const [start, end] = ReportController.getDateRange('monthly', moment.tz('Asia/Karachi').set({ hour: 13, minute: 0, second: 0, millisecond: 0 }));
 
       const revenueByCategory = await Order.aggregate([
         { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
@@ -344,4 +323,4 @@ class ReportController {
   }
 }
 
-module.exports = ReportController;
+module.exports = ReportController; 
