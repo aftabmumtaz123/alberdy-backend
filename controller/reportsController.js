@@ -3,35 +3,34 @@ const Order = require('../model/Order');
 const Product = require('../model/Product');
 const Variant = require('../model/variantProduct');
 const Category = require('../model/Category');
+const mongoose = require('mongoose');
 
 class ReportController {
-  // Helper function to get date range based on period and current date
   static getDateRange(period, now) {
     let start, end, prevStart, prevEnd;
 
     if (period === 'daily') {
-      start = now.startOf('day').toDate(); // Start of November 04, 2025
-      end = now.endOf('day').toDate();    // End of November 04, 2025
-      prevStart = moment(start).subtract(1, 'day').startOf('day').toDate(); // October 04, 2025
-      prevEnd = moment(start).subtract(1, 'day').endOf('day').toDate();    // October 04, 2025
+      start = now.startOf('day').toDate();
+      end = now.endOf('day').toDate();
+      prevStart = moment(start).subtract(1, 'day').startOf('day').toDate();
+      prevEnd = moment(start).subtract(1, 'day').endOf('day').toDate();
     } else if (period === 'weekly') {
-      start = now.startOf('week').toDate(); // Start of week (October 28, 2025)
-      end = now.endOf('week').toDate();    // End of week (November 03, 2025)
-      prevStart = moment(start).subtract(1, 'week').startOf('week').toDate(); // October 21, 2025
-      prevEnd = moment(start).subtract(1, 'week').endOf('week').toDate();    // October 27, 2025
-    } else { // monthly
-      start = now.startOf('month').toDate(); // Start of November 01, 2025
-      end = now.endOf('month').toDate();    // End of November 30, 2025
-      prevStart = moment(start).subtract(1, 'month').startOf('month').toDate(); // October 01, 2025
-      prevEnd = moment(start).subtract(1, 'month').endOf('month').toDate();    // October 31, 2025
+      start = now.startOf('week').toDate();
+      end = now.endOf('week').toDate();
+      prevStart = moment(start).subtract(1, 'week').startOf('week').toDate();
+      prevEnd = moment(start).subtract(1, 'week').endOf('week').toDate();
+    } else {
+      start = now.startOf('month').toDate();
+      end = now.endOf('month').toDate();
+      prevStart = moment(start).subtract(1, 'month').startOf('month').toDate();
+      prevEnd = moment(start).subtract(1, 'month').endOf('month').toDate();
     }
     return [start, end, prevStart, prevEnd];
   }
 
-  // Get Sales by Daily, Weekly, and Monthly Periods
   static async getSalesByPeriods(req, res) {
     try {
-      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 33, second: 0, millisecond: 0 }); // 12:33 PM PKT, November 04, 2025
+      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 46, second: 0, millisecond: 0 });
 
       const [dailyData, weeklyData, monthlyData] = await Promise.all([
         ReportController.calculateSalesPeriod('daily', now),
@@ -51,7 +50,6 @@ class ReportController {
     }
   }
 
-  // Helper function to calculate sales for a given period
   static async calculateSalesPeriod(period, now) {
     const [start, end, prevStart, prevEnd] = ReportController.getDateRange(period, now);
 
@@ -82,10 +80,9 @@ class ReportController {
     };
   }
 
-  // Get Most Sold Products by Daily, Weekly, and Monthly Periods
   static async getMostSoldProducts(req, res) {
     try {
-      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 33, second: 0, millisecond: 0 }); // 12:33 PM PKT, November 04, 2025
+      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 46, second: 0, millisecond: 0 });
 
       const [dailyData, weeklyData, monthlyData] = await Promise.all([
         ReportController.calculateMostSoldPeriod('daily', now),
@@ -105,7 +102,6 @@ class ReportController {
     }
   }
 
-  // Helper function to calculate most sold products for a given period
   static async calculateMostSoldPeriod(period, now) {
     const [start, end] = ReportController.getDateRange(period, now);
 
@@ -131,12 +127,67 @@ class ReportController {
       },
       { $unwind: '$variant' },
       {
+        $lookup: {
+          from: 'offers',
+          let: { prodId: '$product._id', currentDate: now.toDate() },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $in: ['$$prodId', '$applicableProducts'] },
+                status: 'active',
+                $expr: {
+                  $and: [
+                    { $lte: ['$startDate', '$$currentDate'] },
+                    { $gte: ['$endDate', '$$currentDate'] }
+                  ]
+                }
+              }
+            },
+            { $sort: { createdAt: -1 } },
+            { $limit: 1 },
+            {
+              $project: {
+                discountType: 1,
+                discountValue: 1,
+                _id: 0
+              }
+            }
+          ],
+          as: 'activeOffer'
+        }
+      },
+      { $unwind: { path: '$activeOffer', preserveNullAndEmptyArrays: true } },
+      {
+        $addFields: {
+          effectivePrice: {
+            $cond: {
+              if: { $ne: ['$activeOffer', null] },
+              then: {
+                $cond: {
+                  if: { $eq: ['$activeOffer.discountType', 'Percentage'] },
+                  then: {
+                    $subtract: [
+                      { $ifNull: ['$variant.price', 0] },
+                      { $multiply: [{ $ifNull: ['$variant.price', 0] }, { $divide: ['$activeOffer.discountValue', 100] }] }
+                    ]
+                  },
+                  else: { $subtract: [{ $ifNull: ['$variant.price', 0] }, '$activeOffer.discountValue'] }
+                }
+              },
+              else: { $ifNull: ['$variant.price', 0] }
+            }
+          }
+        }
+      },
+      {
         $group: {
           _id: '$product._id',
           productName: { $first: '$product.name' },
           sku: { $first: '$variant.sku' },
           totalSold: { $sum: '$items.quantity' },
-          revenue: { $sum: { $multiply: ['$items.quantity', '$items.price'] } }
+          revenue: {
+            $sum: { $multiply: ['$items.quantity', '$effectivePrice'] }
+          }
         }
       },
       { $sort: { totalSold: -1 } },
@@ -157,10 +208,9 @@ class ReportController {
     };
   }
 
-  // Get Orders by Status (Default: Current month)
   static async getOrdersByStatus(req, res) {
     try {
-      const [start, end] = ReportController.getDateRange('monthly', moment.tz('Asia/Karachi').set({ hour: 12, minute: 33, second: 0, millisecond: 0 }));
+      const [start, end] = ReportController.getDateRange('monthly', moment.tz('Asia/Karachi').set({ hour: 12, minute: 46, second: 0, millisecond: 0 }));
 
       const ordersAgg = await Order.aggregate([
         { $match: { createdAt: { $gte: start, $lte: end } } },
@@ -188,7 +238,6 @@ class ReportController {
     }
   }
 
-  // Get Low Stock Products (Default: Top 4)
   static async getLowStockProducts(req, res) {
     try {
       const lowStock = await Variant.find({ stockQuantity: { $lt: 10, $gt: -1 } })
@@ -210,10 +259,9 @@ class ReportController {
     }
   }
 
-  // Get Expired Products
   static async getExpiredProducts(req, res) {
     try {
-      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 33, second: 0, millisecond: 0 }).toDate();
+      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 46, second: 0, millisecond: 0 }).toDate();
 
       const expired = await Variant.find({ expiryDate: { $lt: now } })
         .populate('product', 'name')
@@ -232,10 +280,9 @@ class ReportController {
     }
   }
 
-  // Get Revenue by Category (Default: Current month)
   static async getRevenueByCategory(req, res) {
     try {
-      const [start, end] = ReportController.getDateRange('monthly', moment.tz('Asia/Karachi').set({ hour: 12, minute: 33, second: 0, millisecond: 0 }));
+      const [start, end] = ReportController.getDateRange('monthly', moment.tz('Asia/Karachi').set({ hour: 12, minute: 46, second: 0, millisecond: 0 }));
 
       const revenueByCategory = await Order.aggregate([
         { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
