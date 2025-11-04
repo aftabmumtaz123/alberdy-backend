@@ -44,15 +44,13 @@ const variantSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: Date.now },
 });
 
-// Schema-level validation to enforce status for expired variants
-variantSchema.validate({
-  validator: function () {
-    if (this.expiryDate && this.expiryDate.getTime() < Date.now()) {
-      return this.status === 'Inactive';
+variantSchema.pre('validate', function (next) {
+  if (this.expiryDate && this.expiryDate.getTime() < Date.now()) {
+    if (this.status !== 'Inactive') {
+      return next(new Error('Status must be Inactive if expiryDate is in the past'));
     }
-    return true;
-  },
-  message: 'Status must be Inactive if expiryDate is in the past',
+  }
+  next();
 });
 
 // Indexes
