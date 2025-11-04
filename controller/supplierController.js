@@ -24,15 +24,9 @@ exports.createSupplier = async (req, res) => {
 
     const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
     if (!supplierCode) {
-      req.body.supplierCode = `SUP-${randomCode}`;
+      supplierCode = `SUP-${randomCode}`;
     }
 
-    if(!supplierCode){
-        return res.status(400).json({
-            success: false,
-            message: 'Supplier code is required',
-        });
-    }
   
 
     const allowedStatus = ['Active', 'Inactive'];
