@@ -42,16 +42,16 @@ app.use(cookieParser()); // Add cookie-parser middleware
 app.use(express.urlencoded({ extended: true }));
 
 
-const connection = require('./config/db'); // Connect to DB
+const connection = require('./config/db'); 
 connection();
 
 // Routes
-app.use('/api/products', productRoutes); // Example: Protected product routes
-app.use('/api/brands', require('./router/brand')); // Example: Protected brand routes
-app.use('/api/categories', categoryRoutes); // Example: Protected category routes
-app.use('/api/subcategories', require('./router/subcategories')); // Example: Protected subcategory routes
+app.use('/api/products', productRoutes);
+app.use('/api/brands', require('./router/brand'));
+app.use('/api/categories', categoryRoutes); 
+app.use('/api/subcategories', require('./router/subcategories')); 
 app.use('/api/auth', require("./router/resetPassword"))
-app.use('/api/units', require('./router/unit')); // Example: Protected unit routes
+app.use('/api/units', require('./router/unit'));
 app.use('/api', require('./router/customer')); 
 app.use('/api/expenses', require('./router/expense')); 
 app.use('/api/expense-categories', require('./router/expenseCategory')); 
