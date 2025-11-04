@@ -1,4 +1,4 @@
-const Supplier = require('../model/Supplier');
+const Supplier = require('../model/Suppliar');
 
 
 // Create a new supplier
