@@ -203,7 +203,7 @@ router.get('/', authMiddleware, requireRole(['Super Admin','Manager','Customer']
 router.put('/:id', authMiddleware, requireRole(['Super Admin','Manager']), async (req, res) => {
   try {
     const { id } = req.params;
-    const { shippingAddress, notes, paymentStatus, status, orderTrackingNumber } = req.body;
+    const { shippingAddress, notes, paymentStatus, status, orderTrackingNumber, deliveryDate, deliveryPartner } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ success: false, msg: 'Invalid order ID' });
@@ -217,6 +217,8 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin','Manager']), async
     // 1️⃣ Update allowed fields
     if (shippingAddress) update.shippingAddress = shippingAddress;
     if (notes) update.notes = notes;
+    if (deliveryDate) update.deliveryDate = deliveryDate;
+    if (deliveryPartner) update.deliveryPartner = deliveryPartner;
     if (orderTrackingNumber) update.orderTrackingNumber = orderTrackingNumber;
 
     // 2️⃣ Handle Order Status Logic
@@ -378,6 +380,7 @@ router.get('/track/:identifier', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
