@@ -39,3 +39,4 @@ exports.getAllSuppliers = async (req, res) => {
         error: error.message,
     });
   }
+}
