@@ -67,7 +67,7 @@ app.use('/api/variants', require('./router/variant'));
 app.use('/api/report', require('./router/reportsRouter'))
 
 
-app.use('/api/supplier', require('./router/supplierRouter')); 
+app.use('/api/suppliers', require('./router/supplierRouter')); 
 // app.use('/api/purchase', require('./router/purchaseRouter'));
 
 
