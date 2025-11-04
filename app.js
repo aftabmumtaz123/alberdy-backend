@@ -56,13 +56,16 @@ app.use('/api/expense-categories', require('./router/expenseCategory'));
 app.use('/api/currencies', require('./router/currency')); 
 app.use('/api', require('./router/inventoryRoutes')); 
 app.use('/api/configuration', require('./router/appConfigurationRouter')); 
-const dashboardRoutes = require('./router/dashboard');
-app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/dashboard', require('./router/dashboard'));
 app.use('/api/offer', require('./router/offer'));
 app.use('/api/orders', require('./router/orderRouter')); 
-app.use('/api/contact', require("./router/contactUs")) // Contact Us routes
+app.use('/api/contact', require("./router/contactUs")) 
 app.use('/', require('./router/authRouter')); 
 app.use('/api/variants', require('./router/variant'));
+app.use('/api/report', require('./router/reportsRouter'))
+
+
+
 
 app.get("/",(req,res)=>{
   res.json({Message: "API's are running well bro!!"})
