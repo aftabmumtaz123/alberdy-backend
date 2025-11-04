@@ -13,13 +13,14 @@ exports.getDashboard = async (req, res) => {
       return res.status(400).json({ msg: 'Invalid period: daily, weekly, or monthly' });
     }
 
-    // Build date filters for current and previous periods
-    const now = moment().tz('Asia/Karachi'); // Use PKT timezone
-    const startOfDay = now.startOf('day');
-    const startOfWeek = now.startOf('week'); // Monday-based week
-    const startOfMonth = now.startOf('month');
+    // Build date filters for current and previous periods with PKT timezone
+    const now = moment().tz('Asia/Karachi'); // Current time: 03:58 PM PKT, Nov 4, 2025
+    console.log('Current time:', now.format()); // Debug: e.g., 2025-11-04T15:58:00+05:00
 
-    // Define date ranges
+    const startOfDay = now.startOf('day');
+    const startOfWeek = now.startOf('week'); // Monday-based week (Oct 28, 2025)
+    const startOfMonth = now.startOf('month'); // Nov 1, 2025
+
     const dailyStart = startOfDay.toDate();
     const dailyEnd = now.toDate();
     const weeklyStart = startOfWeek.toDate();
@@ -34,6 +35,10 @@ exports.getDashboard = async (req, res) => {
     const prevMonthlyStart = moment(monthlyStart).subtract(1, 'month').startOf('month').toDate();
     const prevMonthlyEnd = moment(monthlyStart).subtract(1, 'month').endOf('month').toDate();
 
+    console.log('Daily:', dailyStart, 'to', dailyEnd); // e.g., 2025-11-04T00:00:00+05:00 to 2025-11-04T15:58:00+05:00
+    console.log('Weekly:', weeklyStart, 'to', weeklyEnd); // e.g., 2025-10-28T00:00:00+05:00 to 2025-11-04T15:58:00+05:00
+    console.log('Monthly:', monthlyStart, 'to', monthlyEnd); // e.g., 2025-11-01T00:00:00+05:00 to 2025-11-04T15:58:00+05:00
+
     // All-time totals
     const [totalProductsAll, fullTotalOrders, totalCustomersAll] = await Promise.all([
       Product.countDocuments(),
@@ -44,32 +49,50 @@ exports.getDashboard = async (req, res) => {
     // Revenue calculations for daily, weekly, monthly
     const [dailyRevenue, weeklyRevenue, monthlyRevenue, prevDailyRevenue, prevWeeklyRevenue, prevMonthlyRevenue] = await Promise.all([
       Order.aggregate([
-        { $match: { createdAt: { $gte: dailyStart, $lte: dailyEnd }, status: 'delivered' } },
+        { $match: { createdAt: { $gte: dailyStart, $lte: dailyEnd }, status: { $regex: /delivered/i } } },
+        { $group: { _id: null, revenue: { $sum: '$total' } } }
+      ]).then(results => {
+        console.log('Daily Revenue Query Result:', results); // Debug: Check if data is found
+        return results[0]?.revenue || 0;
+      }).catch(err => {
+        console.error('Daily Revenue Error:', err);
+        return 0;
+      }),
+
+      Order.aggregate([
+        { $match: { createdAt: { $gte: weeklyStart, $lte: weeklyEnd }, status: { $regex: /delivered/i } } },
+        { $group: { _id: null, revenue: { $sum: '$total' } } }
+      ]).then(results => {
+        console.log('Weekly Revenue Query Result:', results);
+        return results[0]?.revenue || 0;
+      }).catch(err => {
+        console.error('Weekly Revenue Error:', err);
+        return 0;
+      }),
+
+      Order.aggregate([
+        { $match: { createdAt: { $gte: monthlyStart, $lte: monthlyEnd }, status: { $regex: /delivered/i } } },
+        { $group: { _id: null, revenue: { $sum: '$total' } } }
+      ]).then(results => {
+        console.log('Monthly Revenue Query Result:', results);
+        return results[0]?.revenue || 0;
+      }).catch(err => {
+        console.error('Monthly Revenue Error:', err);
+        return 0;
+      }),
+
+      Order.aggregate([
+        { $match: { createdAt: { $gte: prevDailyStart, $lte: prevDailyEnd }, status: { $regex: /delivered/i } } },
         { $group: { _id: null, revenue: { $sum: '$total' } } }
       ]).then(results => results[0]?.revenue || 0),
 
       Order.aggregate([
-        { $match: { createdAt: { $gte: weeklyStart, $lte: weeklyEnd }, status: 'delivered' } },
+        { $match: { createdAt: { $gte: prevWeeklyStart, $lte: prevWeeklyEnd }, status: { $regex: /delivered/i } } },
         { $group: { _id: null, revenue: { $sum: '$total' } } }
       ]).then(results => results[0]?.revenue || 0),
 
       Order.aggregate([
-        { $match: { createdAt: { $gte: monthlyStart, $lte: monthlyEnd }, status: 'delivered' } },
-        { $group: { _id: null, revenue: { $sum: '$total' } } }
-      ]).then(results => results[0]?.revenue || 0),
-
-      Order.aggregate([
-        { $match: { createdAt: { $gte: prevDailyStart, $lte: prevDailyEnd }, status: 'delivered' } },
-        { $group: { _id: null, revenue: { $sum: '$total' } } }
-      ]).then(results => results[0]?.revenue || 0),
-
-      Order.aggregate([
-        { $match: { createdAt: { $gte: prevWeeklyStart, $lte: prevWeeklyEnd }, status: 'delivered' } },
-        { $group: { _id: null, revenue: { $sum: '$total' } } }
-      ]).then(results => results[0]?.revenue || 0),
-
-      Order.aggregate([
-        { $match: { createdAt: { $gte: prevMonthlyStart, $lte: prevMonthlyEnd }, status: 'delivered' } },
+        { $match: { createdAt: { $gte: prevMonthlyStart, $lte: prevMonthlyEnd }, status: { $regex: /delivered/i } } },
         { $group: { _id: null, revenue: { $sum: '$total' } } }
       ]).then(results => results[0]?.revenue || 0)
     ]);
@@ -138,11 +161,9 @@ exports.getDashboard = async (req, res) => {
     }));
 
     // Growth Calculations
-    const revenueGrowth = (period === 'daily' ? prevDailyRevenue : period === 'weekly' ? prevWeeklyRevenue : prevMonthlyRevenue) > 0
-      ? (((period === 'daily' ? dailyRevenue : period === 'weekly' ? weeklyRevenue : monthlyRevenue) - 
-          (period === 'daily' ? prevDailyRevenue : period === 'weekly' ? prevWeeklyRevenue : prevMonthlyRevenue)) / 
-          (period === 'daily' ? prevDailyRevenue : period === 'weekly' ? prevWeeklyRevenue : prevMonthlyRevenue) * 100).toFixed(1)
-      : 12.5;
+    const prevRevenue = period === 'daily' ? prevDailyRevenue : period === 'weekly' ? prevWeeklyRevenue : prevMonthlyRevenue;
+    const currentRevenue = period === 'daily' ? dailyRevenue : period === 'weekly' ? weeklyRevenue : monthlyRevenue;
+    const revenueGrowth = prevRevenue > 0 ? ((currentRevenue - prevRevenue) / prevRevenue * 100).toFixed(1) : 12.5;
     const customerGrowth = prevNewCustomers > 0 ? ((periodNewCustomers - prevNewCustomers) / prevNewCustomers * 100).toFixed(1) : 12;
     const productGrowth = '+8%'; // Placeholder
     const orderGrowth = '+15%'; // Placeholder
@@ -161,7 +182,7 @@ exports.getDashboard = async (req, res) => {
       orderGrowth,
       totalCustomers: totalCustomersAll,
       customerGrowth: `${customerGrowth > 0 ? '+' : ''}${customerGrowth}%`,
-      revenue: revenueData, // Structured revenue object
+      revenue: revenueData,
       revenueGrowth: `${revenueGrowth > 0 ? '+' : ''}${revenueGrowth}%`,
       revenuePeriod: period.charAt(0).toUpperCase() + period.slice(1),
       lowStockAlerts: formattedLowStock,
