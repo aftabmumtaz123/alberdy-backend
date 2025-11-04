@@ -84,12 +84,11 @@ exports.createSupplier = async (req, res) => {
 
 
 
-// Get all suppliers
 exports.getAllSuppliers = async (req, res) => {
   try {
 
     const suppliers = await Supplier.find()
-      .sort({ createdAt: -1 }) // newest first
+      .sort({ createdAt: -1 }) 
       .select('-__v'); 
 
     res.status(200).json({

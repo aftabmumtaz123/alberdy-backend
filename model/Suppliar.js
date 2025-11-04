@@ -36,7 +36,15 @@ const SupplierSchema = new mongoose.Schema({
         fileName: String,
         filePath: String,
         uploadedAt: { type: Date, default: Date.now }
-    }]
+    }],
+
+    address: {
+        street: String,
+        city: String,
+        state: String,
+        zip: String,
+        country: String
+    }
 
 
 })
