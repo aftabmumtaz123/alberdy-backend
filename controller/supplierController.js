@@ -21,10 +21,14 @@ exports.createSupplier = async (req, res) => {
       errors.supplierName = 'Supplier name is required and must be at least 2 characters long';
     }
 
-    if (!supplierCode || !/^[A-Z0-9_-]+$/.test(supplierCode)) {
-      errors.supplierCode = 'Supplier code is required and must contain only uppercase letters, numbers, underscores, or hyphens';
+    //Auto Generated code validation
+
+    const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    if (!supplierCode) {
+      req.body.supplierCode = `SUP-${randomCode}`;
     }
 
+   
     if (email && !/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,})+$/.test(email)) {
       errors.email = 'Invalid email address format';
     }

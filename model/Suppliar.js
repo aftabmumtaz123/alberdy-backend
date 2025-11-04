@@ -45,8 +45,6 @@ const SupplierSchema = new mongoose.Schema({
         zip: String,
         country: String
     }
-
-
 })
 
 module.exports = mongoose.model('Supplier', SupplierSchema);
