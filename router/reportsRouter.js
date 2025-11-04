@@ -1,4 +1,4 @@
-const ReportController = require('./reportController');
+const ReportController = require('../controller/reportsController');
 const router = require('express').Router();
 
 router.get('/sales', ReportController.getSalesByPeriods);
