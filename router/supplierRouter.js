@@ -5,7 +5,7 @@ const {createSupplier} = require('../controller/supplierController');
 
 
 
-router.post('/suppliers', createSupplier);  
+router.post('/', createSupplier);  
 
 
 module.exports = router;
