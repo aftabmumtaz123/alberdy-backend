@@ -14,7 +14,12 @@ const orderSchema = new mongoose.Schema(
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     orderNumber: { type: String, unique: true, required: true },
     orderTrackingNumber: { type: String, unique: true, sparse: true },
-
+  deliveryDate: {
+    type: Date
+  },
+    deliveryPartner: {
+      type: String
+    },
     trackingStatus: {
       type: String,
       enum: ['not shipped','shipped','in transit','out for delivery','delivered','cancelled'],
@@ -58,5 +63,6 @@ orderSchema.index({ status: 1 });
 orderSchema.index({ 'items.product': 1 });
 
 module.exports = mongoose.model('Order', orderSchema);
+
 
 
