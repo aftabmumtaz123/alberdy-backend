@@ -31,9 +31,8 @@ class ReportController {
   // Get Sales by Daily, Weekly, and Monthly Periods
   static async getSalesByPeriods(req, res) {
     try {
-      const now = moment.tz('Asia/Karachi'); // 12:17 PM PKT, November 04, 2025
+      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 33, second: 0, millisecond: 0 }); // 12:33 PM PKT, November 04, 2025
 
-      // Calculate sales for each period in parallel
       const [dailyData, weeklyData, monthlyData] = await Promise.all([
         ReportController.calculateSalesPeriod('daily', now),
         ReportController.calculateSalesPeriod('weekly', now),
@@ -83,51 +82,22 @@ class ReportController {
     };
   }
 
-  // Get Most Sold Products (Default: Top 5 for current month)
+  // Get Most Sold Products by Daily, Weekly, and Monthly Periods
   static async getMostSoldProducts(req, res) {
     try {
-      const [start, end] = ReportController.getDateRange('monthly', moment.tz('Asia/Karachi'));
+      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 33, second: 0, millisecond: 0 }); // 12:33 PM PKT, November 04, 2025
 
-      const mostSold = await Order.aggregate([
-        { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
-        { $unwind: '$items' },
-        {
-          $lookup: {
-            from: 'products',
-            localField: 'items.product',
-            foreignField: '_id',
-            as: 'product'
-          }
-        },
-        { $unwind: '$product' },
-        {
-          $lookup: {
-            from: 'variantproducts',
-            localField: 'items.variant',
-            foreignField: '_id',
-            as: 'variant'
-          }
-        },
-        { $unwind: '$variant' },
-        {
-          $group: {
-            _id: '$product._id',
-            productName: { $first: '$product.name' },
-            sku: { $first: '$variant.sku' },
-            totalSold: { $sum: '$items.quantity' },
-            revenue: { $sum: { $multiply: ['$items.quantity', '$items.price'] } }
-          }
-        },
-        { $sort: { totalSold: -1 } },
-        { $limit: 5 }
+      const [dailyData, weeklyData, monthlyData] = await Promise.all([
+        ReportController.calculateMostSoldPeriod('daily', now),
+        ReportController.calculateMostSoldPeriod('weekly', now),
+        ReportController.calculateMostSoldPeriod('monthly', now)
       ]);
 
-      const data = mostSold.map(item => ({
-        productName: item.productName,
-        sku: item.sku,
-        totalSold: item.totalSold,
-        revenue: parseFloat(item.revenue.toFixed(2))
-      }));
+      const data = {
+        daily: dailyData,
+        weekly: weeklyData,
+        monthly: monthlyData
+      };
 
       res.json({ success: true, msg: 'Fetched Successfully', data });
     } catch (error) {
@@ -135,10 +105,62 @@ class ReportController {
     }
   }
 
+  // Helper function to calculate most sold products for a given period
+  static async calculateMostSoldPeriod(period, now) {
+    const [start, end] = ReportController.getDateRange(period, now);
+
+    const mostSold = await Order.aggregate([
+      { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
+      { $unwind: '$items' },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'items.product',
+          foreignField: '_id',
+          as: 'product'
+        }
+      },
+      { $unwind: '$product' },
+      {
+        $lookup: {
+          from: 'variantproducts',
+          localField: 'items.variant',
+          foreignField: '_id',
+          as: 'variant'
+        }
+      },
+      { $unwind: '$variant' },
+      {
+        $group: {
+          _id: '$product._id',
+          productName: { $first: '$product.name' },
+          sku: { $first: '$variant.sku' },
+          totalSold: { $sum: '$items.quantity' },
+          revenue: { $sum: { $multiply: ['$items.quantity', '$items.price'] } }
+        }
+      },
+      { $sort: { totalSold: -1 } },
+      { $limit: 5 }
+    ]);
+
+    const data = mostSold.map(item => ({
+      productName: item.productName,
+      sku: item.sku,
+      totalSold: item.totalSold,
+      revenue: parseFloat(item.revenue.toFixed(2))
+    }));
+
+    return {
+      items: data,
+      period: period.charAt(0).toUpperCase() + period.slice(1),
+      dateRange: `${moment.tz(start, 'Asia/Karachi').format('MMM DD, YYYY')} - ${moment.tz(end, 'Asia/Karachi').format('MMM DD, YYYY')}`
+    };
+  }
+
   // Get Orders by Status (Default: Current month)
   static async getOrdersByStatus(req, res) {
     try {
-      const [start, end] = ReportController.getDateRange('monthly', moment.tz('Asia/Karachi'));
+      const [start, end] = ReportController.getDateRange('monthly', moment.tz('Asia/Karachi').set({ hour: 12, minute: 33, second: 0, millisecond: 0 }));
 
       const ordersAgg = await Order.aggregate([
         { $match: { createdAt: { $gte: start, $lte: end } } },
@@ -191,7 +213,7 @@ class ReportController {
   // Get Expired Products
   static async getExpiredProducts(req, res) {
     try {
-      const now = moment.tz('Asia/Karachi').toDate();
+      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 33, second: 0, millisecond: 0 }).toDate();
 
       const expired = await Variant.find({ expiryDate: { $lt: now } })
         .populate('product', 'name')
@@ -213,7 +235,7 @@ class ReportController {
   // Get Revenue by Category (Default: Current month)
   static async getRevenueByCategory(req, res) {
     try {
-      const [start, end] = ReportController.getDateRange('monthly', moment.tz('Asia/Karachi'));
+      const [start, end] = ReportController.getDateRange('monthly', moment.tz('Asia/Karachi').set({ hour: 12, minute: 33, second: 0, millisecond: 0 }));
 
       const revenueByCategory = await Order.aggregate([
         { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
