@@ -30,7 +30,7 @@ class ReportController {
 
   static async getSalesByPeriods(req, res) {
     try {
-      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 46, second: 0, millisecond: 0 });
+      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 52, second: 0, millisecond: 0 });
 
       const [dailyData, weeklyData, monthlyData] = await Promise.all([
         ReportController.calculateSalesPeriod('daily', now),
@@ -82,7 +82,7 @@ class ReportController {
 
   static async getMostSoldProducts(req, res) {
     try {
-      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 46, second: 0, millisecond: 0 });
+      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 52, second: 0, millisecond: 0 });
 
       const [dailyData, weeklyData, monthlyData] = await Promise.all([
         ReportController.calculateMostSoldPeriod('daily', now),
@@ -210,7 +210,7 @@ class ReportController {
 
   static async getOrdersByStatus(req, res) {
     try {
-      const [start, end] = ReportController.getDateRange('monthly', moment.tz('Asia/Karachi').set({ hour: 12, minute: 46, second: 0, millisecond: 0 }));
+      const [start, end] = ReportController.getDateRange('monthly', moment.tz('Asia/Karachi').set({ hour: 12, minute: 52, second: 0, millisecond: 0 }));
 
       const ordersAgg = await Order.aggregate([
         { $match: { createdAt: { $gte: start, $lte: end } } },
@@ -261,7 +261,7 @@ class ReportController {
 
   static async getExpiredProducts(req, res) {
     try {
-      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 46, second: 0, millisecond: 0 }).toDate();
+      const now = moment.tz('Asia/Karachi').set({ hour: 12, minute: 52, second: 0, millisecond: 0 }).toDate();
 
       const expired = await Variant.find({ expiryDate: { $lt: now } })
         .populate('product', 'name')
@@ -282,7 +282,7 @@ class ReportController {
 
   static async getRevenueByCategory(req, res) {
     try {
-      const [start, end] = ReportController.getDateRange('monthly', moment.tz('Asia/Karachi').set({ hour: 12, minute: 46, second: 0, millisecond: 0 }));
+      const [start, end] = ReportController.getDateRange('monthly', moment.tz('Asia/Karachi').set({ hour: 12, minute: 52, second: 0, millisecond: 0 }));
 
       const revenueByCategory = await Order.aggregate([
         { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
