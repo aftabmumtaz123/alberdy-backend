@@ -52,7 +52,6 @@ const findUnitByIdOrName = async (value) => {
   return await Unit.findOne({ unit_name: trimmedValue, unit_status: 'enable' });
 };
 
-
 exports.createProduct = async (req, res) => {
   const {
     name,
@@ -107,7 +106,7 @@ exports.createProduct = async (req, res) => {
     );
     for (const file of allFiles) {
       try {
-        await fs.unlink(file);
+        await fs.unlink(file.path || file);
       } catch {}
     }
   };
@@ -160,6 +159,22 @@ exports.createProduct = async (req, res) => {
       return res.status(400).json({ success: false, msg: `Variation for ${i + 1} invalid discountPrice` });
     }
 
+    // Validate expiryDate and status
+    if (varObj.expiryDate) {
+      const expiry = new Date(varObj.expiryDate);
+      if (isNaN(expiry.getTime())) {
+        await cleanupAllFiles();
+        return res.status(400).json({ success: false, msg: `Variation ${i + 1}: Invalid expiry date format` });
+      }
+      if (expiry.getTime() < Date.now() && varObj.status === 'Active') {
+        await cleanupAllFiles();
+        return res.status(400).json({
+          success: false,
+          msg: `Variation ${i + 1}: Cannot set status to Active with expired expiryDate`,
+        });
+      }
+    }
+
     if (!varObj.sku || varObj.sku.trim() === '') {
       const timestamp = Math.floor(Date.now() / 1000);
       varObj.sku = `${productCode}-${(i + 1).toString().padStart(3, '0')}-${timestamp}`;
@@ -176,16 +191,6 @@ exports.createProduct = async (req, res) => {
     if (duplicateInBatch) {
       await cleanupAllFiles();
       return res.status(400).json({ success: false, msg: `Duplicate SKU '${varObj.sku}' in variations` });
-    }
-
-    // Validate expiryDate
-    if (varObj.expiryDate) {
-      const expiry = new Date(varObj.expiryDate);
-      if (isNaN(expiry.getTime())) {
-        await cleanupAllFiles();
-        return res.status(400).json({ success: false, msg: `Variation ${i + 1}: Invalid expiry date format` });
-      }
-      // Schema validation will handle past dates, so we don't need to check here
     }
   }
 
@@ -227,8 +232,8 @@ exports.createProduct = async (req, res) => {
       subcategory: subcategory._id,
       brand: brand._id,
       status,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
       variations: [],
     };
     if (ingredientsString) productData.ingredients = ingredientsString.trim();
@@ -255,7 +260,6 @@ exports.createProduct = async (req, res) => {
         discountPrice: parseFloat(varObj.discountPrice || 0),
         stockQuantity: parseInt(varObj.stockQuantity),
         weightQuantity: parseFloat(varObj.weightQuantity),
-        // Let schema middleware handle status based on expiryDate
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -266,10 +270,12 @@ exports.createProduct = async (req, res) => {
       if (variationImages[i]) {
         variantData.image = variationImages[i];
       }
+      if (varObj.status && ['Active', 'Inactive'].includes(varObj.status)) {
+        variantData.status = varObj.status;
+      }
 
       const newVariant = new Variant(variantData);
       try {
-        // Schema middleware will set status based on expiryDate
         await newVariant.validate();
         const savedVariant = await newVariant.save();
         variantIds.push(savedVariant._id);
@@ -353,7 +359,6 @@ exports.createProduct = async (req, res) => {
     });
   }
 };
-
 
 exports.getAllProducts = async (req, res) => {
   const { page = 1, limit = 10, category, subcategory, brand, status, name, lowStock } = req.query;
@@ -715,16 +720,13 @@ exports.getProductById = async (req, res) => {
   }
 };
 
-
 exports.updateProduct = async (req, res) => {
   const cleanupAllFiles = async (files = [], varImgs = {}) => {
     const all = [...files, ...Object.values(varImgs).filter(Boolean)].filter(f => f?.path);
     for (const f of all) {
       try {
         await fs.unlink(f.path || f);
-      } catch (e) {
-        /* ignore */
-      }
+      } catch {}
     }
   };
 
@@ -780,8 +782,6 @@ exports.updateProduct = async (req, res) => {
         if (req.files?.[field]) variationImages[i] = req.files[field][0].path;
       }
     }
-
-    // Enum……
 
     // Enum validations
     if (suitableFor && !['Puppy', 'Adult', 'Senior', 'All Ages'].includes(suitableFor)) {
@@ -937,17 +937,21 @@ exports.updateProduct = async (req, res) => {
           variantUpdate.expiryDate = existingVariant.expiryDate;
         }
 
-        // Handle status
-        if (v.status && ['Active', 'Inactive'].includes(v.status)) {
-          const expiryDate = variantUpdate.expiryDate ? new Date(variantUpdate.expiryDate) : null;
-          if (expiryDate && expiryDate.getTime() < Date.now() && v.status === 'Active') {
+        // Validate expiryDate and status
+        if (variantUpdate.expiryDate) {
+          const expiry = new Date(variantUpdate.expiryDate);
+          if (expiry.getTime() < Date.now() && v.status === 'Active') {
             await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
             return res.status(400).json({
               success: false,
               msg: `Variation ${i + 1}: Cannot set status to Active with expired expiryDate`,
             });
           }
-          variantUpdate.status = v.status; // Respect manual status
+        }
+
+        // Handle status
+        if (v.status && ['Active', 'Inactive'].includes(v.status)) {
+          variantUpdate.status = v.status;
         }
 
         if (variationImages[i]) variantUpdate.image = variationImages[i];
@@ -1059,7 +1063,7 @@ exports.updateProduct = async (req, res) => {
       ...(req.files?.['images'] ?? []),
       ...(req.files?.['thumbnail'] ? [req.files['thumbnail'][0]] : []),
     ];
-    await cleanupAllFiles(files, {});
+    await cleanupAllFiles(files, variationImages);
     if (err.name === 'MongoServerError' && err.code === 11000) {
       return res.status(400).json({
         success: false,
@@ -1079,7 +1083,6 @@ exports.updateProduct = async (req, res) => {
     });
   }
 };
-
 
 exports.deleteProduct = async (req, res) => {
   try {

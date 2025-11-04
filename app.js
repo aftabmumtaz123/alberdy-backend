@@ -20,17 +20,24 @@ app.set('trust proxy', 1);
 const Offer = require('./model/Offer');
 
 
-// Daily at midnight: Recompute all product stockQuantity excluding expired
+const cron = require('cron');
+
+// Daily at midnight: Recompute all product stockQuantity and update expired variants
 cron.schedule('0 0 * * *', async () => {
-  await Offer.updateExpiredOffers();
-  await Variant.updateExpiredVariants();
-  const now = new Date();
-  const productsWithEntries = await StockEntry.distinct('product');
-  for (const prodId of productsWithEntries) {
-    const currentStock = await calculateCurrentStock(prodId);
-    await Product.findByIdAndUpdate(prodId, { stockQuantity: currentStock });
+  try {
+    await Offer.updateExpiredOffers();
+    await Variant.updateExpiredVariants();
+    const now = new Date();
+    const productsWithEntries = await StockEntry.distinct('product');
+    for (const prodId of productsWithEntries) {
+      const currentStock = await calculateCurrentStock(prodId);
+      await Product.findByIdAndUpdate(prodId, { stockQuantity: currentStock });
+    }
+    console.log('Daily stock recalculation and variant status update completed at', new Date());
+  } catch (error) {
+    console.error('Cron job failed:', error);
+    // Optionally integrate a notification system (e.g., email or logging service)
   }
-  console.log('Daily stock recalculation completed');
 });
 
 
