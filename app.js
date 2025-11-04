@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const cron = require('node-cron');
-const Variant = require('./model/variantProduct')
+const Variant = require('./model/variantProduct');
 require('dotenv').config();
 const categoryRoutes = require('./router/categories'); // Import routes
 const productRoutes = require('./router/products'); // Import routes
