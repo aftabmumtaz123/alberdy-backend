@@ -4,7 +4,6 @@ const mongoose = require('mongoose');
 const fs = require('fs').promises;
 const { v4: uuidv4 } = require('uuid');
 
-// Joi validation schema
 const supplierSchema = Joi.object({
   supplierName: Joi.string().min(2).required(),
   supplierCode: Joi.string().optional(),
