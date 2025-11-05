@@ -1,5 +1,6 @@
-const Supplier = require('../model/Supplier'); 
+const Supplier = require('../model/Supplier'); // Fixed typo
 
+// Create a new supplier
 exports.createSupplier = async (req, res) => {
   try {
     let {
@@ -20,13 +21,9 @@ exports.createSupplier = async (req, res) => {
       errors.supplierName = 'Supplier name is required and must be at least 2 characters long';
     }
 
-    if (!email || !/^\S+@\S+\.\S+$/.test(email.trim())) {
-      errors.email = 'A valid email is required';
-    }
+   
 
-    if (!phone || phone.trim().length < 10) {
-      errors.phone = 'A valid phone number (min 10 digits) is required';
-    }
+    
 
     if (!supplierType || supplierType.trim() === '') {
       errors.supplierType = 'Supplier type is required';
