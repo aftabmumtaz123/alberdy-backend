@@ -1,0 +1,159 @@
+const Purchase = require('../models/Purchase');
+const Variant = require('../models/variantProduct');
+const Supplier = require('../models/Supplier');
+exports.createPurchase = async (req, res) => {
+  try {
+    const { supplierId, products, otherCharges, discount, payment } = req.body;
+
+    // Validate supplier
+    const supplier = await Supplier.findById(supplierId);
+    if (!supplier) return res.status(400).json({ success: false, message: 'Invalid supplier' });
+
+    // Validate variants and calculate totals
+    let subtotal = 0;
+    const validatedProducts = [];
+    for (let prod of products) {
+      const variant = await Variant.findById(prod.variantId);
+      if (!variant || variant.status === 'Inactive') {
+        return res.status(400).json({ success: false, message: `Invalid or inactive variant: ${prod.variantId}` });
+      }
+      const taxAmount = (prod.unitPrice * prod.quantity * (prod.taxPercent || 0)) / 100;
+      const productTotal = prod.unitPrice * prod.quantity + taxAmount;
+      subtotal += productTotal;
+      validatedProducts.push({ variantId: prod.variantId, quantity: prod.quantity, unitPrice: prod.unitPrice, taxAmount });
+    }
+
+    const grandTotal = subtotal + (otherCharges || 0) - (discount || 0);
+    const amountPaid = payment?.amountPaid || 0;
+    const amountDue = grandTotal - amountPaid;
+
+    // Generate unique purchaseCode
+    let purchaseCode = `PUR-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    while (await Purchase.findOne({ purchaseCode })) {
+      purchaseCode = `PUR-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    }
+
+    const purchase = new Purchase({
+      purchaseCode,
+      supplierId,
+      products: validatedProducts,
+      payment: { amountPaid, amountDue, type: payment?.type || null },
+      summary: { subtotal, otherCharges: otherCharges || 0, discount: discount || 0, grandTotal },
+    });
+
+    await purchase.save();
+
+    // Update stock levels
+    for (let prod of validatedProducts) {
+      await Variant.findByIdAndUpdate(prod.variantId, { $inc: { stockQuantity: prod.quantity } });
+    }
+
+    res.status(201).json({ success: true, message: 'Purchase created', data: purchase });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+};
+
+exports.getAllPurchases = async (req, res) => {
+  try {
+    const { page = 1, limit = 10, sort = 'date', order = 'desc' } = req.query;
+    const skip = (page - 1) * limit;
+
+    const purchases = await Purchase.find()
+      .sort({ [sort]: order === 'desc' ? -1 : 1 })
+      .skip(skip)
+      .limit(limit)
+      .populate('supplierId', 'supplierName');
+
+    const total = await Purchase.countDocuments();
+
+    res.status(200).json({ success: true, data: purchases, total, page, limit });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+};
+
+
+exports.getPurchaseById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const purchase = await Purchase.findById(id).populate('supplierId', 'supplierName');
+    if (!purchase) return res.status(404).json({ success: false, message: 'Purchase not found' });
+    res.status(200).json({ success: true, data: purchase });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+};
+
+
+
+
+exports.updatePurchase = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { supplierId, products, otherCharges, discount, payment } = req.body;
+
+    const purchase = await Purchase.findById(id);
+    if (!purchase) return res.status(404).json({ success: false, message: 'Purchase not found' });
+
+    // Validate variants and calculate new totals
+    let subtotal = 0;
+    const newProducts = [];
+    for (let prod of products) {
+      const variant = await Variant.findById(prod.variantId);
+      if (!variant || variant.status === 'Inactive') {
+        return res.status(400).json({ success: false, message: `Invalid or inactive variant: ${prod.variantId}` });
+      }
+      const taxAmount = (prod.unitPrice * prod.quantity * (prod.taxPercent || 0)) / 100;
+      const productTotal = prod.unitPrice * prod.quantity + taxAmount;
+      subtotal += productTotal;
+      newProducts.push({ variantId: prod.variantId, quantity: prod.quantity, unitPrice: prod.unitPrice, taxAmount });
+    }
+
+    const grandTotal = subtotal + (otherCharges || 0) - (discount || 0);
+    const amountPaid = payment?.amountPaid || purchase.payment.amountPaid;
+    const amountDue = grandTotal - amountPaid;
+
+    // Adjust stock levels
+    const oldProducts = purchase.products;
+    for (let oldProd of oldProducts) {
+      const newProd = newProducts.find(p => p.variantId.toString() === oldProd.variantId.toString());
+      const diff = newProd ? newProd.quantity - oldProd.quantity : -oldProd.quantity;
+      if (diff !== 0) {
+        await Variant.findByIdAndUpdate(oldProd.variantId, { $inc: { stockQuantity: diff } });
+      }
+    }
+
+    purchase.set({
+      supplierId,
+      products: newProducts,
+      payment: { amountPaid, amountDue, type: payment?.type || purchase.payment.type },
+      summary: { subtotal, otherCharges: otherCharges || 0, discount: discount || 0, grandTotal },
+    });
+    await purchase.save();
+
+    res.status(200).json({ success: true, message: 'Purchase updated', data: purchase });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+};
+
+
+
+
+exports.deletePurchase = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const purchase = await Purchase.findByIdAndDelete(id);
+    if (!purchase) return res.status(404).json({ success: false, message: 'Purchase not found' });
+
+    // Decrease stock levels
+    for (let prod of purchase.products) {
+      await Variant.findByIdAndUpdate(prod.variantId, { $inc: { stockQuantity: -prod.quantity } });
+    }
+
+    res.status(200).json({ success: true, message: 'Purchase deleted' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+};
