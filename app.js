@@ -10,9 +10,20 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 // Middleware (parsers first!)
 const cookieParser = require('cookie-parser'); // Add require
+
+
+
+app.use(express.json());
+app.use(cookieParser()); 
+app.use(express.urlencoded({ extended: true }));
+
+
+
+
+
 app.use(morgan('dev'));
 app.use(cors());
-// app.set('trust proxy', 1);
+app.set('trust proxy', 1);
 
 
 
