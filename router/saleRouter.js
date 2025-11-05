@@ -2,10 +2,10 @@ const express = require('express');
 const router = express.Router();
 const saleController = require('../controller/salesController');
 
-router.get('/', salesController.getAllSales);
-router.post('/', salesController.createSale);
-router.get('/:id', salesController.getSaleById);
-router.put('/:id', salesController.updateSale);
-router.delete('/:id', salesController.deleteSale);
+router.get('/', saleController.getAllSales);
+router.post('/', saleController.createSale);
+router.get('/:id', saleController.getSaleById);
+router.put('/:id', saleController.updateSale);
+router.delete('/:id', saleController.deleteSale);
 
 module.exports = router;
