@@ -240,7 +240,7 @@ exports.updateSupplier = async (req, res) => {
       ...(email && { email: email.trim() }),
       ...(phone && { phone: phone.trim() }),
       ...(supplierType && { supplierType: supplierType.trim() }),
-      ...(address && { address: address.trim() }),
+      ...(address && { address}),
       ...(status && { status }),
       ...(attachments && { attachments }),
     };
