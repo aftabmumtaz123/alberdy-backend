@@ -64,9 +64,8 @@ exports.getAllPurchases = async (req, res) => {
     const { page = 1, limit = 10 } = req.query;
     const skip = (page - 1) * limit;
 
-    // Sort by 'date' in ASCENDING order (oldest first)
     const purchases = await Purchase.find()
-      .sort({ date: 1 }) // 1 = ascending, -1 = descending
+      .sort({ date: 1 })
       .skip(skip)
       .limit(parseInt(limit))
       .populate('supplierId', 'supplierName')
