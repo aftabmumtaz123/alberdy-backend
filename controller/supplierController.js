@@ -10,6 +10,7 @@ exports.createSupplier = async (req, res) => {
       email,
       phone,
       supplierType,
+      address,
       status,
       attachments
     } = req.body;

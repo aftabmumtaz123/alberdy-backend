@@ -38,7 +38,7 @@ cron.schedule('0 0 * * *', async () => {
 
 
 app.use(express.json());
-app.use(cookieParser()); // Add cookie-parser middleware
+app.use(cookieParser()); 
 app.use(express.urlencoded({ extended: true }));
 
 
