@@ -61,23 +61,39 @@ exports.createPurchase = async (req, res) => {
 
 exports.getAllPurchases = async (req, res) => {
   try {
-    const { page = 1, limit = 10, sort = 'date', order = 'desc' } = req.query;
+    const { page = 1, limit = 10 } = req.query;
     const skip = (page - 1) * limit;
 
+    // Sort by 'date' in ASCENDING order (oldest first)
     const purchases = await Purchase.find()
-      .sort({ [sort]: order === 'desc' ? -1 : 1 })
+      .sort({ date: 1 }) // 1 = ascending, -1 = descending
       .skip(skip)
-      .limit(limit)
-      .populate('supplierId', 'supplierName');
+      .limit(parseInt(limit))
+      .populate('supplierId', 'supplierName')
+      .populate('products.variantId', 'sku attribute value unit');
 
     const total = await Purchase.countDocuments();
 
-    res.status(200).json({ success: true, data: purchases, total, page, limit });
+    res.status(200).json({
+      success: true,
+      message: 'Purchases fetched successfully',
+      data: purchases,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(total / limit),
+      },
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    console.error('Error fetching purchases:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching purchases',
+      error: error.message,
+    });
   }
 };
-
 
 
 exports.getPurchaseById = async (req, res) => {
