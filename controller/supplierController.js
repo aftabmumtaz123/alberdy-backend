@@ -200,9 +200,6 @@ exports.updateSupplier = async (req, res) => {
       }
     }
 
-    if (phone && !/^\+?\d{10,15}$/.test(phone)) {
-      errors.phone = 'Valid phone number is required (10-15 digits, optional + prefix)';
-    }
 
     if (supplierType && supplierType.trim() === '') {
       errors.supplierType = 'Supplier type cannot be empty';
@@ -272,7 +269,6 @@ exports.updateSupplier = async (req, res) => {
   }
 };
 
-// Delete a supplier
 exports.deleteSupplier = async (req, res) => {
   try {
     const { id } = req.params;
