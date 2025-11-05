@@ -1,6 +1,6 @@
-const Purchase = require('../models/Purchase');
-const Variant = require('../models/variantProduct');
-const Supplier = require('../models/Supplier');
+const Purchase = require('../model/Purchase');
+const Variant = require('../model/variantProduct');
+const Supplier = require('../model/Supplier');
 exports.createPurchase = async (req, res) => {
   try {
     const { supplierId, products, otherCharges, discount, payment } = req.body;
