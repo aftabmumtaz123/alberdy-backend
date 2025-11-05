@@ -68,16 +68,16 @@ exports.getAllPurchases = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const purchases = await Purchase.find()
-      .sort({ date: 1 }) // Changed from createdAt to date (assumes date is the intended sort field)
+      .sort({ date: 1 }) 
       .skip(skip)
       .limit(parseInt(limit))
-      .populate('supplierId', 'supplierName') // Populate supplier details
+      .populate('supplierId', 'supplierName')
       .populate({
-        path: 'products.variantId', // Populate the variantId within products array
+        path: 'products.variantId', 
         select: 'sku attribute value unit purchasePrice price discountPrice stockQuantity expiryDate weightQuantity image', // Select Variant fields
         populate: {
-          path: 'product', // Populate the Product reference within Variant
-          select: 'name images thumbnail description' // Select Product fields (name, image-related fields, etc.)
+          path: 'product',
+          select: 'name images thumbnail description' 
         }
       });
 
