@@ -67,7 +67,7 @@ exports.getAllPurchases = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const purchases = await Purchase.find()
-      .sort({ date: 1 })
+      .sort({ createdAt: 1 })
       .skip(skip)
       .limit(parseInt(limit))
       .populate('supplierId', 'supplierName')
@@ -117,7 +117,6 @@ exports.updatePurchase = async (req, res) => {
     const purchase = await Purchase.findById(id);
     if (!purchase) return res.status(404).json({ success: false, message: 'Purchase not found' });
 
-    // Validate variants and calculate new totals
     let subtotal = 0;
     const newProducts = [];
     for (let prod of products) {
