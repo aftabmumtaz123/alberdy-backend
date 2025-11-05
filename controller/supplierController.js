@@ -1,161 +1,125 @@
 const Supplier = require('../model/Supplier');
 const upload = require('../config/multer'); // Path to your multer config
 
-// Create a new supplier
 exports.createSupplier = async (req, res) => {
-  upload.array('attachments', 5)(req, res, async (err) => {
-    if (err) {
-      console.error('Multer Error:', err);
+  try {
+    if (!req.body) {
       return res.status(400).json({
         success: false,
-        message: 'File upload failed',
-        error: err.message,
+        message: 'Request body is missing',
       });
     }
 
-    try {
-      if (!req.body) {
-        return res.status(400).json({
-          success: false,
-          message: 'Request body is missing',
-        });
+    let {
+      supplierName,
+      supplierCode,
+      contactPerson,
+      email,
+      phone,
+      supplierType,
+      address,
+      status,
+    } = req.body;
+
+    const errors = {};
+
+    // Validation
+    if (!supplierName || supplierName.trim().length < 2) {
+      errors.supplierName = 'Supplier name must be at least 2 characters';
+    }
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      errors.email = 'Valid email required';
+    } else if (await Supplier.findOne({ email })) {
+      errors.email = 'Email already exists';
+    }
+
+    if (!phone || !/^\+?\d{10,15}$/.test(phone)) {
+      errors.phone = 'Valid phone number required';
+    }
+
+    if (!supplierType || supplierType.trim() === '') {
+      errors.supplierType = 'Supplier type required';
+    }
+
+    if (address) {
+      try {
+        address = typeof address === 'string' ? JSON.parse(address) : address;
+      } catch {
+        errors.address = 'Address must be valid JSON';
       }
+    }
 
-      let {
-        supplierName,
-        supplierCode,
-        contactPerson,
-        email,
-        phone,
-        supplierType,
-        address,
-        status,
-      } = req.body;
+    const allowedStatus = ['Active', 'Inactive'];
+    const statusToUse = allowedStatus.includes(status) ? status : 'Active';
 
-      const errors = {};
-
-      // 🔹 Manual field validations
-      if (!supplierName || supplierName.trim().length < 2) {
-        errors.supplierName = 'Supplier name is required and must be at least 2 characters long';
-      }
-
-      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        errors.email = 'Valid email is required';
-      } else {
-        const existingEmail = await Supplier.findOne({ email: email.trim() });
-        if (existingEmail) {
-          errors.email = 'Email already exists';
+    let supplierCodeToUse = supplierCode?.trim();
+    if (!supplierCodeToUse) {
+      let isUnique = false;
+      while (!isUnique) {
+        const randomCode = `SUP-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+        if (!(await Supplier.findOne({ supplierCode: randomCode }))) {
+          supplierCodeToUse = randomCode;
+          isUnique = true;
         }
       }
+    } else if (await Supplier.findOne({ supplierCode: supplierCodeToUse })) {
+      errors.supplierCode = 'Supplier code already exists';
+    }
 
-      if (!phone || !/^\+?\d{10,15}$/.test(phone)) {
-        errors.phone = 'Valid phone number is required (10-15 digits, optional + prefix)';
-      }
+    const attachments = req.files
+      ? req.files.map(f => ({
+          fileName: f.originalname,
+          filePath: f.path,
+          uploadedAt: new Date(),
+        }))
+      : [];
 
-      if (!supplierType || supplierType.trim() === '') {
-        errors.supplierType = 'Supplier type is required';
-      }
-
-      // Validate address object
-      if (address) {
-        try {
-          address = typeof address === 'string' ? JSON.parse(address) : address;
-          if (address.street && address.street.trim() === '') {
-            errors['address.street'] = 'Street cannot be empty if provided';
-          }
-          if (address.city && address.city.trim() === '') {
-            errors['address.city'] = 'City cannot be empty if provided';
-          }
-          if (address.state && address.state.trim() === '') {
-            errors['address.state'] = 'State cannot be empty if provided';
-          }
-          if (address.zip && address.zip.trim() === '') {
-            errors['address.zip'] = 'Zip code cannot be empty if provided';
-          }
-          if (address.country && address.country.trim() === '') {
-            errors['address.country'] = 'Country cannot be empty if provided';
-          }
-        } catch (e) {
-          errors.address = 'Invalid address format; must be a valid JSON object';
-        }
-      }
-
-      const allowedStatus = ['Active', 'Inactive'];
-      const statusToUse = status && allowedStatus.includes(status) ? status : 'Active';
-
-      // Generate unique supplierCode if not provided
-      let supplierCodeToUse = supplierCode?.trim();
-      if (!supplierCodeToUse) {
-        let isUnique = false;
-        while (!isUnique) {
-          const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-          supplierCodeToUse = `SUP-${randomCode}`;
-          const existing = await Supplier.findOne({ supplierCode: supplierCodeToUse });
-          if (!existing) isUnique = true;
-        }
-      } else {
-        const existing = await Supplier.findOne({ supplierCode: supplierCodeToUse });
-        if (existing) {
-          errors.supplierCode = 'Supplier code already exists';
-        }
-      }
-
-      // Handle uploaded files
-      const attachments = req.files
-        ? req.files.map(file => ({
-            fileName: file.originalname,
-            filePath: file.path,
-            uploadedAt: new Date(),
-          }))
-        : [];
-
-      // Return validation errors
-      if (Object.keys(errors).length > 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Validation failed',
-          errors,
-        });
-      }
-
-      // 🔹 Save supplier
-      const supplier = new Supplier({
-        supplierName: supplierName.trim(),
-        supplierCode: supplierCodeToUse,
-        contactPerson: contactPerson?.trim(),
-        email: email.trim(),
-        phone: phone.trim(),
-        supplierType: supplierType.trim(),
-        address: address
-          ? {
-              street: address.street?.trim(),
-              city: address.city?.trim(),
-              state: address.state?.trim(),
-              zip: address.zip?.trim(),
-              country: address.country?.trim(),
-            }
-          : undefined,
-        status: statusToUse,
-        attachments,
-      });
-
-      await supplier.save();
-
-      res.status(201).json({
-        success: true,
-        message: 'Supplier created successfully',
-        data: supplier,
-      });
-    } catch (error) {
-      console.error('Create Supplier Error:', error);
-      res.status(500).json({
+    if (Object.keys(errors).length > 0) {
+      return res.status(400).json({
         success: false,
-        message: 'Server error occurred while creating supplier',
-        error: error.message,
+        message: 'Validation failed',
+        errors,
       });
     }
-  });
+
+    const supplier = new Supplier({
+      supplierName: supplierName.trim(),
+      supplierCode: supplierCodeToUse,
+      contactPerson: contactPerson?.trim(),
+      email: email.trim(),
+      phone: phone.trim(),
+      supplierType: supplierType.trim(),
+      address: address
+        ? {
+            street: address.street?.trim(),
+            city: address.city?.trim(),
+            state: address.state?.trim(),
+            zip: address.zip?.trim(),
+            country: address.country?.trim(),
+          }
+        : undefined,
+      status: statusToUse,
+      attachments,
+    });
+
+    await supplier.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Supplier created successfully',
+      data: supplier,
+    });
+  } catch (error) {
+    console.error('Create Supplier Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error occurred while creating supplier',
+      error: error.message,
+    });
+  }
 };
+
 
 // Get all suppliers
 exports.getAllSuppliers = async (req, res) => {
