@@ -61,17 +61,25 @@ exports.createPurchase = async (req, res) => {
   }
 };
 
+
 exports.getAllPurchases = async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
     const skip = (page - 1) * limit;
 
     const purchases = await Purchase.find()
-      .sort({ createdAt: 1 })
+      .sort({ date: 1 }) // Changed from createdAt to date (assumes date is the intended sort field)
       .skip(skip)
       .limit(parseInt(limit))
-      .populate('supplierId', 'supplierName')
-      .populate('products.variantId', 'sku attribute value unit');
+      .populate('supplierId', 'supplierName') // Populate supplier details
+      .populate({
+        path: 'products.variantId', // Populate the variantId within products array
+        select: 'sku attribute value unit purchasePrice price discountPrice stockQuantity expiryDate weightQuantity image', // Select Variant fields
+        populate: {
+          path: 'product', // Populate the Product reference within Variant
+          select: 'name images thumbnail description' // Select Product fields (name, image-related fields, etc.)
+        }
+      });
 
     const total = await Purchase.countDocuments();
 
