@@ -34,9 +34,7 @@ exports.createSupplier = async (req, res) => {
       errors.email = 'Email already exists';
     }
 
-    if (!phone || !/^\+?\d{10,15}$/.test(phone)) {
-      errors.phone = 'Valid phone number required';
-    }
+ 
 
     if (!supplierType || supplierType.trim() === '') {
       errors.supplierType = 'Supplier type required';
@@ -223,9 +221,6 @@ exports.updateSupplier = async (req, res) => {
       if (existingEmail) errors.email = 'Email already exists';
     }
 
-    if (phone && !/^\+?\d{10,15}$/.test(phone)) {
-      errors.phone = 'Valid phone number is required (10-15 digits, optional + prefix)';
-    }
 
     if (supplierType && supplierType.trim() === '') {
       errors.supplierType = 'Supplier type cannot be empty';
