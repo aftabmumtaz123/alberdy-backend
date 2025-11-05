@@ -50,7 +50,6 @@ exports.createSupplier = async (req, res) => {
     const allowedStatus = ['Active', 'Inactive'];
     const statusToUse = status && allowedStatus.includes(status) ? status : 'Active';
 
-    // Generate unique supplierCode if not provided
     let supplierCodeToUse = supplierCode?.trim();
     if (!supplierCodeToUse) {
       let isUnique = false;
