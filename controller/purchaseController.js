@@ -8,11 +8,9 @@ exports.createPurchase = async (req, res) => {
   try {
     const { supplierId, products, otherCharges, discount, payment, notes } = req.body;
 
-    // Validate supplier
     const supplier = await Supplier.findById(supplierId);
     if (!supplier) return res.status(400).json({ success: false, message: 'Invalid supplier' });
 
-    // Validate variants and calculate totals
     let subtotal = 0;
     const validatedProducts = [];
     for (let prod of products) {
@@ -30,7 +28,6 @@ exports.createPurchase = async (req, res) => {
     const amountPaid = payment?.amountPaid || 0;
     const amountDue = grandTotal - amountPaid;
 
-    // Generate unique purchaseCode
     let purchaseCode = `PUR-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
     while (await Purchase.findOne({ purchaseCode })) {
       purchaseCode = `PUR-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
@@ -47,9 +44,15 @@ exports.createPurchase = async (req, res) => {
 
     await purchase.save();
 
-    // Update stock levels
     for (let prod of validatedProducts) {
-      await Variant.findByIdAndUpdate(prod.variantId, { $inc: { stockQuantity: prod.quantity } });
+      const variant = await Variant.findById(prod.variantId);
+      if (variant) {
+        const updateData = { $inc: { stockQuantity: prod.quantity } };
+        if (prod.unitPrice !== variant.purchasePrice) {
+          updateData.$set = { ...updateData.$set, purchasePrice: prod.unitPrice };
+        }
+        await Variant.findByIdAndUpdate(prod.variantId, updateData);
+      }
     }
 
     res.status(201).json({ success: true, message: 'Purchase created', data: purchase });
@@ -57,7 +60,6 @@ exports.createPurchase = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 };
-
 
 exports.getAllPurchases = async (req, res) => {
   try {
