@@ -100,10 +100,22 @@ exports.getAllPurchases = async (req, res) => {
 exports.getPurchaseById = async (req, res) => {
   try {
     const { id } = req.params;
-    const purchase = await Purchase.findById(id).populate('supplierId', 'supplierName');
+    const purchase = await Purchase.findById(id)
+      .populate('supplierId', 'supplierName') // Populate supplier details
+      .populate({
+        path: 'products.variantId', 
+        select: 'sku attribute value unit purchasePrice price discountPrice stockQuantity expiryDate weightQuantity image', // Select specific fields
+        populate: {
+          path: 'product', // Populate the Product reference within Variant
+          select: 'name images thumbnail description' // Select Product fields (name, image-related fields, etc.)
+        }
+      });
+
     if (!purchase) return res.status(404).json({ success: false, message: 'Purchase not found' });
+
     res.status(200).json({ success: true, data: purchase });
   } catch (error) {
+    console.error('Server error:', error);
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 };
