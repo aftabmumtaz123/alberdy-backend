@@ -101,14 +101,25 @@ exports.createSupplier = async (req, res) => {
 // Get all suppliers
 exports.getAllSuppliers = async (req, res) => {
   try {
+    const page = parseInt(req.query.page) || 1;  // Default to page 1
+    const limit = parseInt(req.query.limit) || 10; // Default to 10 items per page
+    const skip = (page - 1) * limit;
+
     const suppliers = await Supplier.find()
       .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
       .select('-__v');
+
+    const totalSuppliers = await Supplier.countDocuments();
 
     res.status(200).json({
       success: true,
       message: 'Suppliers fetched successfully',
-      total: suppliers.length,
+      total: totalSuppliers,
+      currentPage: page,
+      totalPages: Math.ceil(totalSuppliers / limit),
+      count: suppliers.length,
       data: suppliers,
     });
   } catch (error) {
@@ -121,7 +132,7 @@ exports.getAllSuppliers = async (req, res) => {
   }
 };
 
-// Get a single supplier by ID
+
 exports.getSupplierById = async (req, res) => {
   try {
     const { id } = req.params;
