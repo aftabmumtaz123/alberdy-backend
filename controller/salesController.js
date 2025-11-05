@@ -1,5 +1,5 @@
 const Sale = require('../model/Sales');
-const Variant = require('../model/Variant');
+const Variant = require('../model/variantProduct');
 const Customer = require('../model/Customer');
 
 
