@@ -1,6 +1,5 @@
 const Supplier = require('../model/Supplier');
 
-// Create a new supplier
 exports.createSupplier = async (req, res) => {
   try {
    
@@ -28,11 +27,7 @@ exports.createSupplier = async (req, res) => {
       if (existingEmail) {
         errors.email = 'Email already exists';
       }
-    
-
-    if (!phone || !/^\+?\d{10,15}$/.test(phone)) {
-      errors.phone = 'Valid phone number is required (10-15 digits, optional + prefix)';
-    }
+ 
 
     if (!supplierType || supplierType.trim() === '') {
       errors.supplierType = 'Supplier type is required';
@@ -98,11 +93,10 @@ exports.createSupplier = async (req, res) => {
   }
 };
 
-// Get all suppliers
 exports.getAllSuppliers = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;  // Default to page 1
-    const limit = parseInt(req.query.limit) || 10; // Default to 10 items per page
+    const page = parseInt(req.query.page) || 1; 
+    const limit = parseInt(req.query.limit) || 10; 
     const skip = (page - 1) * limit;
 
     const suppliers = await Supplier.find()
