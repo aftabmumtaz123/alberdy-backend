@@ -2,8 +2,13 @@ const Supplier = require('../model/Supplier');
 
 exports.createSupplier = async (req, res) => {
   try {
-   console.log('REQ BODY:', req.body);
 
+    if(!req.body) {
+      return res.status(400).json({
+        success: false,
+        message: 'Request body is missing',
+      });
+    }
 
     let {
       supplierName,
