@@ -24,7 +24,6 @@ exports.createSupplier = async (req, res) => {
 
     const errors = {};
 
-    // 🔹 Manual field validations
     if (!supplierName || supplierName.trim().length < 2) {
       errors.supplierName = 'Supplier name is required and must be at least 2 characters long';
     }
@@ -107,7 +106,6 @@ exports.getAllSuppliers = async (req, res) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .select('-__v');
 
     const totalSuppliers = await Supplier.countDocuments();
 
@@ -220,7 +218,6 @@ exports.updateSupplier = async (req, res) => {
       }
     }
 
-    // Return validation errors
     if (Object.keys(errors).length > 0) {
       return res.status(400).json({
         success: false,
@@ -229,7 +226,6 @@ exports.updateSupplier = async (req, res) => {
       });
     }
 
-    // 🔹 Update supplier
     const updateData = {
       ...(supplierName && { supplierName: supplierName.trim() }),
       ...(supplierCode && { supplierCode: supplierCode.trim() }),
