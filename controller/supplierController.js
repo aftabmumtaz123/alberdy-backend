@@ -2,7 +2,8 @@ const Supplier = require('../model/Supplier');
 
 exports.createSupplier = async (req, res) => {
   try {
-   
+   console.log('REQ BODY:', req.body);
+
 
     let {
       supplierName,
@@ -54,7 +55,6 @@ exports.createSupplier = async (req, res) => {
       }
     }
 
-    // Return validation errors
     if (Object.keys(errors).length > 0) {
       return res.status(400).json({
         success: false,
@@ -63,7 +63,6 @@ exports.createSupplier = async (req, res) => {
       });
     }
 
-    // 🔹 Save supplier
     const supplier = new Supplier({
       supplierName: supplierName.trim(),
       supplierCode: supplierCodeToUse,
@@ -180,7 +179,6 @@ exports.updateSupplier = async (req, res) => {
 
     const errors = {};
 
-    // 🔹 Manual field validations
     if (supplierName && supplierName.trim().length < 2) {
       errors.supplierName = 'Supplier name must be at least 2 characters long';
     }
@@ -188,7 +186,6 @@ exports.updateSupplier = async (req, res) => {
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       errors.email = 'Valid email is required';
     } else if (email) {
-      // Check email uniqueness, excluding the current supplier
       const existingEmail = await Supplier.findOne({
         email: email.trim(),
         _id: { $ne: id },
