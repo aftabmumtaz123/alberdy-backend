@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 5000;
 const cookieParser = require('cookie-parser'); // Add require
 app.use(morgan('dev'));
 app.use(cors());
-app.set('trust proxy', 1);
+// app.set('trust proxy', 1);
 
 
 
