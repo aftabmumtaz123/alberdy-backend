@@ -4,7 +4,6 @@ const Customer = require('../model/Customer');
 
 
 
-
 exports.createSale = async (req, res) => {
   try {
     const { date, customerId, products, summary, payment, notes } = req.body;

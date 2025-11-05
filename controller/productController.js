@@ -242,6 +242,10 @@ exports.createProduct = async (req, res) => {
     if (thumbnail) productData.thumbnail = thumbnail;
     if (description) productData.description = description.trim();
 
+
+
+
+
     const newProduct = new Product(productData);
     await newProduct.validate();
     await newProduct.save();
@@ -272,6 +276,10 @@ exports.createProduct = async (req, res) => {
       }
       if (varObj.status && ['Active', 'Inactive'].includes(varObj.status)) {
         variantData.status = varObj.status;
+      }
+
+      if(varObj.stockQuantity <= 0){
+        return res.status(400).json({ success: false, msg: `Stock quantity must be greater than zero for variant ${i + 1}` });
       }
 
       const newVariant = new Variant(variantData);
