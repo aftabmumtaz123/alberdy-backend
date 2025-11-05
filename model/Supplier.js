@@ -33,7 +33,9 @@ const SupplierSchema = new mongoose.Schema({
         default: 'Active'
     },
     attachments: [{
-       type: String
+        fileName: String,
+        filePath: String,
+        uploadedAt: { type: Date, default: Date.now }
     }],
 
     address: {
