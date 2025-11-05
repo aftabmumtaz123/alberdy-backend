@@ -208,9 +208,6 @@ exports.updateSupplier = async (req, res) => {
       errors.supplierType = 'Supplier type cannot be empty';
     }
 
-    if (address && address.trim() === '') {
-      errors.address = 'Address cannot be empty if provided';
-    }
 
     if (status && !['Active', 'Inactive'].includes(status)) {
       errors.status = 'Status must be either Active or Inactive';
