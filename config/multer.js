@@ -14,8 +14,10 @@ cloudinary.config({
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
-    folder: 'Uploads',
-    allowed_formats: ['jpeg', 'jpg', 'png', 'gif', 'jfif', 'webp', 'bmp', 'tiff', 'ico'],
+      folder: 'Uploads',
+      resource_type: 'auto',
+      allowed_formats: ['jpeg','jpg','png','gif','webp','pdf'],
+
     transformation: [
       {
         fetch_format: 'webp',  // Automatically convert to WebP
@@ -33,17 +35,16 @@ const storage = new CloudinaryStorage({
 
 
 const fileFilter = (req, file, cb) => {
-  const allowedMimes = [
-    'image/jpeg', // Covers .jpeg, .jpg, .jfif
-    'image/png',
-    'image/gif',
-    'image/webp',
-    'image/bmp',
-    'image/tiff', // Covers .tiff, .tif
-    'image/x-icon'
-  ];
+ const allowedMimes = [
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+  'image/bmp', 'image/tiff', 'image/x-icon',
+  'application/pdf'
+];
   const ext = path.extname(file.originalname).toLowerCase();
-  const allowedExts = ['.jpeg', '.jpg', '.png', '.gif', '.jfif', '.webp', '.bmp', '.tiff', '.tif', '.ico'];
+ const allowedExts = [
+  '.jpeg', '.jpg', '.png', '.gif', '.jfif', '.webp',
+  '.bmp', '.tiff', '.tif', '.ico', '.pdf'  // ✅ allow PDFs
+];
 
   // Debug logging
   console.log('File mimetype:', file.mimetype);
