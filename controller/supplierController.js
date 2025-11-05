@@ -43,9 +43,7 @@ exports.createSupplier = async (req, res) => {
       errors.supplierType = 'Supplier type is required';
     }
 
-    if (address && address.trim() === '') {
-      errors.address = 'Address cannot be empty if provided';
-    }
+    
 
     const allowedStatus = ['Active', 'Inactive'];
     const statusToUse = status && allowedStatus.includes(status) ? status : 'Active';
