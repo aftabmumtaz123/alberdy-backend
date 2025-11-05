@@ -76,7 +76,7 @@ exports.createSupplier = async (req, res) => {
       email: email.trim(),
       phone: phone.trim(),
       supplierType: supplierType.trim(),
-      address: address?.trim(),
+      address,
       status: statusToUse,
       attachments,
     });
