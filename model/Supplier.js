@@ -27,11 +27,8 @@ const SupplierSchema = new mongoose.Schema({
     supplierType: {
         type: String,
     },
-    status: {
-        type: String,
-        enum: ['Active', 'Inactive'],
-        default: 'Active'
-    },
+    status: { type: String, enum: ['Active', 'Inactive', 'Deleted'], default: 'Active' },
+
     attachments: [{
         fileName: String,
         filePath: String,
