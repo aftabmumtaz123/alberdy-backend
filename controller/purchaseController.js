@@ -1,9 +1,12 @@
 const Purchase = require('../model/Purchase');
 const Variant = require('../model/variantProduct');
 const Supplier = require('../model/Supplier');
+
+
+
 exports.createPurchase = async (req, res) => {
   try {
-    const { supplierId, products, otherCharges, discount, payment } = req.body;
+    const { supplierId, products, otherCharges, discount, payment, notes } = req.body;
 
     // Validate supplier
     const supplier = await Supplier.findById(supplierId);
@@ -39,6 +42,7 @@ exports.createPurchase = async (req, res) => {
       products: validatedProducts,
       payment: { amountPaid, amountDue, type: payment?.type || null },
       summary: { subtotal, otherCharges: otherCharges || 0, discount: discount || 0, grandTotal },
+      notes: notes || '',
     });
 
     await purchase.save();
@@ -53,6 +57,7 @@ exports.createPurchase = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 };
+
 
 exports.getAllPurchases = async (req, res) => {
   try {
@@ -74,6 +79,7 @@ exports.getAllPurchases = async (req, res) => {
 };
 
 
+
 exports.getPurchaseById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -86,12 +92,10 @@ exports.getPurchaseById = async (req, res) => {
 };
 
 
-
-
 exports.updatePurchase = async (req, res) => {
   try {
     const { id } = req.params;
-    const { supplierId, products, otherCharges, discount, payment } = req.body;
+    const { supplierId, products, otherCharges, discount, payment, notes } = req.body;
 
     const purchase = await Purchase.findById(id);
     if (!purchase) return res.status(404).json({ success: false, message: 'Purchase not found' });
@@ -129,6 +133,7 @@ exports.updatePurchase = async (req, res) => {
       products: newProducts,
       payment: { amountPaid, amountDue, type: payment?.type || purchase.payment.type },
       summary: { subtotal, otherCharges: otherCharges || 0, discount: discount || 0, grandTotal },
+      notes: notes || purchase.notes,
     });
     await purchase.save();
 
@@ -137,7 +142,6 @@ exports.updatePurchase = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 };
-
 
 
 
