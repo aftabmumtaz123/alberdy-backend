@@ -1,111 +1,137 @@
 const Supplier = require('../model/Supplier');
+const upload = require('../middleware/upload'); // Path to your multer config
 
+// Create a new supplier
 exports.createSupplier = async (req, res) => {
-  try {
-
-    if(!req.body) {
+  // Apply multer middleware for file uploads
+  upload.array('attachments', 5)(req, res, async (err) => {
+    if (err) {
+      console.error('Multer Error:', err);
       return res.status(400).json({
         success: false,
-        message: 'Request body is missing',
+        message: 'File upload failed',
+        error: err.message,
       });
     }
 
-    let {
-      supplierName,
-      supplierCode,
-      contactPerson,
-      email,
-      phone,
-      supplierType,
-      address,
-      status,
-      attachments,
-    } = req.body;
-
-    const errors = {};
-
-    if (!supplierName || supplierName.trim().length < 2) {
-      errors.supplierName = 'Supplier name is required and must be at least 2 characters long';
-    }
-
-      const existingEmail = await Supplier.findOne({ email });
-      if (existingEmail) {
-        errors.email = 'Email already exists';
+    try {
+      if (!req.body) {
+        return res.status(400).json({
+          success: false,
+          message: 'Request body is missing',
+        });
       }
- 
 
-    if (!supplierType || supplierType.trim() === '') {
-      errors.supplierType = 'Supplier type is required';
-    }
+      let {
+        supplierName,
+        supplierCode,
+        contactPerson,
+        email,
+        phone,
+        supplierType,
+        address,
+        status,
+      } = req.body;
 
-    
+      const errors = {};
 
-    const allowedStatus = ['Active', 'Inactive'];
-    const statusToUse = status && allowedStatus.includes(status) ? status : 'Active';
+      // 🔹 Manual field validations
+      if (!supplierName || supplierName.trim().length < 2) {
+        errors.supplierName = 'Supplier name is required and must be at least 2 characters long';
+      }
 
-    let supplierCodeToUse = supplierCode?.trim();
-    if (!supplierCodeToUse) {
-      let isUnique = false;
-      while (!isUnique) {
-        const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-        supplierCodeToUse = `SUP-${randomCode}`;
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        errors.email = 'Valid email is required';
+      } else {
+        const existingEmail = await Supplier.findOne({ email: email.trim() });
+        if (existingEmail) {
+          errors.email = 'Email already exists';
+        }
+      }
+
+      if (!supplierType || supplierType.trim() === '') {
+        errors.supplierType = 'Supplier type is required';
+      }
+
+      if (address && address.trim() === '') {
+        errors.address = 'Address cannot be empty if provided';
+      }
+
+      const allowedStatus = ['Active', 'Inactive'];
+      const statusToUse = status && allowedStatus.includes(status) ? status : 'Active';
+
+      // Generate unique supplierCode if not provided
+      let supplierCodeToUse = supplierCode?.trim();
+      if (!supplierCodeToUse) {
+        let isUnique = false;
+        while (!isUnique) {
+          const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+          supplierCodeToUse = `SUP-${randomCode}`;
+          const existing = await Supplier.findOne({ supplierCode: supplierCodeToUse });
+          if (!existing) isUnique = true;
+        }
+      } else {
         const existing = await Supplier.findOne({ supplierCode: supplierCodeToUse });
-        if (!existing) isUnique = true;
+        if (existing) {
+          errors.supplierCode = 'Supplier code already exists';
+        }
       }
-    } else {
-      const existing = await Supplier.findOne({ supplierCode: supplierCodeToUse });
-      if (existing) {
-        errors.supplierCode = 'Supplier code already exists';
-      }
-    }
 
-    if (Object.keys(errors).length > 0) {
-      return res.status(400).json({
+      // Handle uploaded files
+      const attachments = req.files ? req.files.map(file => file.path) : [];
+
+      // Return validation errors
+      if (Object.keys(errors).length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors,
+        });
+      }
+
+      // 🔹 Save supplier
+      const supplier = new Supplier({
+        supplierName: supplierName.trim(),
+        supplierCode: supplierCodeToUse,
+        contactPerson: contactPerson?.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        supplierType: supplierType.trim(),
+        address: address?.trim(),
+        status: statusToUse,
+        attachments,
+      });
+
+      await supplier.save();
+
+      res.status(201).json({
+        success: true,
+        message: 'Supplier created successfully',
+        data: supplier,
+      });
+    } catch (error) {
+      console.error('Create Supplier Error:', error);
+      res.status(500).json({
         success: false,
-        message: 'Validation failed',
-        errors,
+        message: 'Server error occurred while creating supplier',
+        error: error.message,
       });
     }
-
-    const supplier = new Supplier({
-      supplierName: supplierName.trim(),
-      supplierCode: supplierCodeToUse,
-      contactPerson: contactPerson?.trim(),
-      email: email.trim(),
-      phone: phone.trim(),
-      supplierType: supplierType.trim(),
-      address,
-      status: statusToUse,
-      attachments,
-    });
-
-    await supplier.save();
-
-    res.status(201).json({
-      success: true,
-      message: 'Supplier created successfully',
-      data: supplier,
-    });
-  } catch (error) {
-    console.error('Create Supplier Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error occurred while creating supplier',
-      error: error.message,
-    });
-  }
+  });
 };
 
+// Get all suppliers
 exports.getAllSuppliers = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1; 
-    const limit = parseInt(req.query.limit) || 10; 
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
     const suppliers = await Supplier.find()
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
+      .select('-__v');
 
     const totalSuppliers = await Supplier.countDocuments();
 
@@ -128,7 +154,7 @@ exports.getAllSuppliers = async (req, res) => {
   }
 };
 
-
+// Get a single supplier by ID
 exports.getSupplierById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -159,112 +185,136 @@ exports.getSupplierById = async (req, res) => {
 
 // Update a supplier
 exports.updateSupplier = async (req, res) => {
-  try {
-    const { id } = req.params;
-    if (!req.body) {
+  // Apply multer middleware for file uploads
+  upload.array('attachments', 5)(req, res, async (err) => {
+    if (err) {
+      console.error('Multer Error:', err);
       return res.status(400).json({
         success: false,
-        message: 'Request body is missing',
+        message: 'File upload failed',
+        error: err.message,
       });
     }
 
-    let {
-      supplierName,
-      supplierCode,
-      contactPerson,
-      email,
-      phone,
-      supplierType,
-      address,
-      status,
-      attachments,
-    } = req.body;
-
-    const errors = {};
-
-    if (supplierName && supplierName.trim().length < 2) {
-      errors.supplierName = 'Supplier name must be at least 2 characters long';
-    }
-
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      errors.email = 'Valid email is required';
-    } else if (email) {
-      const existingEmail = await Supplier.findOne({
-        email: email.trim(),
-        _id: { $ne: id },
-      });
-      if (existingEmail) {
-        errors.email = 'Email already exists';
+    try {
+      const { id } = req.params;
+      if (!req.body) {
+        return res.status(400).json({
+          success: false,
+          message: 'Request body is missing',
+        });
       }
-    }
 
+      let {
+        supplierName,
+        supplierCode,
+        contactPerson,
+        email,
+        phone,
+        supplierType,
+        address,
+        status,
+      } = req.body;
 
-    if (supplierType && supplierType.trim() === '') {
-      errors.supplierType = 'Supplier type cannot be empty';
-    }
+      const errors = {};
 
-
-    if (status && !['Active', 'Inactive'].includes(status)) {
-      errors.status = 'Status must be either Active or Inactive';
-    }
-
-    if (supplierCode && supplierCode.trim()) {
-      const existingCode = await Supplier.findOne({
-        supplierCode: supplierCode.trim(),
-        _id: { $ne: id },
-      });
-      if (existingCode) {
-        errors.supplierCode = 'Supplier code already exists';
+      // 🔹 Manual field validations
+      if (supplierName && supplierName.trim().length < 2) {
+        errors.supplierName = 'Supplier name must be at least 2 characters long';
       }
-    }
 
-    if (Object.keys(errors).length > 0) {
-      return res.status(400).json({
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        errors.email = 'Valid email is required';
+      } else if (email) {
+        const existingEmail = await Supplier.findOne({
+          email: email.trim(),
+          _id: { $ne: id },
+        });
+        if (existingEmail) {
+          errors.email = 'Email already exists';
+        }
+      }
+    
+
+      if (supplierType && supplierType.trim() === '') {
+        errors.supplierType = 'Supplier type cannot be empty';
+      }
+
+      if (address && address.trim() === '') {
+        errors.address = 'Address cannot be empty if provided';
+      }
+
+      if (status && !['Active', 'Inactive'].includes(status)) {
+        errors.status = 'Status must be either Active or Inactive';
+      }
+
+      if (supplierCode && supplierCode.trim()) {
+        const existingCode = await Supplier.findOne({
+          supplierCode: supplierCode.trim(),
+          _id: { $ne: id },
+        });
+        if (existingCode) {
+          errors.supplierCode = 'Supplier code already exists';
+        }
+      }
+
+      // Handle uploaded files (append to existing attachments)
+      let attachments = [];
+      if (req.files && req.files.length > 0) {
+        attachments = req.files.map(file => file.path);
+      }
+
+      // Return validation errors
+      if (Object.keys(errors).length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors,
+        });
+      }
+
+      // 🔹 Update supplier
+      const updateData = {
+        ...(supplierName && { supplierName: supplierName.trim() }),
+        ...(supplierCode && { supplierCode: supplierCode.trim() }),
+        ...(contactPerson && { contactPerson: contactPerson.trim() }),
+        ...(email && { email: email.trim() }),
+        ...(phone && { phone: phone.trim() }),
+        ...(supplierType && { supplierType: supplierType.trim() }),
+        ...(address && { address: address.trim() }),
+        ...(status && { status }),
+        ...(attachments.length > 0 && { $push: { attachments: { $each: attachments } } }), // Append new attachments
+      };
+
+      const supplier = await Supplier.findByIdAndUpdate(id, updateData, {
+        new: true,
+        runValidators: true,
+      });
+
+      if (!supplier) {
+        return res.status(404).json({
+          success: false,
+          message: 'Supplier not found',
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'Supplier updated successfully',
+        data: supplier,
+      });
+    } catch (error) {
+      console.error('Update Supplier Error:', error);
+      res.status(500).json({
         success: false,
-        message: 'Validation failed',
-        errors,
+        message: 'Server error occurred while updating supplier',
+        error: error.message,
       });
     }
-
-    const updateData = {
-      ...(supplierName && { supplierName: supplierName.trim() }),
-      ...(supplierCode && { supplierCode: supplierCode.trim() }),
-      ...(contactPerson && { contactPerson: contactPerson.trim() }),
-      ...(email && { email: email.trim() }),
-      ...(phone && { phone: phone.trim() }),
-      ...(supplierType && { supplierType: supplierType.trim() }),
-      ...(address && { address}),
-      ...(status && { status }),
-      ...(attachments && { attachments }),
-    };
-
-    const supplier = await Supplier.findByIdAndUpdate(id, updateData, {
-      new: true,
-      runValidators: true,
-    });
-
-    if (!supplier) {
-      return res.status(404).json({
-        success: false,
-        message: 'Supplier not found',
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: 'Supplier updated successfully',
-      data: supplier,
-    });
-  } catch (error) {
-    console.error('Update Supplier Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error occurred while updating supplier',
-      error: error.message,
-    });
-  }
+  });
 };
 
+// Delete a supplier
 exports.deleteSupplier = async (req, res) => {
   try {
     const { id } = req.params;
