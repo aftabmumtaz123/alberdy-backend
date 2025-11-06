@@ -61,24 +61,29 @@ exports.createPurchase = async (req, res) => {
   }
 };
 
-
 exports.getAllPurchases = async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
     const skip = (page - 1) * limit;
 
     const purchases = await Purchase.find()
-      .sort({ date: 1 }) 
+      .sort({ date: 1 })
       .skip(skip)
       .limit(parseInt(limit))
       .populate('supplierId', 'supplierName')
       .populate({
-        path: 'products.variantId', 
-        select: 'sku attribute value unit purchasePrice price discountPrice stockQuantity expiryDate weightQuantity image', // Select Variant fields
-        populate: {
-          path: 'product',
-          select: 'name images thumbnail description' 
-        }
+        path: 'products.variantId',
+        select: 'sku attribute value unit purchasePrice price discountPrice stockQuantity expiryDate weightQuantity image',
+        populate: [
+          {
+            path: 'product',
+            select: 'name images thumbnail description'
+          },
+          {
+            path: 'unit',
+            select: 'short_name' 
+          }
+        ]
       });
 
     const total = await Purchase.countDocuments();
@@ -103,6 +108,7 @@ exports.getAllPurchases = async (req, res) => {
     });
   }
 };
+
 
 
 exports.getPurchaseById = async (req, res) => {
@@ -196,4 +202,5 @@ exports.deletePurchase = async (req, res) => {
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
+
 };
