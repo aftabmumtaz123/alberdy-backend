@@ -154,9 +154,7 @@ const updateOffer = async (req, res) => {
       const newEnd = updateData.endDate ? new Date(updateData.endDate) : offer.endDate;
       let newProducts = updateData.applicableProducts !== undefined ? await resolveProducts(updateData.applicableProducts) : offer.applicableProducts.map(p => p._id.toString());
 
-      if (newEnd <= newStart) {
-        return res.status(400).json({ msg: 'End date must be after start date' });
-      }
+   
 
       // Validate products if changed
       if (updateData.applicableProducts !== undefined) {
