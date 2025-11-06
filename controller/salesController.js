@@ -185,7 +185,7 @@ exports.createSale = async (req, res) => {
           subTotal: parseFloat(populatedSale.summary.subTotal),
           taxTotal: parseFloat(populatedSale.summary.taxTotal),
           discount: parseFloat(populatedSale.summary.discount),
-          otherCharges: parseFloat(populatedSale.summary.otherCharges.),
+          otherCharges: parseFloat(populatedSale.summary.otherCharges),
           grandTotal: parseFloat(populatedSale.summary.grandTotal ),
         },
         payment: {
