@@ -32,7 +32,7 @@ const checkOverlaps = async (applicableProducts, startDate, endDate, excludeOffe
     };
     const count = await Offer.countDocuments(overlapQuery);
     if (count > 0) {
-      throw new Error(`Overlapping offer exists for product`);
+      throw new Error(`Overlapping offer exists for product: ${prodId.name}`);
     }
   }
 };
