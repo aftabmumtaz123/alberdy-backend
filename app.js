@@ -45,10 +45,6 @@ cron.schedule('0 0 * * *', async () => {
   }
 });
 
-app.get('*', (req, res) => {
-  res.status(404).send('Route not found');
-});
-
 
 app.use(express.json());
 app.use(cookieParser()); 
