@@ -46,6 +46,9 @@ cron.schedule('0 0 * * *', async () => {
   }
 });
 
+app.get('*', (req, res) => {
+  res.status(404).send('Route not found');
+});
 
 
 app.use(express.json());
@@ -78,7 +81,7 @@ app.use('/api/variants', require('./router/variant'));
 app.use('/api/report', require('./router/reportsRouter'))
 app.use('/api/purchases', require('./router/purchaseRouter'));
 app.use('/api/suppliers', require('./router/supplierRouter')); 
-app.use('/api/sales,' , require('./router/saleRouter'));
+app.use('/api/sales', require('./router/saleRouter'));
 
 
 app.get("/",(req,res)=>{
