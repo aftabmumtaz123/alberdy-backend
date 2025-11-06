@@ -153,7 +153,7 @@ exports.createSale = async (req, res) => {
           image: product.variantId?.product?.thumbnail || product.variantId?.image || '',
           unit: product.variantId?.unit?.short_name || 'Unknown',
           quantity: product.quantity,
-          Weight: 
+          Weight: product.variantId?.weightQuantity || '',
         })),
         customer: {
           id: populatedSale.customerId?._id,
