@@ -145,31 +145,78 @@ exports.getPurchaseById = async (req, res) => {
   }
 };
 
-
 exports.updatePurchase = async (req, res) => {
   try {
     const { id } = req.params;
-    const { supplierId, products, otherCharges, discount, status, payment, notes } = req.body;
+    const { supplierId, products, summary, status, payment, notes } = req.body;
+
+    // Validate summary object
+    if (!summary || typeof summary !== 'object') {
+      return res.status(400).json({ success: false, message: 'Summary object is required' });
+    }
+    const { otherCharges = 0, discount = 0 } = summary;
+
+    // Validate otherCharges and discount
+    if (typeof otherCharges !== 'number' || otherCharges < 0) {
+      return res.status(400).json({ success: false, message: 'otherCharges must be a non-negative number' });
+    }
+    if (typeof discount !== 'number' || discount < 0) {
+      return res.status(400).json({ success: false, message: 'discount must be a non-negative number' });
+    }
+
+    // Validate products array
+    if (!Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({ success: false, message: 'Products array is required and cannot be empty' });
+    }
 
     const purchase = await Purchase.findById(id);
-    if (!purchase) return res.status(404).json({ success: false, message: 'Purchase not found' });
+    if (!purchase) {
+      return res.status(404).json({ success: false, message: 'Purchase not found' });
+    }
 
     let subtotal = 0;
     const newProducts = [];
     for (let prod of products) {
+      // Validate product fields based on ProductPurchaseSchema
+      if (!prod.variantId || !prod.quantity || !prod.unitPrice) {
+        return res.status(400).json({ success: false, message: 'Each product must have variantId, quantity, and unitPrice' });
+      }
+      if (prod.quantity < 1 || prod.unitPrice < 0 || (prod.taxPercent && prod.taxPercent < 0)) {
+        return res.status(400).json({ success: false, message: 'Invalid product data: quantity, unitPrice, or taxPercent' });
+      }
+
       const variant = await Variant.findById(prod.variantId);
       if (!variant || variant.status === 'Inactive') {
         return res.status(400).json({ success: false, message: `Invalid or inactive variant: ${prod.variantId}` });
       }
+
       const taxAmount = (prod.unitPrice * prod.quantity * (prod.taxPercent || 0)) / 100;
       const productTotal = prod.unitPrice * prod.quantity + taxAmount;
       subtotal += productTotal;
-      newProducts.push({ variantId: prod.variantId, quantity: prod.quantity, unitPrice: prod.unitPrice, taxAmount });
+      newProducts.push({
+        variantId: prod.variantId,
+        quantity: prod.quantity,
+        unitPrice: prod.unitPrice,
+        taxAmount,
+        taxPercent: prod.taxPercent || 0,
+      });
     }
 
-    const grandTotal = subtotal + (otherCharges || 0) - (discount || 0);
-    const amountPaid = payment?.amountPaid || purchase.payment.amountPaid;
+    const grandTotal = subtotal + otherCharges - discount;
+    if (grandTotal < 0) {
+      return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
+    }
+
+    const amountPaid = payment?.amountPaid ?? purchase.payment.amountPaid;
     const amountDue = grandTotal - amountPaid;
+
+    // Validate payment fields
+    if (payment && (typeof payment.amountPaid !== 'number' || payment.amountPaid < 0)) {
+      return res.status(400).json({ success: false, message: 'amountPaid must be a non-negative number' });
+    }
+    if (payment?.type && !['Cash', 'Card', 'Online', 'BankTransfer'].includes(payment.type)) {
+      return res.status(400).json({ success: false, message: 'Invalid payment type' });
+    }
 
     // Adjust stock levels
     const oldProducts = purchase.products;
@@ -181,14 +228,25 @@ exports.updatePurchase = async (req, res) => {
       }
     }
 
+    // Update purchase
     purchase.set({
       supplierId,
       products: newProducts,
-      payment: { amountPaid, amountDue, type: payment?.type || purchase.payment.type },
-      summary: { subtotal, otherCharges: otherCharges || 0, discount: discount || 0, grandTotal },
-      notes: notes || purchase.notes,
-      status: status || purchase.status,
+      payment: {
+        amountPaid,
+        amountDue,
+        type: payment?.type ?? purchase.payment.type,
+      },
+      summary: {
+        subtotal,
+        otherCharges,
+        discount,
+        grandTotal,
+      },
+      notes: notes ?? purchase.notes,
+      status: status ?? purchase.status,
     });
+
     await purchase.save();
 
     res.status(200).json({ success: true, message: 'Purchase updated', data: purchase });
