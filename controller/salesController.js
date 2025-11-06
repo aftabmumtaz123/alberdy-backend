@@ -45,7 +45,6 @@ exports.createSale = async (req, res) => {
     const grandTotal = subTotal + (summary.otherCharges || 0) - (summary.discount || 0);
     if (summary.discount > subTotal) return res.status(400).json({ status: false, message: 'Discount cannot exceed subtotal' });
     if (date && new Date(date) > new Date()) return res.status(400).json({ status: false, message: 'Date cannot be in the future' });
-    if (payment.amount !== grandTotal) return res.status(400).json({ status: false, message: 'Payment amount must match grand total' });
 
     // Generate unique saleCode
     let saleCode = `SALE-000001`;

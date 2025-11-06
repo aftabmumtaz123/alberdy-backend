@@ -4,53 +4,121 @@ const Supplier = require('../model/Supplier');
 
 exports.createPurchase = async (req, res) => {
   try {
-    const { supplierId, products, otherCharges, discount, payment, notes } = req.body;
+    const { supplierId, products, summary, payment, notes } = req.body;
 
+    // Validate summary object
+    if (!summary || typeof summary !== 'object') {
+      return res.status(400).json({ success: false, message: 'Summary object is required' });
+    }
+    const { otherCharges = 0, discount = 0 } = summary;
+
+    // Validate otherCharges and discount
+    if (typeof otherCharges !== 'number' || otherCharges < 0) {
+      return res.status(400).json({ success: false, message: 'otherCharges must be a non-negative number' });
+    }
+    if (typeof discount !== 'number' || discount < 0) {
+      return res.status(400).json({ success: false, message: 'discount must be a non-negative number' });
+    }
+
+    // Validate supplier
     const supplier = await Supplier.findById(supplierId);
-    if (!supplier) return res.status(400).json({ success: false, message: 'Invalid supplier' });
+    if (!supplier) {
+      return res.status(400).json({ success: false, message: 'Invalid supplier' });
+    }
+
+    // Validate products array
+    if (!Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({ success: false, message: 'Products array is required and cannot be empty' });
+    }
 
     let subtotal = 0;
     const validatedProducts = [];
     for (let prod of products) {
+      // Validate product fields based on ProductPurchaseSchema
+      if (!prod.variantId || !prod.quantity || !prod.unitPrice) {
+        return res.status(400).json({ success: false, message: 'Each product must have variantId, quantity, and unitPrice' });
+      }
+      if (prod.quantity < 1 || prod.unitPrice < 0 || (prod.taxPercent && prod.taxPercent < 0)) {
+        return res.status(400).json({ success: false, message: 'Invalid product data: quantity, unitPrice, or taxPercent' });
+      }
+
       const variant = await Variant.findById(prod.variantId);
       if (!variant || variant.status === 'Inactive') {
         return res.status(400).json({ success: false, message: `Invalid or inactive variant: ${prod.variantId}` });
       }
+
       const taxAmount = (prod.unitPrice * prod.quantity * (prod.taxPercent || 0)) / 100;
       const productTotal = prod.unitPrice * prod.quantity + taxAmount;
       subtotal += productTotal;
-      validatedProducts.push({ variantId: prod.variantId, quantity: prod.quantity, unitPrice: prod.unitPrice, taxAmount });
+      validatedProducts.push({
+        variantId: prod.variantId,
+        quantity: prod.quantity,
+        unitPrice: prod.unitPrice,
+        taxAmount,
+        taxPercent: prod.taxPercent || 0,
+      });
     }
 
-    const grandTotal = subtotal + (otherCharges || 0) - (discount || 0);
-    const amountPaid = payment?.amountPaid || 0;
+    // Validate subtotal if provided
+    if (summary.subtotal && summary.subtotal !== subtotal) {
+      return res.status(400).json({ success: false, message: 'Provided subtotal does not match calculated subtotal' });
+    }
+
+    const grandTotal = subtotal + otherCharges - discount;
+    if (grandTotal < 0) {
+      return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
+    }
+
+    // Validate grandTotal if provided
+    if (summary.grandTotal && summary.grandTotal !== grandTotal) {
+      return res.status(400).json({ success: false, message: 'Provided grandTotal does not match calculated grandTotal' });
+    }
+
+    // Validate payment fields
+    if (payment && (typeof payment.amountPaid !== 'number' || payment.amountPaid < 0)) {
+      return res.status(400).json({ success: false, message: 'amountPaid must be a non-negative number' });
+    }
+    if (payment?.type && !['Cash', 'Card', 'Online', 'BankTransfer'].includes(payment.type)) {
+      return res.status(400).json({ success: false, message: 'Invalid payment type' });
+    }
+
+    const amountPaid = payment?.amountPaid ?? 0;
     const amountDue = grandTotal - amountPaid;
 
+    // Generate unique purchase code
     let purchaseCode = `PUR-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
     while (await Purchase.findOne({ purchaseCode })) {
       purchaseCode = `PUR-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
     }
 
+    // Create purchase
     const purchase = new Purchase({
       purchaseCode,
       supplierId,
       products: validatedProducts,
-      payment: { amountPaid, amountDue, type: payment?.type || null },
-      summary: { subtotal, otherCharges: otherCharges || 0, discount: discount || 0, grandTotal },
-      notes: notes || '',
+      payment: {
+        amountPaid,
+        amountDue,
+        type: payment?.type ?? null,
+      },
+      summary: {
+        subtotal,
+        otherCharges,
+        discount,
+        grandTotal,
+      },
+      notes: notes ?? '',
     });
 
     await purchase.save();
 
+    // Update stock and purchase price
     for (let prod of validatedProducts) {
-      const variant = await Variant.findById(prod.variantId);
-      if (variant) {
-        const updateData = { $inc: { stockQuantity: prod.quantity } };
-        if (prod.unitPrice !== variant.purchasePrice) {
-          updateData.$set = { ...updateData.$set, purchasePrice: prod.unitPrice };
-        }
-        await Variant.findByIdAndUpdate(prod.variantId, updateData);
+      const updateData = { $inc: { stockQuantity: prod.quantity } };
+      if (prod.unitPrice !== (await Variant.findById(prod.variantId)).purchasePrice) {
+        updateData.$set = { ...updateData.$set, purchasePrice: prod.unitPrice };
       }
+      await Variant.findByIdAndUpdate(prod.variantId, updateData);
     }
 
     res.status(201).json({ success: true, message: 'Purchase created', data: purchase });
