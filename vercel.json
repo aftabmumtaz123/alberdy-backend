@@ -8,9 +8,8 @@
   ],
   "functions": {
     "app.js": {
-      "limits": {
-        "requestBodySize": "10MB"
-      }
+      "maxDuration": 30,
+      "memory": 2048
     }
   },
   "routes": [
