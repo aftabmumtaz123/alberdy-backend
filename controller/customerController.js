@@ -67,14 +67,13 @@ exports.getAllCustomers = async (req, res) => {
   if (email) filter.email = { $regex: email, $options: 'i' };
 
   try {
-    // Aggregation to include orders count
     const customers = await Customer.aggregate([
       { $match: filter },
       {
         $lookup: {
-          from: 'orders', // Assuming 'orders' collection
+          from: 'orders', 
           localField: '_id',
-          foreignField: 'customer', // Assuming Orders has 'customer' ref
+          foreignField: 'customer', 
           as: 'orders'
         }
       },

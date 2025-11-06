@@ -207,6 +207,9 @@ exports.createSale = async (req, res) => {
     res.status(500).json({ status: false, message: 'Server error', error: error.message });
   }
 };
+
+
+
 exports.getAllSales = async (req, res) => {
   try {
     const { page = 1, limit = 10, startDate, endDate, paymentStatus, search } = req.query;
@@ -236,7 +239,7 @@ exports.getAllSales = async (req, res) => {
     }
 
     const sales = await Sale.find(query)
-      .sort({ createdAt: -1 }) // Changed to descending for recent sales first
+      .sort({ createdAt: -1 }) // Recent sales first
       .skip(skip)
       .limit(parseInt(limit))
       .populate('customerId', 'name email phone')
@@ -245,7 +248,7 @@ exports.getAllSales = async (req, res) => {
         select: 'sku attribute value unit purchasePrice price discountPrice stockQuantity expiryDate weightQuantity image',
         populate: [
           { path: 'product', select: 'name images thumbnail description' },
-          { path: 'unit', select: 'name symbol' }
+          { path: 'unit', select: 'unit_name short_name' } // Include short_name
         ],
       })
       .lean();
@@ -274,16 +277,16 @@ exports.getAllSales = async (req, res) => {
           },
           summary: {
             totalQuantity: sale.summary.totalQuantity,
-            subTotal: parseFloat(sale.summary.subTotal ),
-            taxTotal: parseFloat((sale.summary.taxTotal || totalTax) ), // Use stored taxTotal if available
-            discount: parseFloat(sale.summary.discount ),
-            otherCharges: parseFloat(sale.summary.otherCharges ),
-            grandTotal: parseFloat(sale.summary.grandTotal ),
+            subTotal: parseFloat(sale.summary.subTotal.toFixed(2)),
+            taxTotal: parseFloat((sale.summary.taxTotal || totalTax).toFixed(2)),
+            discount: parseFloat(sale.summary.discount.toFixed(2)),
+            otherCharges: parseFloat(sale.summary.otherCharges.toFixed(2)),
+            grandTotal: parseFloat(sale.summary.grandTotal.toFixed(2)),
           },
           payment: {
             type: sale.payment.type || null,
-            amountPaid: parseFloat(sale.payment.amountPaid ),
-            amountDue: parseFloat(sale.payment.amountDue ),
+            amountPaid: parseFloat(sale.payment.amountPaid.toFixed(2)),
+            amountDue: parseFloat(sale.payment.amountDue.toFixed(2)),
             notes: sale.payment.notes || '',
           },
           paymentStatus: sale.payment.amountPaid >= sale.summary.grandTotal ? 'Paid' : 'Pending',
@@ -297,15 +300,15 @@ exports.getAllSales = async (req, res) => {
               attribute: product.variantId?.attribute || '',
               value: product.variantId?.value || '',
               weightQuantity: product.variantId?.weightQuantity || '',
-              unit: product.variantId?.unit?.unit_name || 'kg',
+              unit: product.variantId?.unit?.short_name || 'Unknown', 
               image: product.variantId?.product?.thumbnail || product.variantId?.image || '',
               quantity: product.quantity,
-              price: parseFloat(product.price ),
-              unitCost: parseFloat(product.unitCost ),
+              price: parseFloat(product.price.toFixed(2)),
+              unitCost: parseFloat(product.unitCost.toFixed(2)),
               taxPercent: product.taxPercent || 0,
               taxType: product.taxType || 'Exclusive',
-              taxAmount: parseFloat(taxAmount ),
-              total: parseFloat((product.price * product.quantity + taxAmount) ),
+              taxAmount: parseFloat(taxAmount.toFixed(2)),
+              total: parseFloat((product.price * product.quantity + taxAmount).toFixed(2)),
               productDescription: product.variantId?.product?.description || '',
             };
           }),
@@ -326,10 +329,11 @@ exports.getAllSales = async (req, res) => {
   }
 };
 
+
 exports.updateSale = async (req, res) => {
   try {
     const { id } = req.params;
-    const { date, customerId, products, summary, payment, notes } = req.body;
+    const { date, customerId, products, summary, payment, notes, status } = req.body;
 
     const sale = await Sale.findById(id);
     if (!sale || sale.isDeleted) return res.status(404).json({ status: false, message: 'Sale not found' });
@@ -337,6 +341,11 @@ exports.updateSale = async (req, res) => {
     // Validate required fields
     if (!customerId || !products || !summary) {
       return res.status(400).json({ status: false, message: 'Customer ID, products, and summary are required' });
+    }
+
+    // Validate status
+    if (status && !['Pending', 'Completed', 'Cancelled', 'Refunded'].includes(status)) {
+      return res.status(400).json({ status: false, message: 'Status must be one of: Pending, Completed, Cancelled, Refunded' });
     }
 
     // Validate summary fields
@@ -359,6 +368,7 @@ exports.updateSale = async (req, res) => {
 
     let subTotal = 0;
     let totalQuantity = 0;
+    let taxTotal = 0;
     const newProducts = [];
     for (let prod of products) {
       if (!prod.variantId || !prod.quantity || !prod.price || !prod.unitCost) {
@@ -371,7 +381,6 @@ exports.updateSale = async (req, res) => {
         return res.status(400).json({ status: false, message: 'taxType must be Inclusive or Exclusive' });
       }
       const variant = await Variant.findById(prod.variantId);
-      // Check stock including old quantity (to account for stock being restored)
       const oldProduct = sale.products.find(p => p.variantId.toString() === prod.variantId.toString());
       const availableStock = variant ? variant.stockQuantity + (oldProduct ? oldProduct.quantity : 0) : 0;
       if (!variant || variant.status === 'Inactive' || availableStock < prod.quantity) {
@@ -380,6 +389,7 @@ exports.updateSale = async (req, res) => {
       const taxAmount = (prod.price * prod.quantity * (prod.taxPercent || 0)) / 100 * (prod.taxType === 'Exclusive' ? 1 : 0);
       const productTotal = prod.price * prod.quantity + taxAmount;
       subTotal += productTotal;
+      taxTotal += taxAmount;
       totalQuantity += prod.quantity;
       newProducts.push({ 
         variantId: prod.variantId, 
@@ -422,7 +432,7 @@ exports.updateSale = async (req, res) => {
     const oldProducts = sale.products;
     for (let oldProd of oldProducts) {
       const newProd = newProducts.find(p => p.variantId.toString() === oldProd.variantId.toString());
-      const diff = newProd ? oldProd.quantity - newProd.quantity : oldProd.quantity; // Positive diff = restore stock
+      const diff = newProd ? oldProd.quantity - newProd.quantity : oldProd.quantity;
       if (diff !== 0) {
         await Variant.findByIdAndUpdate(oldProd.variantId, { $inc: { stockQuantity: diff } });
       }
@@ -436,7 +446,7 @@ exports.updateSale = async (req, res) => {
     // Log history
     sale.salesHistory.push({
       action: 'Update',
-      changes: { date, customerId, products, summary, payment, notes },
+      changes: { date, customerId, products, summary, payment, notes, status },
       date: Date.now(),
     });
 
@@ -445,6 +455,7 @@ exports.updateSale = async (req, res) => {
       date: date && new Date(date) <= new Date() ? date : sale.date,
       customerId,
       products: newProducts,
+      status: status ?? sale.status, // Update status
       payment: { 
         type: payment?.type ?? sale.payment.type, 
         amountPaid, 
@@ -454,6 +465,7 @@ exports.updateSale = async (req, res) => {
       summary: { 
         totalQuantity, 
         subTotal, 
+        taxTotal, // Save taxTotal
         discount, 
         otherCharges, 
         grandTotal 
@@ -478,22 +490,56 @@ exports.updateSale = async (req, res) => {
       status: true, 
       message: 'Sale updated successfully', 
       data: {
-        ...updatedSale.toObject(),
-        amountPaid: updatedSale.payment.amountPaid,
-        amountDue: updatedSale.payment.amountDue,
-        products: updatedSale.products.map((product) => ({
-          ...product.toObject(),
-          productName: product.variantId?.product?.name || 'Unknown',
-          image: product.variantId?.product?.thumbnail || product.variantId?.image || '',
-          unit: product.variantId?.unit?.name || 'Unknown',
-          quantity: product.quantity,
-        })),
+        _id: updatedSale._id,
+        saleCode: updatedSale.saleCode,
+        date: updatedSale.date,
+        status: updatedSale.status,
+        notes: updatedSale.notes,
         customer: {
           id: updatedSale.customerId?._id,
-          name: updatedSale.customerId?.name || 'Unknown',
+          name: updatedSale.customerId?.name || 'Walk-in Customer',
           email: updatedSale.customerId?.email || '',
           phone: updatedSale.customerId?.phone || '',
         },
+        products: updatedSale.products.map((product) => {
+          const variant = product.variantId;
+          const taxAmount = (product.price * product.quantity * (product.taxPercent || 0)) / 100 
+                          * (product.taxType === 'Exclusive' ? 1 : 0);
+          return {
+            variantId: variant?._id,
+            productName: variant?.product?.name || 'Unknown',
+            sku: variant?.sku || '',
+            attribute: variant?.attribute || '',
+            value: variant?.value || '',
+            weightQuantity: variant?.weightQuantity || '',
+            unit: variant?.unit?.name || 'Unknown',
+            unitSymbol: variant?.unit?.symbol || '',
+            image: variant?.product?.thumbnail || variant?.image || '',
+            quantity: product.quantity,
+            price: parseFloat(product.price.toFixed(2)),
+            unitCost: parseFloat(product.unitCost.toFixed(2)),
+            taxPercent: product.taxPercent || 0,
+            taxType: product.taxType || 'Exclusive',
+            taxAmount: parseFloat(taxAmount.toFixed(2)),
+            total: parseFloat((product.price * product.quantity + taxAmount).toFixed(2)),
+          };
+        }),
+        summary: {
+          totalQuantity: updatedSale.summary.totalQuantity,
+          subTotal: parseFloat(updatedSale.summary.subTotal.toFixed(2)),
+          taxTotal: parseFloat(updatedSale.summary.taxTotal.toFixed(2)),
+          discount: parseFloat(updatedSale.summary.discount.toFixed(2)),
+          otherCharges: parseFloat(updatedSale.summary.otherCharges.toFixed(2)),
+          grandTotal: parseFloat(updatedSale.summary.grandTotal.toFixed(2)),
+        },
+        payment: {
+          type: updatedSale.payment.type || null,
+          amountPaid: parseFloat(updatedSale.payment.amountPaid.toFixed(2)),
+          amountDue: parseFloat(updatedSale.payment.amountDue.toFixed(2)),
+          notes: updatedSale.payment.notes || '',
+        },
+        createdAt: updatedSale.createdAt,
+        updatedAt: updatedSale.updatedAt,
       }
     });
   } catch (error) {
@@ -501,6 +547,9 @@ exports.updateSale = async (req, res) => {
     res.status(500).json({ status: false, message: 'Server error', error: error.message });
   }
 };
+
+
+
 exports.getSaleById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -542,8 +591,7 @@ exports.getSaleById = async (req, res) => {
             attribute: variant?.attribute || '',
             value: variant?.value || '',
             weightQuantity: variant?.weightQuantity || '',
-            unit: variant?.unit?.short_name || 'Unknown',
-            unitSymbol: variant?.unit?.symbol || '',
+            unit: variant?.unit?.short_name || 'Unknown', 
             image: variant?.product?.thumbnail || variant?.image || '',
             quantity: product.quantity,
             price: parseFloat(product.price ),
