@@ -32,6 +32,6 @@ const SalesSchema = new mongoose.Schema({
     date: { type: Date, default: Date.now },
     changes: { type: mongoose.Schema.Types.Mixed },
   }],
-});
+}, { timestamps: true });
 
 module.exports = mongoose.model('Sale', SalesSchema);

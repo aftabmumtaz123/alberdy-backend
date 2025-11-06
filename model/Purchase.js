@@ -25,6 +25,6 @@ const PurchaseSchema = new mongoose.Schema({
     grandTotal: { type: Number, required: true },
   },
   notes: { type: String, default: '' },
-});
+}, { timestamps: true });
 
 module.exports = mongoose.model('Purchase', PurchaseSchema);
