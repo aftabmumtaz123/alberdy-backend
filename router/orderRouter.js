@@ -80,7 +80,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin','Manager','Customer'
 
       if (variant.stockQuantity < qty)
         return res.status(400).json({ success: false,
-          msg: `Insufficient stock for ${variant.sku}. Available: ${variant.stockQuantity}` });
+          msg: `Product is out of stock, please remove it from cart.` });
 
       const price = variant.discountPrice || variant.price;
       const lineTotal = price * qty;
