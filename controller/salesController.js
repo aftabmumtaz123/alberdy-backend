@@ -297,7 +297,7 @@ exports.getAllSales = async (req, res) => {
               attribute: product.variantId?.attribute || '',
               value: product.variantId?.value || '',
               weightQuantity: product.variantId?.weightQuantity || '',
-              unit: product.variations?.unit?.short_name,
+              unit: product.variantId?.unit?.unit_name,
               image: product.variantId?.product?.thumbnail || product.variantId?.image || '',
               quantity: product.quantity,
               price: parseFloat(product.price ),
