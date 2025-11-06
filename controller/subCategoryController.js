@@ -76,6 +76,7 @@ exports.createSubcategory = async (req, res) => {
   }
 }
 
+
 exports.getAllSubcategories = async (req, res) => {
   const { page = 1, limit = 10, category, status, name } = req.query;
   const filter = {};
@@ -89,41 +90,55 @@ exports.getAllSubcategories = async (req, res) => {
 
   try {
     const subcategories = await Subcategory.find(filter)
-      .populate('parent_category_id', 'name _id')  // Include both name and _id for parent category
+      .populate('parent_category_id', 'name _id')
       .limit(limit * 1)
       .skip((page - 1) * limit)
       .sort({ createdAt: -1 });
-    
+
     const total = await Subcategory.countDocuments(filter);
 
+    // Aggregate product count per subcategory
+    const subcategoryProductCounts = await Product.aggregate([
+      {
+        $group: {
+          _id: '$subcategory', // Group by subcategory ID
+          productCount: { $sum: 1 } // Count the number of products per subcategory
+        }
+      }
+    ]);
+
+    // Convert product counts into a map for easy lookup
+    const productCountMap = new Map(subcategoryProductCounts.map(item => [item._id.toString(), item.productCount]));
+
     // Transform response to explicitly include parent category details by name and ID
-    // Hide the original 'name' and 'parent_category_id' fields by destructuring them out
-   const formattedSubcategories = subcategories.map(sub => {
-  const subObj = sub.toObject();
-  const parent = subObj.parent_category_id || {}; // Prevent null access
+    const formattedSubcategories = subcategories.map(sub => {
+      const subObj = sub.toObject();
+      const parent = subObj.parent_category_id || {}; // Prevent null access
+      return {
+        ...subObj,
+        parentCategory: {
+          id: parent._id || null,
+          name: parent.name || 'Unknown',
+        },
+        subcategoryName: subObj.name,
+        productCount: productCountMap.get(subObj._id.toString()) || 0 // Add product count, default to 0 if none
+      };
+    });
 
-  return {
-    ...subObj,
-    parentCategory: {
-      id: parent._id || null,
-      name: parent.name || 'Unknown',
-    },
-    subcategoryName: subObj.name,
-  };
-});
-
-    res.json({ 
+    res.json({
       success: true,
-      subcategories: formattedSubcategories,  // Use formatted version
-      total, 
+      subcategories: formattedSubcategories, // Use formatted version with productCount
+      total,
       pages: Math.ceil(total / limit),
-      currentPage: page 
+      currentPage: page
     });
   } catch (err) {
     console.error('Subcategory list error:', err);
     res.status(500).json({ success: false, msg: 'Server error fetching subcategories' });
   }
-}
+};
+
+
 
 exports.getsubcategoryById = async (req, res) => {
   try {
