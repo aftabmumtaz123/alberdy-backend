@@ -8,14 +8,12 @@ exports.createSale = async (req, res) => {
   try {
     const { date, customerId, products, summary, payment, notes } = req.body;
 
-    // Validate required fields
     if (!customerId || !products || !summary) {
       return res.status(400).json({ status: false, message: 'Customer ID, products, and summary are required' });
     }
     const customer = await Customer.findById(customerId);
     if (!customer) return res.status(400).json({ status: false, message: 'Invalid customer' });
 
-    // Validate and calculate totals
     let subTotal = 0;
     let totalQuantity = 0;
     const validatedProducts = [];

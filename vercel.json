@@ -6,6 +6,13 @@
       "use": "@vercel/node"
     }
   ],
+  "functions": {
+    "app.js": {
+      "limits": {
+        "requestBodySize": "10MB"
+      }
+    }
+  },
   "routes": [
     {
       "src": "/(.*)",

@@ -136,11 +136,11 @@ exports.getAllSuppliers = async (req, res) => {
     res.status(200).json({
       success: true,
       message: 'Suppliers fetched successfully',
+      data: suppliers,
       total: totalSuppliers,
       currentPage: page,
       totalPages: Math.ceil(totalSuppliers / limit),
       count: suppliers.length,
-      data: suppliers,
     });
   } catch (error) {
     console.error('Fetch Suppliers Error:', error);
