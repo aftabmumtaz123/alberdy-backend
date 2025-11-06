@@ -42,10 +42,7 @@ const createOffer = async (req, res) => {
   try {
     const { offerName, discountType, discountValue, applicableProducts, startDate, endDate, status = 'active' } = req.body;
 
-    // Validate dates
-    if (new Date(endDate) <= new Date(startDate)) {
-      return res.status(400).json({ msg: 'End date must be after start date' });
-    }
+ 
 
     // Validate discountValue
     if (discountValue <= 0) {
