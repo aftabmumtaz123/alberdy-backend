@@ -43,9 +43,6 @@ exports.createCategory =  async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error during category creation' });
   }
 }
-const Category = require('../model/Category');
-const Subcategory = require('../model/subCategory');
-const Product = require('../model/Product'); // Added to access Product model
 
 exports.getCategories = async (req, res) => {
   const { page = 1, limit = 10, status, name } = req.query;
