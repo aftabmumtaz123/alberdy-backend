@@ -1,15 +1,13 @@
 
 const Category = require('../model/Category'); 
 const Subcategory = require('../model/subCategory')
-
+const Product = require('../model/Product');
 
 
 exports.createCategory =  async (req, res) => {
   const { name, description, status = 'Active' } = req.body;
 
    const image = req.file ? req.file.path : null;
-
-
 
   if (!name) {
     return res.status(400).json({ success: false, msg: 'Category name is required' });
@@ -45,8 +43,11 @@ exports.createCategory =  async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error during category creation' });
   }
 }
+const Category = require('../model/Category');
+const Subcategory = require('../model/subCategory');
+const Product = require('../model/Product'); // Added to access Product model
 
-exports.getCategories =  async (req, res) => {
+exports.getCategories = async (req, res) => {
   const { page = 1, limit = 10, status, name } = req.query;
   const filter = {};
   if (status) filter.status = status;
@@ -54,25 +55,41 @@ exports.getCategories =  async (req, res) => {
 
   try {
     const categories = await Category.find(filter)
-      .populate('subcategories', 'name status') // ADD: Populate _id, name, status
+      .populate('subcategories', 'name status')
       .limit(limit * 1)
       .skip((page - 1) * limit)
       .sort({ createdAt: -1 });
-    
+
     const total = await Category.countDocuments(filter);
 
-    res.json({ 
+    const categoryProductCounts = await Product.aggregate([
+      {
+        $group: {
+          _id: '$category', // Group by category ID
+          productCount: { $sum: 1 } // Count the number of products per category
+        }
+      }
+    ]);
+
+    const productCountMap = new Map(categoryProductCounts.map(item => [item._id.toString(), item.productCount]));
+
+    const categoriesWithProductCount = categories.map(category => ({
+      ...category.toObject(),
+      productCount: productCountMap.get(category._id.toString()) || 0 // Default to 0 if no products
+    }));
+
+    res.json({
       success: true,
-      categories,  // Now includes populated subcategories array
-      total, 
+      categories: categoriesWithProductCount, // Now includes productCount
+      total,
       pages: Math.ceil(total / limit),
-      currentPage: page 
+      currentPage: page
     });
   } catch (err) {
     console.error('Category list error:', err);
     res.status(500).json({ success: false, msg: 'Server error fetching categories' });
   }
-}
+};
 
 exports.getCategoryById =   async (req, res) => {
   try {
