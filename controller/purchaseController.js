@@ -81,7 +81,7 @@ exports.getAllPurchases = async (req, res) => {
           },
           {
             path: 'unit',
-            select: 'short_name' 
+            select: 'short_name'
           }
         ]
       });
@@ -109,28 +109,41 @@ exports.getAllPurchases = async (req, res) => {
   }
 };
 
-
-
 exports.getPurchaseById = async (req, res) => {
   try {
     const { id } = req.params;
     const purchase = await Purchase.findById(id)
-      .populate('supplierId', 'supplierName') // Populate supplier details
+      .populate('supplierId', 'supplierName')
       .populate({
-        path: 'products.variantId', 
-        select: 'sku attribute value unit purchasePrice price discountPrice stockQuantity expiryDate weightQuantity image', // Select specific fields
-        populate: {
-          path: 'product', // Populate the Product reference within Variant
-          select: 'name images thumbnail description' // Select Product fields (name, image-related fields, etc.)
-        }
+        path: 'products.variantId',
+        select: 'sku attribute value unit purchasePrice price discountPrice stockQuantity expiryDate weightQuantity image',
+        populate: [
+          {
+            path: 'product',
+            select: 'name images thumbnail description'
+          },
+          {
+            path: 'unit',
+            select: 'short_name' 
+          }
+        ]
       });
 
-    if (!purchase) return res.status(404).json({ success: false, message: 'Purchase not found' });
+    if (!purchase)
+      return res.status(404).json({ success: false, message: 'Purchase not found' });
 
-    res.status(200).json({ success: true, data: purchase });
+    res.status(200).json({
+      success: true,
+      message: 'Purchase fetched successfully',
+      data: purchase,
+    });
   } catch (error) {
     console.error('Server error:', error);
-    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching purchase',
+      error: error.message,
+    });
   }
 };
 
@@ -204,3 +217,4 @@ exports.deletePurchase = async (req, res) => {
   }
 
 };
+
