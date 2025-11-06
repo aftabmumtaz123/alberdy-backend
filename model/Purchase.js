@@ -15,7 +15,7 @@ const PurchaseSchema = new mongoose.Schema({
   products: [ProductPurchaseSchema],
   payment: {
     amountPaid: { type: Number, default: 0 },
-    ammountDue: { type: Number, default: 0 },
+    amountDue: { type: Number, default: 0 },
     type: { type: String, enum: ['Cash', 'Card', 'Online' , 'BankTransfer'], default: null },
   },
   summary: {

@@ -11,7 +11,7 @@ const ProductSaleSchema = new mongoose.Schema({
 
 const SalesSchema = new mongoose.Schema({
   saleCode: { type: String, required: true, unique: true },
-  date: { type: Date, default: Date.now, validate: { validator: v => !v || v <= new Date(), message: 'Date cannot be in the future' } },
+  date: { type: Date, default: Date.now },
   customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', required: true },
   products: [ProductSaleSchema],
   payment: {
@@ -22,7 +22,7 @@ const SalesSchema = new mongoose.Schema({
   summary: {
     totalQuantity: { type: Number, required: true },
     subTotal: { type: Number, required: true },
-    discount: { type: Number, default: 0, min: 0, validate: { validator: v => v <= this.subTotal, message: 'Discount cannot exceed subtotal' } },
+    discount: { type: Number, default: 0, min: 0 },
     otherCharges: { type: Number, default: 0, min: 0 },
     grandTotal: { type: Number, required: true },
   },

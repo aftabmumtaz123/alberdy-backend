@@ -1,6 +1,6 @@
 const Sale = require('../model/Sales');
 const Variant = require('../model/variantProduct');
-const Customer = require('../model/Customer');
+const User = require('../model/User');
 
 
 
@@ -11,11 +11,18 @@ exports.createSale = async (req, res) => {
     if (!customerId || !products || !summary) {
       return res.status(400).json({ status: false, message: 'Customer ID, products, and summary are required' });
     }
-    const customer = await Customer.findById(customerId);
+
+    const customer = await User.findById(customerId);
     if (!customer) return res.status(400).json({ status: false, message: 'Invalid customer' });
+
+    
+
 
     let subTotal = 0;
     let totalQuantity = 0;
+
+   
+
     const validatedProducts = [];
     for (let prod of products) {
       if (!prod.variantId || !prod.quantity || !prod.price || !prod.unitCost) {
@@ -76,21 +83,32 @@ exports.createSale = async (req, res) => {
   }
 };
 
-
-
 exports.getAllSales = async (req, res) => {
   try {
     const { page = 1, limit = 10, startDate, endDate, paymentStatus, search } = req.query;
     const skip = (page - 1) * limit;
 
     let query = { isDeleted: false };
-    if (startDate && endDate) query.date = { $gte: new Date(startDate), $lte: new Date(endDate) };
-    if (paymentStatus) query['payment.amount'] = paymentStatus === 'Paid' ? { $gte: this.summary.grandTotal } : { $lt: this.summary.grandTotal };
+    if (startDate && endDate) {
+      query.date = { $gte: new Date(startDate), $lte: new Date(endDate) };
+    }
+    if (paymentStatus) {
+      query = {
+        ...query,
+        $expr: {
+          [paymentStatus === 'Paid' ? '$gte' : '$lt']: [
+            '$payment.amount',
+            '$summary.grandTotal',
+          ],
+        },
+      };
+    }
     if (search) {
-      query.$or = [
-        { saleCode: { $regex: search, $options: 'i' } },
-        { 'customerId': await Customer.findOne({ name: { $regex: search, $options: 'i' } })?._id }
-      ];
+      const user = await User.findOne({ name: { $regex: search, $options: 'i' } });
+      query.$or = [{ saleCode: { $regex: search, $options: 'i' } }];
+      if (user) {
+        query.$or.push({ customerId: user._id });
+      }
     }
 
     const sales = await Sale.find(query)
@@ -98,22 +116,46 @@ exports.getAllSales = async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit))
       .populate('customerId', 'name')
-      .populate('products.variantId', 'sku attribute value');
+      .populate({
+        path: 'products.variantId',
+        select: 'sku attribute value price stockQuantity',
+        populate: {
+          path: 'product',
+          select: 'name description thumbnail category brand',
+          populate: [
+            { path: 'category', select: 'name' },
+            { path: 'brand', select: 'name' },
+          ],
+        },
+      })
+      .lean();
 
     const total = await Sale.countDocuments(query);
 
     res.status(200).json({
       status: true,
       message: 'Sales fetched successfully',
-      data: sales.map(sale => ({
+      data: sales.map((sale) => ({
         id: sale._id,
         date: sale.date,
         saleCode: sale.saleCode,
-        customerName: sale.customerId.name,
+        customerName: sale.customerId?.name || 'Unknown',
         grandTotal: sale.summary.grandTotal,
         paid: sale.payment.amount,
         paymentStatus: sale.payment.amount >= sale.summary.grandTotal ? 'Paid' : 'Pending',
-        actions: 'Edit/Delete'
+        products: sale.products.map((product) => ({
+          variantId: product.variantId?._id,
+          sku: product.variantId?.sku,
+          attribute: product.variantId?.attribute,
+          value: product.variantId?.value,
+          price: product.price,
+          quantity: product.quantity,
+          productName: product.variantId?.product?.name || 'Unknown',
+          productDescription: product.variantId?.product?.description || '',
+          productThumbnail: product.variantId?.product?.thumbnail || '',
+          categoryName: product.variantId?.product?.category?.name || 'Unknown',
+          brandName: product.variantId?.product?.brand?.name || 'Unknown',
+        })),
       })),
       pagination: {
         total,
@@ -127,7 +169,6 @@ exports.getAllSales = async (req, res) => {
     res.status(500).json({ status: false, message: 'Server error', error: error.message });
   }
 };
-
 
 exports.updateSale = async (req, res) => {
   try {

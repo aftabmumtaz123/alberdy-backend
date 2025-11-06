@@ -2,8 +2,6 @@ const Purchase = require('../model/Purchase');
 const Variant = require('../model/variantProduct');
 const Supplier = require('../model/Supplier');
 
-
-
 exports.createPurchase = async (req, res) => {
   try {
     const { supplierId, products, otherCharges, discount, payment, notes } = req.body;
@@ -151,7 +149,7 @@ exports.getPurchaseById = async (req, res) => {
 exports.updatePurchase = async (req, res) => {
   try {
     const { id } = req.params;
-    const { supplierId, products, otherCharges, discount, payment, notes } = req.body;
+    const { supplierId, products, otherCharges, discount, status, payment, notes } = req.body;
 
     const purchase = await Purchase.findById(id);
     if (!purchase) return res.status(404).json({ success: false, message: 'Purchase not found' });
@@ -189,6 +187,7 @@ exports.updatePurchase = async (req, res) => {
       payment: { amountPaid, amountDue, type: payment?.type || purchase.payment.type },
       summary: { subtotal, otherCharges: otherCharges || 0, discount: discount || 0, grandTotal },
       notes: notes || purchase.notes,
+      status: status || purchase.status,
     });
     await purchase.save();
 
