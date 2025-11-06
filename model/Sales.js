@@ -16,7 +16,8 @@ const SalesSchema = new mongoose.Schema({
   products: [ProductSaleSchema],
   payment: {
     type: { type: String, enum: ['Cash', 'Card', 'Online', 'BankTransfer'], default: null },
-    amount: { type: Number, default: 0 },
+    amountPaid: { type: Number, default: 0 },
+    amountDue: {type: Number, default: 0 },
     notes: { type: String, default: '' },
   },
   summary: {
