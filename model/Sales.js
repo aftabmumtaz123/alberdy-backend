@@ -12,7 +12,7 @@ const ProductSaleSchema = new mongoose.Schema({
 const SalesSchema = new mongoose.Schema({
   saleCode: { type: String, required: true, unique: true },
   date: { type: Date, default: Date.now },
-  customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', required: true },
+  customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   products: [ProductSaleSchema],
   payment: {
     type: { type: String, enum: ['Cash', 'Card', 'Online', 'BankTransfer'], default: null },

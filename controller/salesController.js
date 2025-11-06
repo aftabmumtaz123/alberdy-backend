@@ -151,8 +151,9 @@ exports.createSale = async (req, res) => {
           ...product.toObject(),
           productName: product.variantId?.product?.name || 'Unknown',
           image: product.variantId?.product?.thumbnail || product.variantId?.image || '',
-          unit: product.variantId?.unit?.name || 'Unknown',
+          unit: product.variantId?.unit?.short_name || 'Unknown',
           quantity: product.quantity,
+          Weight: 
         })),
         customer: {
           id: populatedSale.customerId?._id,
