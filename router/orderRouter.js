@@ -198,9 +198,8 @@ router.get('/', authMiddleware, requireRole(['Super Admin','Manager','Customer']
 });
 
 
-        
 /* -------------------------- UPDATE ORDER -------------------------- */
-router.put('/:id', authMiddleware, requireRole(['Super Admin','Manager']), async (req, res) => {
+router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { id } = req.params;
     const { shippingAddress, notes, paymentStatus, status, orderTrackingNumber, deliveryDate, deliveryPartner } = req.body;
@@ -208,7 +207,7 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin','Manager']), async
     if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ success: false, msg: 'Invalid order ID' });
 
-    const order = await Order.findById(id);
+    const order = await Order.findById(id).populate('items.variant');
     if (!order)
       return res.status(404).json({ success: false, msg: 'Order not found' });
 
@@ -256,7 +255,20 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin','Manager']), async
       update.paymentStatus = paymentStatus;
     }
 
-    // 4️⃣ Save update
+    // 4️⃣ Restore stock for cancelled orders
+    if (status === 'cancelled' && order.status !== 'cancelled') {
+      for (const item of order.items) {
+        if (item.variant && mongoose.Types.ObjectId.isValid(item.variant._id)) {
+          await Variant.findByIdAndUpdate(
+            item.variant._id,
+            { $inc: { stockQuantity: item.quantity } },
+            { runValidators: true }
+          );
+        }
+      }
+    }
+
+    // 5️⃣ Save update
     const updatedOrder = await Order.findByIdAndUpdate(id, { $set: update }, { new: true, runValidators: true })
       .populate('items.product', 'name thumbnail images')
       .populate('items.variant', 'attribute value sku price discountPrice stockQuantity image')
