@@ -13,22 +13,22 @@ const SalesSchema = new mongoose.Schema({
   saleCode: { type: String, required: true, unique: true },
   date: { type: Date, default: Date.now },
   customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-
   status: {
     type: String,
     enum: ['Pending', 'Completed', 'Cancelled', 'Refunded'],
     default: 'Pending',
-  }
+  },
   products: [ProductSaleSchema],
   payment: {
     type: { type: String, enum: ['Cash', 'Card', 'Online', 'BankTransfer'], default: null },
     amountPaid: { type: Number, default: 0 },
-    amountDue: {type: Number, default: 0 },
+    amountDue: { type: Number, default: 0 },
     notes: { type: String, default: '' },
   },
   summary: {
     totalQuantity: { type: Number, required: true },
     subTotal: { type: Number, required: true },
+    taxTotal: { type: Number, default: 0 }, // Added taxTotal
     discount: { type: Number, default: 0, min: 0 },
     otherCharges: { type: Number, default: 0, min: 0 },
     grandTotal: { type: Number, required: true },
