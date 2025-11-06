@@ -256,7 +256,7 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
     }
 
     // 4️⃣ Restore stock for cancelled orders
-    if (status === 'cancelled' && order.status !== 'cancelled') {
+    if (status === 'cancelled' ) {
       for (const item of order.items) {
         if (item.variant && mongoose.Types.ObjectId.isValid(item.variant._id)) {
           await Variant.findByIdAndUpdate(

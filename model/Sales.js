@@ -13,6 +13,12 @@ const SalesSchema = new mongoose.Schema({
   saleCode: { type: String, required: true, unique: true },
   date: { type: Date, default: Date.now },
   customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+
+  status: {
+    type: String,
+    enum: ['Pending', 'Completed', 'Cancelled', 'Refunded'],
+    default: 'Pending',
+  }
   products: [ProductSaleSchema],
   payment: {
     type: { type: String, enum: ['Cash', 'Card', 'Online', 'BankTransfer'], default: null },
