@@ -73,15 +73,15 @@ exports.createSale = async (req, res) => {
 
     // Validate payment
     if (payment) {
-      if (typeof payment.amount !== 'number' || payment.amount < 0) {
-        return res.status(400).json({ status: false, message: 'payment.amount must be a non-negative number' });
+      if (typeof payment.amountPaid !== 'number' || payment.amountPaid < 0) {
+        return res.status(400).json({ status: false, message: 'payment.amountPaid must be a non-negative number' });
       }
       if (payment.type && !['Cash', 'Card', 'Online', 'BankTransfer'].includes(payment.type)) {
         return res.status(400).json({ status: false, message: 'Invalid payment type' });
       }
     }
 
-    const amountPaid = payment?.amount || 0;
+    const amountPaid = payment?.amountPaid || 0;
     const amountDue = grandTotal - amountPaid;
     if (amountDue < 0) {
       return res.status(400).json({ status: false, message: 'Amount paid cannot exceed grand total' });
@@ -107,8 +107,8 @@ exports.createSale = async (req, res) => {
       products: validatedProducts,
       payment: { 
         type: payment?.type || null, 
-        amount: amountPaid, // Renamed to amountPaid for schema consistency
-        amountDue, // Store in schema
+        amountPaid, 
+        amountDue, 
         notes: payment?.notes || '' 
       },
       summary: { 
@@ -145,7 +145,7 @@ exports.createSale = async (req, res) => {
       message: 'Sale created successfully', 
       data: {
         ...populatedSale.toObject(),
-        amountPaid: populatedSale.payment.amount,
+        amountPaid: populatedSale.payment.amountPaid,
         amountDue: populatedSale.payment.amountDue,
         products: populatedSale.products.map((product) => ({
           ...product.toObject(),
@@ -182,7 +182,7 @@ exports.getAllSales = async (req, res) => {
         ...query,
         $expr: {
           [paymentStatus === 'Paid' ? '$gte' : '$lt']: [
-            '$payment.amount',
+            '$payment.amountPaid', // Fixed to use amountPaid
             '$summary.grandTotal',
           ],
         },
@@ -226,10 +226,10 @@ exports.getAllSales = async (req, res) => {
           email: sale.customerId?.email || '',
           phone: sale.customerId?.phone || '',
         },
-        amountPaid: sale.payment.amount,
+        amountPaid: sale.payment.amountPaid, // Fixed to use amountPaid
         amountDue: sale.payment.amountDue,
         grandTotal: sale.summary.grandTotal,
-        paymentStatus: sale.payment.amount >= sale.summary.grandTotal ? 'Paid' : 'Pending',
+        paymentStatus: sale.payment.amountPaid >= sale.summary.grandTotal ? 'Paid' : 'Pending', // Fixed to use amountPaid
         products: sale.products.map((product) => ({
           productName: product.variantId?.product?.name || 'Unknown',
           image: product.variantId?.product?.thumbnail || product.variantId?.image || '',
@@ -334,15 +334,15 @@ exports.updateSale = async (req, res) => {
 
     // Validate payment
     if (payment) {
-      if (typeof payment.amount !== 'number' || payment.amount < 0) {
-        return res.status(400).json({ status: false, message: 'payment.amount must be a non-negative number' });
+      if (typeof payment.amountPaid !== 'number' || payment.amountPaid < 0) {
+        return res.status(400).json({ status: false, message: 'payment.amountPaid must be a non-negative number' });
       }
       if (payment.type && !['Cash', 'Card', 'Online', 'BankTransfer'].includes(payment.type)) {
         return res.status(400).json({ status: false, message: 'Invalid payment type' });
       }
     }
 
-    const amountPaid = payment?.amount ?? sale.payment.amount;
+    const amountPaid = payment?.amountPaid ?? sale.payment.amountPaid;
     const amountDue = grandTotal - amountPaid;
     if (amountDue < 0) {
       return res.status(400).json({ status: false, message: 'Amount paid cannot exceed grand total' });
@@ -356,6 +356,11 @@ exports.updateSale = async (req, res) => {
       if (diff !== 0) {
         await Variant.findByIdAndUpdate(oldProd.variantId, { $inc: { stockQuantity: diff } });
       }
+    }
+
+    // Deduct new quantities
+    for (let newProd of newProducts) {
+      await Variant.findByIdAndUpdate(newProd.variantId, { $inc: { stockQuantity: -newProd.quantity } });
     }
 
     // Log history
@@ -372,7 +377,7 @@ exports.updateSale = async (req, res) => {
       products: newProducts,
       payment: { 
         type: payment?.type ?? sale.payment.type, 
-        amount: amountPaid, 
+        amountPaid, 
         amountDue, 
         notes: payment?.notes ?? sale.payment.notes 
       },
@@ -404,7 +409,7 @@ exports.updateSale = async (req, res) => {
       message: 'Sale updated successfully', 
       data: {
         ...updatedSale.toObject(),
-        amountPaid: updatedSale.payment.amount,
+        amountPaid: updatedSale.payment.amountPaid,
         amountDue: updatedSale.payment.amountDue,
         products: updatedSale.products.map((product) => ({
           ...product.toObject(),
@@ -446,7 +451,7 @@ exports.getSaleById = async (req, res) => {
       status: true, 
       data: {
         ...sale.toObject(),
-        amountPaid: sale.payment.amount,
+        amountPaid: sale.payment.amountPaid,
         amountDue: sale.payment.amountDue,
         products: sale.products.map((product) => ({
           ...product.toObject(),
