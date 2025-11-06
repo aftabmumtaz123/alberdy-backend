@@ -3,7 +3,7 @@ const Variant = require('../model/variantProduct');
 const User = require('../model/User');
 exports.createSale = async (req, res) => {
   try {
-    const { date, customerId, products, summary, payment, notes } = req.body;
+    const { date, customerId, products, summary, payment, notes, status } = req.body;
 
     // Validate required fields
     if (!customerId || !products || !summary) {
@@ -72,6 +72,9 @@ exports.createSale = async (req, res) => {
       return res.status(400).json({ status: false, message: 'Provided grandTotal does not match calculated grandTotal' });
     }
 
+
+
+
     // Validate payment
     if (payment) {
       if (typeof payment.amountPaid !== 'number' || payment.amountPaid < 0) {
@@ -106,6 +109,7 @@ exports.createSale = async (req, res) => {
       date: date && new Date(date) <= new Date() ? date : Date.now(),
       customerId,
       products: validatedProducts,
+      status,
       payment: { 
         type: payment?.type || null, 
         amountPaid, 
@@ -232,7 +236,7 @@ exports.getAllSales = async (req, res) => {
     }
 
     const sales = await Sale.find(query)
-      .sort({ date: -1 }) // Changed to descending for recent sales first
+      .sort({ createdAt: -1 }) // Changed to descending for recent sales first
       .skip(skip)
       .limit(parseInt(limit))
       .populate('customerId', 'name email phone')
@@ -293,7 +297,7 @@ exports.getAllSales = async (req, res) => {
               attribute: product.variantId?.attribute || '',
               value: product.variantId?.value || '',
               weightQuantity: product.variantId?.weightQuantity || '',
-              unit: product.variantId?.unit?.name || 'Unknown',
+              unit: product.variantId?.unit?.short_name || 'Unknown',
               unitSymbol: product.variantId?.unit?.symbol || '',
               image: product.variantId?.product?.thumbnail || product.variantId?.image || '',
               quantity: product.quantity,
