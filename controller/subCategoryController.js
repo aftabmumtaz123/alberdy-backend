@@ -2,6 +2,8 @@ const Category = require('../model/Category');
 const Subcategory = require('../model/subCategory');
 const mongoose = require('mongoose');
 const fs = require('fs');
+const Product = require('../model/Product');
+
 
 // Helper for flexible category lookup
 const findCategoryByIdOrName = async (categoryValue) => {
