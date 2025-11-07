@@ -83,7 +83,14 @@ exports.createPurchase = async (req, res) => {
     }
 
     const amountPaid = payment?.amountPaid ?? 0;
+
     const amountDue = grandTotal - amountPaid;
+
+    // cannot charge more than grand total
+    if (amountDue < 0) {
+      return res.status(400).json({ success: false, message: 'Amount paid cannot exceed grand total' });
+    }
+   
 
     // Generate unique purchase code
     let purchaseCode = `PUR-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
@@ -133,7 +140,7 @@ exports.getAllPurchases = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const purchases = await Purchase.find()
-      .sort({ date: 1 })
+      .sort({ date: -1 })
       .skip(skip)
       .limit(parseInt(limit))
       .populate('supplierId', 'supplierName')
