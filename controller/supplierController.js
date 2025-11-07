@@ -126,7 +126,7 @@ exports.createSupplier = async (req, res) => {
 exports.getAllSuppliers = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit;
+    const limit = parseInt(req.query.limit);
     const skip = (page - 1) * limit;
 
     const suppliers = await Supplier.find()
