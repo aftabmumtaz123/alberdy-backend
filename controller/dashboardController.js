@@ -153,8 +153,6 @@
 // };
 
 
-
-
 const Variant = require('../model/variantProduct');
 const Order = require('../model/Order');
 const User = require('../model/User');
@@ -193,10 +191,15 @@ exports.getDashboard = async (req, res) => {
     };
 
     // All-time totals
-    const [totalProductsAll, fullTotalOrders, totalCustomersAll] = await Promise.all([
+    const [totalProductsAll, fullTotalOrders, totalCustomersAll, totalLifetimeRevenue] = await Promise.all([
       Product.countDocuments(),
       Order.countDocuments(),
-      User.countDocuments({ role: 'Customer' })
+      User.countDocuments({ role: 'Customer' }),
+      // Lifetime Revenue (all delivered orders)
+      Order.aggregate([
+        { $match: { status: 'delivered' } },
+        { $group: { _id: null, total: { $sum: '$total' } }}
+      ]).then(results => results[0]?.total || 0)
     ]);
 
     // Calculate revenue for all periods in parallel
@@ -295,7 +298,7 @@ exports.getDashboard = async (req, res) => {
     const productGrowth = '+8%'; // Placeholder; implement historical if needed
     const orderGrowth = '+15%'; // Placeholder
 
-    // Dashboard data with separate revenue objects
+    // Dashboard data with separate revenue objects and lifetime revenue
     const dashboardData = {
       totalProducts: totalProductsAll,
       productGrowth,
@@ -309,6 +312,7 @@ exports.getDashboard = async (req, res) => {
         weekly: revenueData.find(r => r.period === 'Weekly'),
         monthly: revenueData.find(r => r.period === 'Monthly')
       },
+      totalLifetimeRevenue: totalLifetimeRevenue,
       revenuePeriod: period.charAt(0).toUpperCase() + period.slice(1),
       lowStockAlerts: formattedLowStock,
       recentOrders: formattedRecentOrders
