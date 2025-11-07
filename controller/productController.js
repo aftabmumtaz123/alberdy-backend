@@ -969,7 +969,7 @@ exports.updateProduct = async (req, res) => {
             await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
             return res.status(400).json({
               success: false,
-              msg: `Variation ${i + 1}: Cannot set status to Active with expired expiryDate`,
+              msg: `Variation ${i + 1}: Expiry date cannot be today or in the past. Please select a future date.`,
             });
           }
         }
