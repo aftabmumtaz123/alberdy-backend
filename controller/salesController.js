@@ -43,8 +43,11 @@ exports.createSale = async (req, res) => {
         return res.status(400).json({ status: false, message: 'taxType must be Inclusive or Exclusive' });
       }
       const variant = await Variant.findById(prod.variantId);
-      if (!variant || variant.status === 'Inactive' || variant.stockQuantity < prod.quantity) {
+      if (!variant || variant.status === 'Inactive') {
         return res.status(400).json({ status: false, message: `Only ${variant.stockQuantity} items available in stock` });
+      }
+      if(variant.stockQuantity < prod.quantity){
+        return res.status(400).json({ status: false, message: `Insufficient stock for variant` });
       }
       const taxAmount = (prod.price * prod.quantity * (prod.taxPercent || 0)) / 100 * (prod.taxType === 'Exclusive' ? 1 : 0);
       const productTotal = prod.price * prod.quantity + taxAmount;
