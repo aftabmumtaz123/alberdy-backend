@@ -369,7 +369,7 @@ exports.createProduct = async (req, res) => {
 };
 
 exports.getAllProducts = async (req, res) => {
-  const { page = 1, limit = 10, category, subcategory, brand, status, name, lowStock } = req.query;
+  const { page = 1, limit , category, subcategory, brand, status, name, lowStock } = req.query;
   const filter = {};
   if (category) {
     const cat = await findCategoryByIdOrName(category);

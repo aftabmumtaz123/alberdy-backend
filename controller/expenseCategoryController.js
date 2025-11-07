@@ -24,7 +24,7 @@ exports.createCategory = async (req, res) => {
 // GET /api/expense-categories - List Categories (filter: status)
 exports.getCategories = async (req, res) => {
   try {
-    const { status = 'all', page = 1, limit = 10 } = req.query;
+    const { status = 'all', page = 1, limit  } = req.query;
 
     // Convert pagination params to numbers
     const pageNum = Math.max(parseInt(page, 10), 1);

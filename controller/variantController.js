@@ -125,7 +125,7 @@ exports.createVariant = async (req, res) => {
 
 // Get All Variants (GET /api/variants)
 exports.getAllVariants = async (req, res) => {
-  const { page = 1, limit = 10, product, sku, status, attribute } = req.query;
+  const { page = 1, limit , product, sku, status, attribute } = req.query;
   const filter = {};
   if (product) {
     let prod;

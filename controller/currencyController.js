@@ -39,7 +39,7 @@ exports.createCurrency = async (req, res) => {
 // 🟡 Get All Currencies (with pagination + search)
 exports.getAllCurrencies = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search = '' } = req.query;
+    const { page = 1, limit , search = '' } = req.query;
 
     const pageNum = Math.max(parseInt(page, 10), 1);
     const limitNum = Math.max(parseInt(limit, 10), 1);

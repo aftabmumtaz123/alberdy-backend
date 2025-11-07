@@ -45,7 +45,7 @@ exports.createCategory =  async (req, res) => {
 }
 
 exports.getCategories = async (req, res) => {
-  const { page = 1, limit = 10, status, name } = req.query;
+  const { page = 1, limit , status, name } = req.query;
   const filter = {};
   if (status) filter.status = status;
   if (name) filter.name = { $regex: name, $options: 'i' };

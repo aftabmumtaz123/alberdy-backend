@@ -93,7 +93,7 @@ const createOffer = async (req, res) => {
 // Get All Offers
 const getAllOffers = async (req, res) => {
   try {
-    const { page = 1, limit = 10, status } = req.query;
+    const { page = 1, limit , status } = req.query;
     const query = status ? { status } : {};
     const skip = (parseInt(page) - 1) * parseInt(limit);
 

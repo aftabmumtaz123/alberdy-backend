@@ -131,7 +131,7 @@ exports.updateExpense = async (req, res) => {
 
 exports.getExpenses = async (req, res) => {
   try {
-    const { id, category, startDate, endDate, page = 1, limit = 10 } = req.query;
+    const { id, category, startDate, endDate, page = 1, limit  } = req.query;
     const skip = (page - 1) * limit;
 
     let filter = {};

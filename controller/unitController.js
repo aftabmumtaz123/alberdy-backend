@@ -5,7 +5,7 @@ const Unit = require('../model/Unit'); // Adjust the path as per your project st
 // Get all units
 exports.getAllUnits = async (req, res) => {
   try {
-    const { page = 1, limit = 10, unit_status } = req.query;
+    const { page = 1, limit , unit_status } = req.query;
     const query = unit_status ? { unit_status } : {};
     const units = await Unit.find(query)
       .sort({ createdAt: -1 })

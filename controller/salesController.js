@@ -212,7 +212,7 @@ exports.createSale = async (req, res) => {
 
 exports.getAllSales = async (req, res) => {
   try {
-    const { page = 1, limit = 10, startDate, endDate, paymentStatus, search } = req.query;
+    const { page = 1, limit , startDate, endDate, paymentStatus, search } = req.query;
     const skip = (page - 1) * limit;
 
     let query = { isDeleted: false };

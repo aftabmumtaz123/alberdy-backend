@@ -180,7 +180,7 @@ router.post('/api/auth/logout', authMiddleware, async (req, res) => {
 
 router.get('/api/auth/users', authMiddleware, async (req, res) => {
   try {
-    const { page = 1, limit = 10, status, name } = req.query;
+    const { page = 1, limit , status, name } = req.query;
 
     const pageNum = Math.max(parseInt(page), 1);
     const limitNum = Math.max(parseInt(limit), 1);

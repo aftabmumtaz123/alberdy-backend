@@ -59,7 +59,7 @@ exports.createCustomer = async (req, res) => {
 
 // Get All Customers (List View with Orders Count)
 exports.getAllCustomers = async (req, res) => {
-  const { page = 1, limit = 100, status, petType, name, email } = req.query;
+  const { page = 1, limit , status, petType, name, email } = req.query;
   const filter = {};
   if (status) filter.status = status;
   if (petType) filter.petType = petType;

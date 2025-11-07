@@ -129,7 +129,7 @@ exports.createPurchase = async (req, res) => {
 
 exports.getAllPurchases = async (req, res) => {
   try {
-    const { page = 1, limit = 10 } = req.query;
+    const { page = 1, limit  } = req.query;
     const skip = (page - 1) * limit;
 
     const purchases = await Purchase.find()

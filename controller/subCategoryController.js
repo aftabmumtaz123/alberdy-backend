@@ -80,7 +80,7 @@ exports.createSubcategory = async (req, res) => {
 
 
 exports.getAllSubcategories = async (req, res) => {
-  const { page = 1, limit = 10, category, status, name } = req.query;
+  const { page = 1, limit , category, status, name } = req.query;
   const filter = {};
   if (category) {
     const cat = await findCategoryByIdOrName(category);

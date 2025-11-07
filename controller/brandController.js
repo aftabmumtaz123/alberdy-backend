@@ -61,7 +61,7 @@ exports.createBrand = async (req, res) => {
 
 // Get All Brands
 exports.getAllBrands = async (req, res) => {
-  const { page = 1, limit = 10, status, brandName, brandCode } = req.query;
+  const { page = 1, limit , status, brandName, brandCode } = req.query;
   const filter = {};
   if (status) filter.status = status;
   if (brandName) filter.brandName = { $regex: brandName, $options: 'i' };
