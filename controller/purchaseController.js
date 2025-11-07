@@ -98,6 +98,11 @@ exports.createPurchase = async (req, res) => {
       purchaseCode = `PUR-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
     }
 
+    //status update payment is completely done
+    if (amountDue === 0) {
+      req.body.status = 'Completed';
+    }
+
     // Create purchase
     const purchase = new Purchase({
       purchaseCode,
