@@ -3,12 +3,6 @@ const upload = require('../config/multer'); // Path to your multer config
 
 exports.createSupplier = async (req, res) => {
   try {
-    if (!req.body) {
-      return res.status(400).json({
-        success: false,
-        message: 'Request body is missing',
-      });
-    }
 
     let {
       supplierName,
@@ -23,28 +17,34 @@ exports.createSupplier = async (req, res) => {
 
     const errors = {};
 
-    // Validation
-    if (!supplierName || supplierName.trim().length < 2) {
-      errors.supplierName = 'Supplier name must be at least 2 characters';
-    }
+
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       errors.email = 'Valid email required';
     } else if (await Supplier.findOne({ email })) {
-      errors.email = 'Email already exists';
+      return res.status(400).json({
+        success: false,
+        message: 'Email already exists',
+      });
     }
 
  
 
     if (!supplierType || supplierType.trim() === '') {
-      errors.supplierType = 'Supplier type required';
+      return res.status(400).json({
+        success: false,
+        message: 'Supplier type is required',
+      });
     }
 
     if (address) {
       try {
         address = typeof address === 'string' ? JSON.parse(address) : address;
       } catch {
-        errors.address = 'Address must be valid JSON';
+        return res.status(400).json({
+          success: false,
+          message: 'Address must be valid JSON',
+        });
       }
     }
 
@@ -62,7 +62,10 @@ exports.createSupplier = async (req, res) => {
         }
       }
     } else if (await Supplier.findOne({ supplierCode: supplierCodeToUse })) {
-      errors.supplierCode = 'Supplier code already exists';
+      return res.status(400).json({
+        success: false,
+        message: 'Supplier code already exists',
+      });
     }
 
     const attachments = req.files
@@ -76,7 +79,7 @@ exports.createSupplier = async (req, res) => {
     if (Object.keys(errors).length > 0) {
       return res.status(400).json({
         success: false,
-        message: errors,
+        message: 'Validation errors occurred',
         errors,
       });
     }
@@ -208,7 +211,10 @@ exports.updateSupplier = async (req, res) => {
 
     // --- Validations ---
     if (supplierName && supplierName.trim().length < 2) {
-      errors.supplierName = 'Supplier name must be at least 2 characters long';
+      return res.json({
+        success: false,
+        message: 'Supplier name must be at least 2 characters',
+      })
     }
 
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -218,25 +224,32 @@ exports.updateSupplier = async (req, res) => {
         email: email.trim(),
         _id: { $ne: id },
       });
-      if (existingEmail) errors.email = 'Email already exists';
+      if (existingEmail) {return res.json({
+        success: false,
+        message: 'Email already exists',
+      });}
     }
 
 
-    if (supplierType && supplierType.trim() === '') {
-      errors.supplierType = 'Supplier type cannot be empty';
-    }
+  
 
     // Validate address JSON
     if (address) {
       try {
         address = typeof address === 'string' ? JSON.parse(address) : address;
       } catch {
-        errors.address = 'Invalid address format; must be a valid JSON object';
+        res.status(400).json({
+          success: false,
+          message: 'Address must be valid JSON',
+        });
       }
     }
 
     if (status && !['Active', 'Inactive'].includes(status)) {
-      errors.status = 'Status must be either Active or Inactive';
+     return res.json({
+        success: false,
+        message: 'Status must be either Active or Inactive',
+      });
     }
 
     if (supplierCode && supplierCode.trim()) {
@@ -244,7 +257,12 @@ exports.updateSupplier = async (req, res) => {
         supplierCode: supplierCode.trim(),
         _id: { $ne: id },
       });
-      if (existingCode) errors.supplierCode = 'Supplier code already exists';
+      if (existingCode) {
+        return res.json({
+        success: false,
+        message: 'Supplier code already exists',
+      });
+    }
     }
 
     // --- Handle uploaded files ---
@@ -261,7 +279,7 @@ exports.updateSupplier = async (req, res) => {
     if (Object.keys(errors).length > 0) {
       return res.status(400).json({
         success: false,
-        message: errors,
+        message: 'Validation errors occurred',
         errors,
       });
     }
