@@ -368,28 +368,34 @@ exports.createProduct = async (req, res) => {
   }
 };
 
+
+
+
 exports.getAllProducts = async (req, res) => {
-  const { page = 1, limit , category, subcategory, brand, status, name, lowStock } = req.query;
+  const { page = 1, limit, category, subcategory, brand, status, name, lowStock } = req.query;
   const filter = {};
-  if (category) {
-    const cat = await findCategoryByIdOrName(category);
-    if (cat) filter.category = cat._id;
-    else return res.status(400).json({ success: false, msg: 'Invalid category filter' });
-  }
-  if (subcategory) {
-    const sub = await findSubcategoryByIdOrName(subcategory);
-    if (sub) filter.subcategory = sub._id;
-    else return res.status(400).json({ success: false, msg: 'Invalid subcategory filter' });
-  }
-  if (brand) {
-    const br = await findBrandByIdOrName(brand);
-    if (br) filter.brand = br._id;
-    else return res.status(400).json({ success: false, msg: 'Invalid brand filter' });
-  }
-  if (status) filter.status = status;
-  if (name) filter.name = { $regex: name, $options: 'i' };
 
   try {
+    // ---------- FILTER HANDLING ----------
+    if (category) {
+      const cat = await findCategoryByIdOrName(category);
+      if (cat) filter.category = cat._id;
+      else return res.status(400).json({ success: false, msg: 'Invalid category filter' });
+    }
+    if (subcategory) {
+      const sub = await findSubcategoryByIdOrName(subcategory);
+      if (sub) filter.subcategory = sub._id;
+      else return res.status(400).json({ success: false, msg: 'Invalid subcategory filter' });
+    }
+    if (brand) {
+      const br = await findBrandByIdOrName(brand);
+      if (br) filter.brand = br._id;
+      else return res.status(400).json({ success: false, msg: 'Invalid brand filter' });
+    }
+    if (status) filter.status = status;
+    if (name) filter.name = { $regex: name, $options: 'i' };
+
+    // ---------- BASE AGGREGATION PIPELINE ----------
     let pipeline = [
       { $match: filter },
       {
@@ -527,47 +533,58 @@ exports.getAllProducts = async (req, res) => {
       }
     ];
 
+    // ---------- LOW STOCK FILTER ----------
     if (lowStock === 'true') {
       pipeline.push({
-        $addFields: {
-          totalStock: { $sum: "$variations.stockQuantity" }
-        }
+        $addFields: { totalStock: { $sum: "$variations.stockQuantity" } }
       });
       pipeline.push({ $match: { totalStock: { $lt: 10 } } });
     }
 
+    // ---------- COUNT ----------
     let countPipeline = [...pipeline];
-    if (lowStock !== 'true') {
-      countPipeline = pipeline.slice(0, pipeline.length - 1);
-    }
     countPipeline.push({ $count: 'total' });
     const countResult = await Product.aggregate(countPipeline);
     const total = countResult.length > 0 ? countResult[0].total : 0;
 
-    const sortStage = { $sort: { createdAt: -1 } };
-    const skipStage = { $skip: (page - 1) * parseInt(limit) };
-    const limitStage = { $limit: parseInt(limit) };
-    const projectStage = { 
-      $project: { 
-        __v: 0,
-        activeOffer: 0
-      } 
-    };
+    // ---------- PAGINATION STAGES ----------
+    const pageNum = parseInt(page);
+    const limitNum = limit ? parseInt(limit) : null; // null means no limit
 
-    const fullPipeline = [...pipeline, sortStage, skipStage, limitStage, projectStage];
+    const sortStage = { $sort: { createdAt: -1 } };
+    const projectStage = { $project: { __v: 0, activeOffer: 0 } };
+
+    let fullPipeline = [...pipeline, sortStage];
+
+    if (limitNum && !isNaN(limitNum)) {
+      fullPipeline.push({ $skip: (pageNum - 1) * limitNum });
+      fullPipeline.push({ $limit: limitNum });
+    }
+
+    fullPipeline.push(projectStage);
+
+    // ---------- EXECUTE QUERY ----------
     const products = await Product.aggregate(fullPipeline);
 
     res.json({
       success: true,
       products,
       total,
-      pages: Math.ceil(total / limit),
-      currentPage: page
+      pages: limitNum ? Math.ceil(total / limitNum) : 1,
+      currentPage: pageNum
     });
+
   } catch (err) {
-    res.status(500).json({ success: false, msg: 'Server error fetching products', details: err.message || 'Unknown error' });
+    res.status(500).json({
+      success: false,
+      msg: 'Server error fetching products',
+      details: err.message || 'Unknown error'
+    });
   }
 };
+
+
+
 
 exports.getProductById = async (req, res) => {
   try {
