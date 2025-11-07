@@ -155,7 +155,7 @@ exports.getAllPurchases = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const purchases = await Purchase.find()
-      .sort({ createdAt: -1 })
+      .sort({ date: -1 })
       .skip(skip)
       .limit(parseInt(limit))
       .populate('supplierId', 'supplierName')
@@ -364,6 +364,7 @@ exports.deletePurchase = async (req, res) => {
   }
 
 };
+
 
 
 
