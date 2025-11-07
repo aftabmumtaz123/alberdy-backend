@@ -242,7 +242,7 @@ exports.getAllSales = async (req, res) => {
     }
 
     const sales = await Sale.find(query)
-      .sort({ date: -1 }) // Recent sales first
+      .sort({ createdAt: -1 }) // Recent sales first
       .skip(skip)
       .limit(parseInt(limit))
       .populate('customerId', 'name email phone')
@@ -654,3 +654,4 @@ exports.deleteSale = async (req, res) => {
   }
 
 };
+
