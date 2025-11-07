@@ -1,13 +1,12 @@
-const Brand = require('../model/Brand'); // Adjust path as needed
+const Brand = require('../model/Brand'); 
 const mongoose = require('mongoose');
-const fs = require('fs'); // For image handling if needed
+const Product = require('../model/Product');
+const fs = require('fs'); 
 
-// Create Brand
 exports.createBrand = async (req, res) => {
   const { brandCode, brandName, description, status = 'Active' } = req.body;
   const image = req.file ? req.file.path : null;
 
-  // Validation
   if (!brandCode) {
     return res.status(400).json({ success: false, msg: 'Brand code is required' });
   }
@@ -22,7 +21,6 @@ exports.createBrand = async (req, res) => {
   }
 
   try {
-    // Check for existing brand by code or brandName
     const existingByCode = await Brand.findOne({ brandCode });
     if (existingByCode) {
       return res.status(400).json({ success: false, msg: 'Brand with this code already exists' });
@@ -61,7 +59,7 @@ exports.createBrand = async (req, res) => {
 
 // Get All Brands
 exports.getAllBrands = async (req, res) => {
-  const { page = 1, limit , status, brandName, brandCode } = req.query;
+  const { page = 1, limit = 10, status, brandName, brandCode } = req.query; // Default limit to 10
   const filter = {};
   if (status) filter.status = status;
   if (brandName) filter.brandName = { $regex: brandName, $options: 'i' };
@@ -72,15 +70,31 @@ exports.getAllBrands = async (req, res) => {
       .limit(parseInt(limit))
       .skip((page - 1) * parseInt(limit))
       .sort({ createdAt: -1 });
-    
+
     const total = await Brand.countDocuments(filter);
 
-    res.json({ 
+    const brandProductCounts = await Product.aggregate([
+      {
+        $group: {
+          _id: '$brand', // Group by brand ID
+          productCount: { $sum: 1 } // Count the number of products per brand
+        }
+      }
+    ]);
+
+    const productCountMap = new Map(brandProductCounts.map(item => [item._id.toString(), item.productCount]));
+
+    const brandsWithProductCount = brands.map(brand => ({
+      ...brand.toObject(),
+      productCount: productCountMap.get(brand._id.toString()) || 0 // Default to 0 if no products
+    }));
+
+    res.json({
       success: true,
-      brands, 
-      total, 
+      brands: brandsWithProductCount, // Now includes productCount
+      total,
       pages: Math.ceil(total / limit),
-      currentPage: page 
+      currentPage: page
     });
   } catch (err) {
     console.error('Brand list error:', err);
@@ -88,7 +102,6 @@ exports.getAllBrands = async (req, res) => {
   }
 };
 
-// Get Brand by ID
 exports.getBrandById = async (req, res) => {
   try {
     const brand = await Brand.findById(req.params.id);
