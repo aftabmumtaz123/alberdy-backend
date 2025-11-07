@@ -69,12 +69,7 @@ exports.createPurchase = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
     }
 
-    if(amountPaid >= amountDue) {
-       return res.status(400).json({
-         success: false,
-         message: "Paid Amount is greater than the due amount"
-       });
-    }
+
 
     // Validate grandTotal if provided
     if (summary.grandTotal && summary.grandTotal !== grandTotal) {
@@ -93,6 +88,14 @@ exports.createPurchase = async (req, res) => {
 
     const amountDue = grandTotal - amountPaid;
 
+        if(amountPaid >= amountDue) {
+       return res.status(400).json({
+         success: false,
+         message: "Paid Amount is greater than the due amount"
+       });
+    }
+
+    
     // cannot charge more than grand total
     if (amountDue < 0) {
       return res.status(400).json({ success: false, message: 'Amount paid cannot exceed grand total' });
@@ -361,5 +364,6 @@ exports.deletePurchase = async (req, res) => {
   }
 
 };
+
 
 
