@@ -242,7 +242,7 @@ exports.getAllSales = async (req, res) => {
     }
 
     const sales = await Sale.find(query)
-      .sort({ createdAt: -1 }) // Recent sales first
+      .sort({ date: -1 }) // Recent sales first
       .skip(skip)
       .limit(parseInt(limit))
       .populate('customerId', 'name email phone')
@@ -652,4 +652,5 @@ exports.deleteSale = async (req, res) => {
     console.error('Error deleting sale:', error);
     res.status(500).json({ status: false, message: 'Server error', error: error.message });
   }
+
 };
