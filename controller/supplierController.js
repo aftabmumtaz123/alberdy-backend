@@ -76,7 +76,7 @@ exports.createSupplier = async (req, res) => {
     if (Object.keys(errors).length > 0) {
       return res.status(400).json({
         success: false,
-        message: 'Validation failed',
+        message: errors,
         errors,
       });
     }
@@ -261,7 +261,7 @@ exports.updateSupplier = async (req, res) => {
     if (Object.keys(errors).length > 0) {
       return res.status(400).json({
         success: false,
-        message: 'Validation failed',
+        message: errors,
         errors,
       });
     }
