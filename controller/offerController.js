@@ -47,23 +47,23 @@ const createOffer = async (req, res) => {
 
     // Validate discountValue
     if (discountValue <= 0) {
-      return res.status(400).json({ msg: 'Discount value must be positive' });
+      return res.status(400).json({ message: 'Discount value must be positive' });
     }
     if (discountType === 'Percentage' && discountValue > 100) {
-      return res.status(400).json({ msg: 'Discount value must be ≤ 100 for Percentage type' });
+      return res.status(400).json({ message: 'Discount value must be ≤ 100 for Percentage type' });
     }
 
     // Resolve products (by ID or name) and validate they exist
     const applicableProductIds = await resolveProducts(applicableProducts || []);
     const products = await Product.find({ _id: { $in: applicableProductIds } });
     if (products.length !== applicableProductIds.length) {
-      return res.status(400).json({ msg: 'One or more products do not exist' });
+      return res.status(400).json({ message: 'One or more products do not exist' });
     }
 
     //existing Offer
     const existingOffer = await Offer.findOne({ offerName: offerName });
     if (existingOffer) {
-      return res.status(400).json({ msg: 'Offer with this name already exists' });
+      return res.status(400).json({ message: 'Offer with this name already exists' });
     }
 
     // Check for overlaps
@@ -92,7 +92,7 @@ const createOffer = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating offer:', error);
-    res.status(400).json({ msg: error.message || 'Error creating offer' });
+    res.status(400).json({ message: error.message || 'Error creating offer' });
   }
 };
 
@@ -122,7 +122,7 @@ const getAllOffers = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching offers:', error);
-    res.status(500).json({ msg: 'Server error fetching offers' });
+    res.status(500).json({ message: 'Server error fetching offers' });
   }
 };
 
@@ -132,7 +132,7 @@ const getOfferById = async (req, res) => {
     const { id } = req.params;
     const offer = await Offer.findById(id).populate('applicableProducts', 'name price brand');
     if (!offer) {
-      return res.status(404).json({ msg: 'Offer not found' });
+      return res.status(404).json({ message: 'Offer not found' });
     }
     res.status(200).json({
       success: true,
@@ -140,7 +140,7 @@ const getOfferById = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching offer:', error);
-    res.status(500).json({ msg: 'Server error fetching offer' });
+    res.status(500).json({ message: 'Server error fetching offer' });
   }
 };
 
@@ -151,7 +151,7 @@ const updateOffer = async (req, res) => {
     const updateData = req.body;
     const offer = await Offer.findById(id);
     if (!offer) {
-      return res.status(404).json({ msg: 'Offer not found' });
+      return res.status(404).json({ message: 'Offer not found' });
     }
 
     // If updating dates or products, re-validate
@@ -166,7 +166,7 @@ const updateOffer = async (req, res) => {
       if (updateData.applicableProducts !== undefined) {
         const products = await Product.find({ _id: { $in: newProducts } });
         if (products.length !== newProducts.length) {
-          return res.status(400).json({ msg: 'One or more products do not exist' });
+          return res.status(400).json({ message: 'One or more products do not exist' });
         }
       }
 
@@ -177,10 +177,10 @@ const updateOffer = async (req, res) => {
     // Update discount if provided
     if (updateData.discountValue !== undefined) {
       if (updateData.discountValue <= 0) {
-        return res.status(400).json({ msg: 'Discount value must be positive' });
+        return res.status(400).json({ message: 'Discount value must be positive' });
       }
       if (updateData.discountType === 'Percentage' && updateData.discountValue > 100) {
-        return res.status(400).json({ msg: 'Discount value must be ≤ 100 for Percentage type' });
+        return res.status(400).json({ message: 'Discount value must be ≤ 100 for Percentage type' });
       }
     }
 
@@ -193,7 +193,7 @@ const updateOffer = async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating offer:', error);
-    res.status(400).json({ msg: error.message || 'Error updating offer' });
+    res.status(400).json({ message: error.message || 'Error updating offer' });
   }
 };
 
@@ -203,7 +203,7 @@ const deleteOffer = async (req, res) => {
     const { id } = req.params;
     const offer = await Offer.findById(id);
     if (!offer) {
-      return res.status(404).json({ msg: 'Offer not found' });
+      return res.status(404).json({ message: 'Offer not found' });
     }
 
     // No need to revert prices if computed dynamically; just delete
@@ -211,11 +211,11 @@ const deleteOffer = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      msg: 'Offer deleted successfully'
+      message: 'Offer deleted successfully'
     });
   } catch (error) {
     console.error('Error deleting offer:', error);
-    res.status(500).json({ msg: 'Server error deleting offer' });
+    res.status(500).json({ message: 'Server error deleting offer' });
   }
 };
 
