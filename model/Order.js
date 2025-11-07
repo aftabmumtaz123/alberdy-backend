@@ -50,7 +50,7 @@ const orderSchema = new mongoose.Schema(
       zip:      { type: String, required: true }
     },
 
-    paymentMethod: { type: String, enum: ['COD','online'], required: true },
+    paymentMethod: { type: String, enum: ['COD','Online'], required: true },
     paymentStatus: { type: String, enum: ['pending','paid', 'unpaid','refunded'], default: 'unpaid' },
 
     notes: { type: String }
@@ -63,6 +63,7 @@ orderSchema.index({ status: 1 });
 orderSchema.index({ 'items.product': 1 });
 
 module.exports = mongoose.model('Order', orderSchema);
+
 
 
 
