@@ -1,51 +1,64 @@
-// controllers/offerController.js
 const Offer = require('../model/Offer');
-const Product = require('../model/Product'); // Assuming Product model exists
+const Product = require('../model/Product');
 const mongoose = require('mongoose');
 
-// Helper to resolve product refs (ID or name) to ObjectIds
+// -----------------------------
+// Helper: Resolve Product IDs
+// -----------------------------
 const resolveProducts = async (productRefs) => {
   const ids = [];
   for (const ref of productRefs) {
     if (mongoose.Types.ObjectId.isValid(ref)) {
       ids.push(ref);
     } else {
-      const product = await Product.findOne({ name: { $regex: new RegExp(`^${ref}$`, 'i') } }); // Case-insensitive exact match
+      const product = await Product.findOne({
+        name: { $regex: new RegExp(`^${ref}$`, 'i') }
+      });
       if (!product) {
         throw new Error(`Product "${ref}" not found`);
       }
       ids.push(product._id);
     }
   }
-  // Remove duplicates if any
   return [...new Set(ids)];
 };
 
-// Helper to check for overlapping offers for given products and dates
+// -----------------------------
+// Helper: Check Overlapping Offers
+// -----------------------------
 const checkOverlaps = async (applicableProducts, startDate, endDate, excludeOfferId = null) => {
+  const now = new Date();
+
   for (const prodId of applicableProducts) {
     const overlapQuery = {
       applicableProducts: prodId,
       startDate: { $lt: endDate },
       endDate: { $gt: startDate },
+      endDate: { $gte: now }, // ignore expired offers
+      status: { $in: ['active', 'upcoming'] }, // ignore inactive ones
       ...(excludeOfferId && { _id: { $ne: excludeOfferId } })
     };
-    const count = await Offer.countDocuments(overlapQuery);
-    if (count > 0) {
-      throw new Error(`Offer on this product is already exist`);
+
+    const existingOffer = await Offer.findOne(overlapQuery)
+      .populate('applicableProducts', 'name')
+      .select('offerName applicableProducts');
+
+    if (existingOffer) {
+      throw new Error(
+        `Product "${existingOffer.applicableProducts[0]?.name || 'Unknown'}" already has an active or upcoming offer ("${existingOffer.offerName}")`
+      );
     }
   }
 };
 
-// Create Offer
+// -----------------------------
+// Create Offer Controller
+// -----------------------------
 const createOffer = async (req, res) => {
   try {
     const { offerName, discountType, discountValue, applicableProducts, startDate, endDate, status = 'active' } = req.body;
 
- 
-    //existing Offer
-
-    // Validate discountValue
+    // Validate discount
     if (discountValue <= 0) {
       return res.status(400).json({ message: 'Discount value must be positive' });
     }
@@ -53,22 +66,23 @@ const createOffer = async (req, res) => {
       return res.status(400).json({ message: 'Discount value must be ≤ 100 for Percentage type' });
     }
 
-    // Resolve products (by ID or name) and validate they exist
+    // Check for existing offer name
+    const existingOffer = await Offer.findOne({ offerName: offerName });
+    if (existingOffer) {
+      return res.status(400).json({ message: 'Offer with this name already exists' });
+    }
+
+    // Resolve product references
     const applicableProductIds = await resolveProducts(applicableProducts || []);
     const products = await Product.find({ _id: { $in: applicableProductIds } });
     if (products.length !== applicableProductIds.length) {
       return res.status(400).json({ message: 'One or more products do not exist' });
     }
 
-    //existing Offer
-    const existingOffer = await Offer.findOne({ offerName: offerName });
-    if (existingOffer) {
-      return res.status(400).json({ message: 'Offer with this name already exists' });
-    }
-
-    // Check for overlaps
+    // Check for overlapping offers
     await checkOverlaps(applicableProductIds, new Date(startDate), new Date(endDate));
 
+    // Create offer
     const offer = new Offer({
       offerName,
       discountType,
@@ -80,11 +94,7 @@ const createOffer = async (req, res) => {
     });
 
     await offer.save();
-
-    // Populate products for response
-    await offer.populate('applicableProducts', 'name price'); // Add fields as needed
-
-    // Note: Set status to 'active' here, but for auto-activation, consider a cron job to check startDate and set status if >= now
+    await offer.populate('applicableProducts', 'name price');
 
     res.status(201).json({
       success: true,
@@ -95,6 +105,10 @@ const createOffer = async (req, res) => {
     res.status(400).json({ message: error.message || 'Error creating offer' });
   }
 };
+
+
+
+
 
 // Get All Offers
 const getAllOffers = async (req, res) => {

@@ -193,6 +193,7 @@ router.get('/api/auth/users', authMiddleware, async (req, res) => {
     // Aggregation pipeline
     const usersAggregation = await User.aggregate([
       { $match: matchStage },
+      
 
       // Lookup orders
       {
