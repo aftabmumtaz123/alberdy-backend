@@ -174,7 +174,7 @@ router.get('/:id' ,authMiddleware, requireRole(['Super Admin', 'Manager', 'Custo
 /* -------------------------- LIST ORDERS -------------------------- */
 router.get('/', authMiddleware, requireRole(['Super Admin','Manager','Customer']), async (req, res) => {
   try {
-    const { page = 1, limit = 10, status } = req.query;
+    const { page = 1, limit, status } = req.query;
     const query = status ? { status } : {};
     if (req.user.role === 'Customer') query.user = req.user.id;
 
