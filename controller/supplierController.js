@@ -130,7 +130,7 @@ exports.getAllSuppliers = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const suppliers = await Supplier.find()
-      .sort({ createdAt: 1 })
+      .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
 
