@@ -60,6 +60,12 @@ const createOffer = async (req, res) => {
       return res.status(400).json({ msg: 'One or more products do not exist' });
     }
 
+    //existing Offer
+    const existingOffer = await Offer.findOne({ offerName: offerName });
+    if (existingOffer) {
+      return res.status(400).json({ msg: 'Offer with this name already exists' });
+    }
+
     // Check for overlaps
     await checkOverlaps(applicableProductIds, new Date(startDate), new Date(endDate));
 
