@@ -84,17 +84,19 @@ exports.createPurchase = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid payment type' });
     }
 
-    const amountPaid = payment?.amountPaid ?? 0;
+   const amountPaid = payment?.amountPaid ?? 0;
+const amountDue = grandTotal - amountPaid;
 
-    const amountDue = grandTotal - amountPaid;
+// Prevent overpayment
+if (amountPaid > grandTotal) {
+  return res.status(400).json({
+    success: false,
+    message: 'Paid amount cannot exceed grand total'
+  });
+}
 
-        if(amountPaid >= amountDue) {
-       return res.status(400).json({
-         success: false,
-         message: "Paid Amount is greater than the due amount"
-       });
-    }
-
+// Ensure amountDue doesn’t go negative
+const safeAmountDue = Math.max(0, amountDue);
     
     // cannot charge more than grand total
     if (amountDue < 0) {
@@ -120,7 +122,7 @@ exports.createPurchase = async (req, res) => {
       products: validatedProducts,
       payment: {
         amountPaid,
-        amountDue,
+        amountDue: safeAmountDue,
         type: payment?.type ?? null,
       },
       summary: {
@@ -364,6 +366,7 @@ exports.deletePurchase = async (req, res) => {
   }
 
 };
+
 
 
 
