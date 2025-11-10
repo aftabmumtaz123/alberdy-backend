@@ -536,12 +536,7 @@ exports.updateSale = async (req, res) => {
     if (grandTotal < 0) {
       return res.status(400).json({ status: false, message: 'Grand total cannot be negative' });
     }
-    if (summary.subTotal && summary.subTotal !== subTotal) {
-      return res.status(400).json({ status: false, message: 'Provided subTotal does not match calculated subTotal' });
-    }
-    if (summary.grandTotal && summary.grandTotal !== grandTotal) {
-      return res.status(400).json({ status: false, message: 'Provided grandTotal does not match calculated grandTotal' });
-    }
+
 
     // Validate payment
     if (payment) {
@@ -772,6 +767,7 @@ exports.deleteSale = async (req, res) => {
   }
 
 };
+
 
 
 
