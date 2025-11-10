@@ -233,6 +233,8 @@ exports.getPurchaseById = async (req, res) => {
     });
   }
 };
+
+
 exports.updatePurchase = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -308,6 +310,8 @@ exports.updatePurchase = async (req, res) => {
       purchase.payment.amountPaid = 0;
       purchase.summary.subtotal = 0;
       purchase.summary.grandTotal = 0;
+      purchase.summary.otherCharges = 0;
+      purchase.summary.discount = 0;
     } else {
       // Validate products for non-cancelled purchases
       if (!Array.isArray(products) || products.length === 0) {
@@ -363,7 +367,10 @@ exports.updatePurchase = async (req, res) => {
           }
           await Variant.findByIdAndUpdate(
             oldProd.variantId,
-            { $inc: { stockQuantity: diff } },
+            {
+              $inc: { stockQuantity: diff },
+              $set: newProd ? { purchasePrice: newProd.unitPrice } : {},
+            },
             { runValidators: true, session }
           );
           console.log(`Adjusted ${diff} units for variant ${oldProd.variantId} for purchase ${purchase.purchaseCode}`);
@@ -376,7 +383,7 @@ exports.updatePurchase = async (req, res) => {
     if (grandTotal < 0) {
       return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
     }
-  
+
 
     // Validate payment
     const amountPaid = payment?.amountPaid ?? purchase.payment.amountPaid;
@@ -391,8 +398,8 @@ exports.updatePurchase = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Amount paid cannot exceed grand total' });
     }
 
-    // Update status if fully paid
-    const newStatus = amountDue === 0 ? 'Completed' : (status ?? purchase.status);
+    // Set status: prioritize provided status, only set 'Completed' if not 'Cancelled' and fully paid
+    const newStatus = status === 'Cancelled' ? 'Cancelled' : (amountDue === 0 && purchase.status !== 'Cancelled' ? 'Completed' : (status ?? purchase.status));
 
     // Update purchase
     purchase.set({
@@ -443,7 +450,6 @@ exports.updatePurchase = async (req, res) => {
   }
 };
 
-
 exports.deletePurchase = async (req, res) => {
   try {
     const { id } = req.params;
@@ -461,6 +467,7 @@ exports.deletePurchase = async (req, res) => {
   }
 
 };
+
 
 
 
