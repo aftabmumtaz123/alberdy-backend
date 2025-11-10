@@ -8,7 +8,7 @@ const variantSchema = new mongoose.Schema({
   },
   attribute: { type: String, trim: true },
   value: { type: String, trim: true },
-  sku: { type: String, unique: true, trim: true },
+  sku: { type: String, trim: true },
   unit: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Unit',
@@ -122,5 +122,6 @@ variantSchema.statics.updateExpiredVariants = async function () {
     throw error;
   }
 };
+
 
 module.exports = mongoose.model('Variant', variantSchema);
