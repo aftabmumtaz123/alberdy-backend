@@ -333,12 +333,15 @@ exports.getAllSales = async (req, res) => {
 };
 
 
+
 exports.updateSale = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
     const { id } = req.params;
     const { date, customerId, products, summary, payment, notes, status } = req.body;
 
-    const sale = await Sale.findById(id);
+    const sale = await Sale.findById(id).session(session);
     if (!sale || sale.isDeleted) return res.status(404).json({ status: false, message: 'Sale not found' });
 
     // Validate required fields
@@ -361,47 +364,64 @@ exports.updateSale = async (req, res) => {
     }
 
     // Validate customer
-    const customer = await User.findById(customerId);
+    const customer = await User.findById(customerId).session(session);
     if (!customer) return res.status(400).json({ status: false, message: 'Invalid customer' });
 
-    // Validate products
-    if (!Array.isArray(products) || products.length === 0) {
-      return res.status(400).json({ status: false, message: 'Products array is required and cannot be empty' });
+    // Handle stock restoration for cancellation
+    if (status === 'Cancelled' && sale.status !== 'Cancelled') {
+      for (let oldProd of sale.products) {
+        if (oldProd.variantId && mongoose.Types.ObjectId.isValid(oldProd.variantId)) {
+          await Variant.findByIdAndUpdate(
+            oldProd.variantId,
+            { $inc: { stockQuantity: oldProd.quantity } },
+            { runValidators: true, session }
+          );
+          console.log(`Restored ${oldProd.quantity} units to variant ${oldProd.variantId} for sale ${sale.saleCode}`);
+        }
+      }
+      // Clear products for cancelled sale
+      products.length = 0; // Ensure no new stock deductions
     }
 
+    // Validate products (skip if cancelled)
     let subTotal = 0;
     let totalQuantity = 0;
     let taxTotal = 0;
     const newProducts = [];
-    for (let prod of products) {
-      if (!prod.variantId || !prod.quantity || !prod.price || !prod.unitCost) {
-        return res.status(400).json({ status: false, message: 'Each product must have variantId, quantity, price, and unitCost' });
+    if (status !== 'Cancelled') {
+      if (!Array.isArray(products) || products.length === 0) {
+        return res.status(400).json({ status: false, message: 'Products array is required and cannot be empty' });
       }
-      if (prod.quantity < 1 || prod.price < 0 || prod.unitCost < 0 || (prod.taxPercent && prod.taxPercent < 0)) {
-        return res.status(400).json({ status: false, message: 'Quantity, price, unitCost, and taxPercent must be valid' });
+      for (let prod of products) {
+        if (!prod.variantId || !prod.quantity || !prod.price || !prod.unitCost) {
+          return res.status(400).json({ status: false, message: 'Each product must have variantId, quantity, price, and unitCost' });
+        }
+        if (prod.quantity < 1 || prod.price < 0 || prod.unitCost < 0 || (prod.taxPercent && prod.taxPercent < 0)) {
+          return res.status(400).json({ status: false, message: 'Quantity, price, unitCost, and taxPercent must be valid' });
+        }
+        if (prod.taxType && !['Inclusive', 'Exclusive'].includes(prod.taxType)) {
+          return res.status(400).json({ status: false, message: 'taxType must be Inclusive or Exclusive' });
+        }
+        const variant = await Variant.findById(prod.variantId).session(session);
+        const oldProduct = sale.products.find(p => p.variantId.toString() === prod.variantId.toString());
+        const availableStock = variant ? variant.stockQuantity + (oldProduct ? oldProduct.quantity : 0) : 0;
+        if (!variant || variant.status === 'Inactive' || availableStock < prod.quantity) {
+          return res.status(400).json({ status: false, message: `Insufficient stock or invalid variant: ${prod.variantId}` });
+        }
+        const taxAmount = (prod.price * prod.quantity * (prod.taxPercent || 0)) / 100 * (prod.taxType === 'Exclusive' ? 1 : 0);
+        const productTotal = prod.price * prod.quantity + taxAmount;
+        subTotal += productTotal;
+        taxTotal += taxAmount;
+        totalQuantity += prod.quantity;
+        newProducts.push({
+          variantId: prod.variantId,
+          quantity: prod.quantity,
+          price: prod.price,
+          taxPercent: prod.taxPercent || 0,
+          taxType: prod.taxType || 'Exclusive',
+          unitCost: prod.unitCost
+        });
       }
-      if (prod.taxType && !['Inclusive', 'Exclusive'].includes(prod.taxType)) {
-        return res.status(400).json({ status: false, message: 'taxType must be Inclusive or Exclusive' });
-      }
-      const variant = await Variant.findById(prod.variantId);
-      const oldProduct = sale.products.find(p => p.variantId.toString() === prod.variantId.toString());
-      const availableStock = variant ? variant.stockQuantity + (oldProduct ? oldProduct.quantity : 0) : 0;
-      if (!variant || variant.status === 'Inactive' || availableStock < prod.quantity) {
-        return res.status(400).json({ status: false, message: `Insufficient stock or invalid variant: ${prod.variantId}` });
-      }
-      const taxAmount = (prod.price * prod.quantity * (prod.taxPercent || 0)) / 100 * (prod.taxType === 'Exclusive' ? 1 : 0);
-      const productTotal = prod.price * prod.quantity + taxAmount;
-      subTotal += productTotal;
-      taxTotal += taxAmount;
-      totalQuantity += prod.quantity;
-      newProducts.push({ 
-        variantId: prod.variantId, 
-        quantity: prod.quantity, 
-        price: prod.price, 
-        taxPercent: prod.taxPercent || 0, 
-        taxType: prod.taxType || 'Exclusive', 
-        unitCost: prod.unitCost 
-      });
     }
 
     // Validate summary calculations
@@ -424,26 +444,38 @@ exports.updateSale = async (req, res) => {
         return res.status(400).json({ status: false, message: 'Invalid payment type' });
       }
     }
-
     const amountPaid = payment?.amountPaid ?? sale.payment.amountPaid;
     const amountDue = grandTotal - amountPaid;
     if (amountDue < 0) {
       return res.status(400).json({ status: false, message: 'Amount paid cannot exceed grand total' });
     }
 
-    // Adjust inventory: Restore old quantities, then deduct new
-    const oldProducts = sale.products;
-    for (let oldProd of oldProducts) {
-      const newProd = newProducts.find(p => p.variantId.toString() === oldProd.variantId.toString());
-      const diff = newProd ? oldProd.quantity - newProd.quantity : oldProd.quantity;
-      if (diff !== 0) {
-        await Variant.findByIdAndUpdate(oldProd.variantId, { $inc: { stockQuantity: diff } });
+    // Adjust inventory: Restore old quantities (if not cancelled)
+    if (status !== 'Cancelled') {
+      const oldProducts = sale.products;
+      for (let oldProd of oldProducts) {
+        const newProd = newProducts.find(p => p.variantId.toString() === oldProd.variantId.toString());
+        const diff = newProd ? oldProd.quantity - newProd.quantity : oldProd.quantity;
+        if (diff !== 0 && oldProd.variantId && mongoose.Types.ObjectId.isValid(oldProd.variantId)) {
+          await Variant.findByIdAndUpdate(
+            oldProd.variantId,
+            { $inc: { stockQuantity: diff } },
+            { runValidators: true, session }
+          );
+          console.log(`Adjusted ${diff} units for variant ${oldProd.variantId} for sale ${sale.saleCode}`);
+        }
       }
-    }
-
-    // Deduct new quantities
-    for (let newProd of newProducts) {
-      await Variant.findByIdAndUpdate(newProd.variantId, { $inc: { stockQuantity: -newProd.quantity } });
+      // Deduct new quantities
+      for (let newProd of newProducts) {
+        if (newProd.variantId && mongoose.Types.ObjectId.isValid(newProd.variantId)) {
+          await Variant.findByIdAndUpdate(
+            newProd.variantId,
+            { $inc: { stockQuantity: -newProd.quantity } },
+            { runValidators: true, session }
+          );
+          console.log(`Deducted ${newProd.quantity} units from variant ${newProd.variantId} for sale ${sale.saleCode}`);
+        }
+      }
     }
 
     // Log history
@@ -458,24 +490,25 @@ exports.updateSale = async (req, res) => {
       date: date && new Date(date) <= new Date() ? date : sale.date,
       customerId,
       products: newProducts,
-      status: status ?? sale.status, // Update status
-      payment: { 
-        type: payment?.type ?? sale.payment.type, 
-        amountPaid, 
-        amountDue, 
-        notes: payment?.notes ?? sale.payment.notes 
+      status: status ?? sale.status,
+      payment: {
+        type: payment?.type ?? sale.payment.type,
+        amountPaid,
+        amountDue,
+        notes: payment?.notes ?? sale.payment.notes
       },
-      summary: { 
-        totalQuantity, 
-        subTotal, 
-        taxTotal, // Save taxTotal
-        discount, 
-        otherCharges, 
-        grandTotal 
+      summary: {
+        totalQuantity,
+        subTotal,
+        taxTotal,
+        discount,
+        otherCharges,
+        grandTotal
       },
       notes: notes ?? sale.notes,
     });
-    await sale.save();
+
+    await sale.save({ session });
 
     // Populate response
     const updatedSale = await Sale.findById(id)
@@ -487,11 +520,13 @@ exports.updateSale = async (req, res) => {
           { path: 'product', select: 'name images thumbnail description' },
           { path: 'unit', select: 'name symbol' }
         ],
-      });
+      })
+      .session(session);
 
-    res.status(200).json({ 
-      status: true, 
-      message: 'Sale updated successfully', 
+    await session.commitTransaction();
+    res.status(200).json({
+      status: true,
+      message: 'Sale updated successfully',
       data: {
         _id: updatedSale._id,
         saleCode: updatedSale.saleCode,
@@ -506,8 +541,8 @@ exports.updateSale = async (req, res) => {
         },
         products: updatedSale.products.map((product) => {
           const variant = product.variantId;
-          const taxAmount = (product.price * product.quantity * (product.taxPercent || 0)) / 100 
-                          * (product.taxType === 'Exclusive' ? 1 : 0);
+          const taxAmount = (product.price * product.quantity * (product.taxPercent || 0)) / 100
+            * (product.taxType === 'Exclusive' ? 1 : 0);
           return {
             variantId: variant?._id,
             productName: variant?.product?.name || 'Unknown',
@@ -541,13 +576,16 @@ exports.updateSale = async (req, res) => {
           amountDue: parseFloat(updatedSale.payment.amountDue.toFixed(2)),
           notes: updatedSale.payment.notes || '',
         },
-        createdAt: updatedSale.createdAt,
+        createdAt: updatedSale.updatedAt,
         updatedAt: updatedSale.updatedAt,
       }
     });
   } catch (error) {
+    await session.abortTransaction();
     console.error('Error updating sale:', error);
     res.status(500).json({ status: false, message: 'Server error', error: error.message });
+  } finally {
+    session.endSession();
   }
 };
 
@@ -654,4 +692,5 @@ exports.deleteSale = async (req, res) => {
   }
 
 };
+
 
