@@ -287,7 +287,7 @@ exports.getDashboard = async (req, res) => {
 
     // Low Stock mapping (assume sku exists; fallback if not)
     const formattedLowStock = lowStockAlerts.map(v => ({
-      name: `${v.product?.name || 'N/A'} (${v.attribute || ''}: ${v.value || ''})`,
+      name: `${v.product?.name || 'N/A'}`,
       sku: v.sku || `SKU-${String(v._id).slice(-4)}`,
       unitsLeft: v.stockQuantity,
       image: v.image || null
@@ -328,3 +328,4 @@ exports.getDashboard = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
