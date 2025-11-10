@@ -6,7 +6,7 @@ const productSchema = new mongoose.Schema({
   category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
   subcategory: { type: mongoose.Schema.Types.ObjectId, ref: 'Subcategory', required: true },
   brand: { type: mongoose.Schema.Types.ObjectId, ref: 'Brand', required: true },
-  suitableFor: { type: String, enum: ['Puppy', 'Adult', 'Senior', 'All Ages'] },
+  suitableFor: { type: String, enum: ['Puppy', 'Adult', 'Senior', 'All Ages', 'Kitten'] },
   ingredients: { type: String },
   images: [{ type: String }],
   thumbnail: { type: String },
@@ -23,6 +23,7 @@ productSchema.index({ brand: 1 });
 productSchema.index({ name: 1, brand: 1 }, { unique: true });
 
 module.exports = mongoose.model('Product', productSchema);
+
 
 
 
