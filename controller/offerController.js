@@ -2,9 +2,7 @@ const Offer = require('../model/Offer');
 const Product = require('../model/Product');
 const mongoose = require('mongoose');
 
-// -----------------------------
 // Helper: Resolve Product IDs
-// -----------------------------
 const resolveProducts = async (productRefs) => {
   const ids = [];
   for (const ref of productRefs) {
@@ -23,12 +21,9 @@ const resolveProducts = async (productRefs) => {
   return [...new Set(ids)];
 };
 
-// -----------------------------
 // Helper: Check Overlapping Offers
-// -----------------------------
 const checkOverlaps = async (applicableProducts, startDate, endDate, excludeOfferId = null) => {
   const now = new Date();
-
   for (const prodId of applicableProducts) {
     const overlapQuery = {
       applicableProducts: prodId,
@@ -38,11 +33,9 @@ const checkOverlaps = async (applicableProducts, startDate, endDate, excludeOffe
       status: { $in: ['active', 'upcoming'] }, // ignore inactive ones
       ...(excludeOfferId && { _id: { $ne: excludeOfferId } })
     };
-
     const existingOffer = await Offer.findOne(overlapQuery)
       .populate('applicableProducts', 'name')
       .select('offerName applicableProducts');
-
     if (existingOffer) {
       throw new Error(
         `Product "${existingOffer.applicableProducts[0]?.name || 'Unknown'}" already has an active or upcoming offer ("${existingOffer.offerName}")`
@@ -51,38 +44,26 @@ const checkOverlaps = async (applicableProducts, startDate, endDate, excludeOffe
   }
 };
 
-// -----------------------------
-// Create Offer Controller
-// -----------------------------
+// Create Offer Controller (unchanged, included for context)
 const createOffer = async (req, res) => {
   try {
     const { offerName, discountType, discountValue, applicableProducts, startDate, endDate, status = 'active' } = req.body;
-
-    // Validate discount
     if (discountValue <= 0) {
       return res.status(400).json({ message: 'Discount value must be positive' });
     }
     if (discountType === 'Percentage' && discountValue > 100) {
       return res.status(400).json({ message: 'Discount value must be ≤ 100 for Percentage type' });
     }
-
-    // Check for existing offer name
-    const existingOffer = await Offer.findOne({ offerName: offerName });
+    const existingOffer = await Offer.findOne({ offerName });
     if (existingOffer) {
       return res.status(400).json({ message: 'Offer with this name already exists' });
     }
-
-    // Resolve product references
     const applicableProductIds = await resolveProducts(applicableProducts || []);
     const products = await Product.find({ _id: { $in: applicableProductIds } });
     if (products.length !== applicableProductIds.length) {
       return res.status(400).json({ message: 'One or more products do not exist' });
     }
-
-    // Check for overlapping offers
     await checkOverlaps(applicableProductIds, new Date(startDate), new Date(endDate));
-
-    // Create offer
     const offer = new Offer({
       offerName,
       discountType,
@@ -92,10 +73,8 @@ const createOffer = async (req, res) => {
       endDate: new Date(endDate),
       status
     });
-
     await offer.save();
     await offer.populate('applicableProducts', 'name price');
-
     res.status(201).json({
       success: true,
       data: offer
@@ -106,28 +85,47 @@ const createOffer = async (req, res) => {
   }
 };
 
-
-
-
-
 // Get All Offers
 const getAllOffers = async (req, res) => {
   try {
-    const { page = 1, limit , status } = req.query;
+    const { page = 1, limit = 10, status } = req.query;
     const query = status ? { status } : {};
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
+    // Fetch offers and populate applicable products
     const offers = await Offer.find(query)
-      .populate('applicableProducts', 'name price brand') // Populate relevant product fields
+      .populate('applicableProducts', 'name price brand')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
 
     const total = await Offer.countDocuments(query);
 
+    // Current date: 12:23 PM PKT, November 10, 2025
+    const currentDate = new Date('2025-11-10T12:23:00+05:00'); // Explicitly set to PKT
+
+    // Update status for expired offers and re-fetch if needed
+    const updatedOffers = await Promise.all(offers.map(async (offer) => {
+      if (currentDate > offer.endDate && offer.status === 'active') {
+        const updatedOffer = await Offer.findByIdAndUpdate(
+          offer._id,
+          { status: 'inactive', updatedAt: currentDate },
+          { new: true, runValidators: true }
+        ).populate('applicableProducts', 'name price brand');
+        return updatedOffer;
+      }
+      return offer;
+    }));
+
+    // Enhance offers with product count
+    const offersWithProductCount = updatedOffers.map(offer => ({
+      ...offer.toObject(),
+      productCount: offer.applicableProducts.length
+    }));
+
     res.status(200).json({
       success: true,
-      data: offers,
+      data: offersWithProductCount,
       pagination: {
         current: parseInt(page),
         pages: Math.ceil(total / parseInt(limit)),
@@ -140,17 +138,33 @@ const getAllOffers = async (req, res) => {
   }
 };
 
-// Get Offer by ID
+// Get Offer by ID (unchanged, included for context)
 const getOfferById = async (req, res) => {
   try {
     const { id } = req.params;
-    const offer = await Offer.findById(id).populate('applicableProducts', 'name price brand');
+    let offer = await Offer.findById(id).populate('applicableProducts', 'name price brand');
+
     if (!offer) {
       return res.status(404).json({ message: 'Offer not found' });
     }
+
+    const currentDate = new Date('2025-11-10T12:23:00+05:00'); // Explicitly set to PKT
+    if (currentDate > offer.endDate && offer.status === 'active') {
+      offer = await Offer.findByIdAndUpdate(
+        id,
+        { status: 'inactive', updatedAt: currentDate },
+        { new: true, runValidators: true }
+      ).populate('applicableProducts', 'name price brand');
+    }
+
+    const responseData = {
+      ...offer.toObject(),
+      productCount: offer.applicableProducts.length
+    };
+
     res.status(200).json({
       success: true,
-      data: offer
+      data: responseData
     });
   } catch (error) {
     console.error('Error fetching offer:', error);
@@ -158,7 +172,7 @@ const getOfferById = async (req, res) => {
   }
 };
 
-// Update Offer
+// Update Offer (unchanged, included for context)
 const updateOffer = async (req, res) => {
   try {
     const { id } = req.params;
@@ -167,28 +181,19 @@ const updateOffer = async (req, res) => {
     if (!offer) {
       return res.status(404).json({ message: 'Offer not found' });
     }
-
-    // If updating dates or products, re-validate
     if (updateData.startDate || updateData.endDate || updateData.applicableProducts !== undefined) {
       const newStart = updateData.startDate ? new Date(updateData.startDate) : offer.startDate;
       const newEnd = updateData.endDate ? new Date(updateData.endDate) : offer.endDate;
       let newProducts = updateData.applicableProducts !== undefined ? await resolveProducts(updateData.applicableProducts) : offer.applicableProducts.map(p => p._id.toString());
 
-   
-
-      // Validate products if changed
       if (updateData.applicableProducts !== undefined) {
         const products = await Product.find({ _id: { $in: newProducts } });
         if (products.length !== newProducts.length) {
           return res.status(400).json({ message: 'One or more products do not exist' });
         }
       }
-
-      // Check overlaps, excluding self
       await checkOverlaps(newProducts, newStart, newEnd, id);
     }
-
-    // Update discount if provided
     if (updateData.discountValue !== undefined) {
       if (updateData.discountValue <= 0) {
         return res.status(400).json({ message: 'Discount value must be positive' });
@@ -197,10 +202,8 @@ const updateOffer = async (req, res) => {
         return res.status(400).json({ message: 'Discount value must be ≤ 100 for Percentage type' });
       }
     }
-
     const updatedOffer = await Offer.findByIdAndUpdate(id, updateData, { new: true, runValidators: true })
       .populate('applicableProducts', 'name price brand');
-
     res.status(200).json({
       success: true,
       data: updatedOffer
@@ -211,7 +214,7 @@ const updateOffer = async (req, res) => {
   }
 };
 
-// Delete Offer
+// Delete Offer (unchanged, included for context)
 const deleteOffer = async (req, res) => {
   try {
     const { id } = req.params;
@@ -219,10 +222,7 @@ const deleteOffer = async (req, res) => {
     if (!offer) {
       return res.status(404).json({ message: 'Offer not found' });
     }
-
-    // No need to revert prices if computed dynamically; just delete
     await Offer.findByIdAndDelete(id);
-
     res.status(200).json({
       success: true,
       message: 'Offer deleted successfully'
@@ -239,5 +239,4 @@ module.exports = {
   getOfferById,
   updateOffer,
   deleteOffer
-
 };
