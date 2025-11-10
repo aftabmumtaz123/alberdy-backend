@@ -2,7 +2,7 @@ const ReportController = require('../controller/reportsController');
 const router = require('express').Router();
 
 // Consolidated endpoint for all reports and analytics
-router.get('/reports', ReportController.getReportsAndAnalytics);
+router.get('/', ReportController.getReportsAndAnalytics);
 
 // Individual endpoints (optional, for specific use cases)
 router.get('/sales', ReportController.getSalesByPeriodsData);
@@ -13,3 +13,4 @@ router.get('/expired', ReportController.getExpiredProductsData);
 router.get('/revenue-by-category', ReportController.getRevenueByCategoryData);
 
 module.exports = router;
+
