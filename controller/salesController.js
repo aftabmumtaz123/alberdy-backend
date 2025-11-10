@@ -333,34 +333,6 @@ exports.getAllSales = async (req, res) => {
   }
 };
 
-
-
-Sale Schema Recap
-The Sale schema defines:
-
-products: Array of { variantId, quantity, price, taxPercent, taxType, unitCost }.
-status: Enum ['Pending', 'Completed', 'Cancelled', 'Refunded'].
-isDeleted: Boolean for soft deletion.
-salesHistory: Tracks changes.
-References the Variant model for stock management (variantId).
-
-The goal is to ensure stock is restored correctly when a sale is canceled (status: 'Cancelled') or soft-deleted (isDeleted: true), and to prevent negative stock.
-
-1. Delete Sale Endpoint (deleteSale)
-Purpose: Soft-deletes a sale by setting isDeleted: true, restores stock for all products, and logs the action in salesHistory.
-Requirements:
-
-Restore stock for all products in the sale.
-Use transactions for atomicity.
-Validate variantId to prevent errors.
-Log stock changes for debugging.
-Prevent deletion if the sale is already deleted.
-
-Optimized Logic:
-javascriptconst mongoose = require('mongoose');
-const Sale = require('../model/Sales');
-const Variant = require('../model/variantProduct');
-
 exports.deleteSale = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -420,32 +392,6 @@ exports.deleteSale = async (req, res) => {
     session.endSession();
   }
 };
-Key Features:
-
-Transaction: Ensures stock restoration and sale deletion are atomic.
-Validation: Checks id, sale existence, and variantId validity.
-Restriction: Prevents deletion of 'Completed' or fully paid sales to avoid reversing finalized transactions.
-Logging: Logs stock restoration for auditing.
-Stock Restoration: Increments stockQuantity for each product’s quantity.
-
-
-2. Update Sale Endpoint (updateSale)
-Purpose: Updates a sale’s details (e.g., products, status, payment) and manages stock, fully restoring it when the sale is canceled.
-Requirements:
-
-Restore all stock when status changes to 'Cancelled'.
-Prevent stock deduction for canceled sales.
-Adjust stock for non-canceled sales (restore old quantities, deduct new ones).
-Use transactions for atomicity.
-Validate inputs and stock availability.
-Log stock changes.
-
-Optimized Logic:
-javascriptconst mongoose = require('mongoose');
-const Sale = require('../model/Sales');
-const Variant = require('../model/variantProduct');
-const User = require('../model/User');
-
 exports.updateSale = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
