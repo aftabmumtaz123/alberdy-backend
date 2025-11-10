@@ -111,7 +111,7 @@ exports.createProduct = async (req, res) => {
     }
   };
 
-  if (suitableFor && !['Puppy', 'Adult', 'Senior', 'All Ages'].includes(suitableFor)) {
+  if (suitableFor && !['Puppy', 'Adult', 'Senior', 'All Ages', 'Kitten'].includes(suitableFor)) {
     await cleanupAllFiles();
     return res.status(400).json({ success: false, msg: 'Invalid suitableFor' });
   }
@@ -1150,5 +1150,6 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
