@@ -371,10 +371,10 @@ exports.createProduct = async (req, res) => {
 
 
 
+
 exports.getAllProducts = async (req, res) => {
   const { page = 1, limit, category, subcategory, brand, status, name, lowStock } = req.query;
   const filter = {};
-
   try {
     // ---------- FILTER HANDLING ----------
     if (category) {
@@ -445,6 +445,22 @@ exports.getAllProducts = async (req, res) => {
             },
             { $unwind: { path: '$unit', preserveNullAndEmptyArrays: true } },
             {
+              $addFields: {
+                status: {
+                  $cond: {
+                    if: {
+                      $and: [
+                        { $ifNull: ['$expiryDate', false] }, // Check if expiryDate exists
+                        { $lt: ['$expiryDate', new Date('2025-11-10T15:58:00+05:00')] } // expiryDate < current date
+                      ]
+                    },
+                    then: 'inactive',
+                    else: { $ifNull: ['$status', 'active'] } // Preserve existing status or default to 'active'
+                  }
+                }
+              }
+            },
+            {
               $project: {
                 attribute: 1,
                 value: 1,
@@ -468,7 +484,7 @@ exports.getAllProducts = async (req, res) => {
       {
         $lookup: {
           from: 'offers',
-          let: { prodId: '$_id', currentDate: new Date() },
+          let: { prodId: '$_id', currentDate: new Date('2025-11-10T15:58:00+05:00') },
           pipeline: [
             {
               $match: {
@@ -536,7 +552,7 @@ exports.getAllProducts = async (req, res) => {
     // ---------- LOW STOCK FILTER ----------
     if (lowStock === 'true') {
       pipeline.push({
-        $addFields: { totalStock: { $sum: "$variations.stockQuantity" } }
+        $addFields: { totalStock: { $sum: '$variations.stockQuantity' } }
       });
       pipeline.push({ $match: { totalStock: { $lt: 10 } } });
     }
@@ -550,22 +566,17 @@ exports.getAllProducts = async (req, res) => {
     // ---------- PAGINATION STAGES ----------
     const pageNum = parseInt(page);
     const limitNum = limit ? parseInt(limit) : null; // null means no limit
-
     const sortStage = { $sort: { createdAt: -1 } };
     const projectStage = { $project: { __v: 0, activeOffer: 0 } };
-
     let fullPipeline = [...pipeline, sortStage];
-
     if (limitNum && !isNaN(limitNum)) {
       fullPipeline.push({ $skip: (pageNum - 1) * limitNum });
       fullPipeline.push({ $limit: limitNum });
     }
-
     fullPipeline.push(projectStage);
 
     // ---------- EXECUTE QUERY ----------
     const products = await Product.aggregate(fullPipeline);
-
     res.json({
       success: true,
       products,
@@ -573,7 +584,6 @@ exports.getAllProducts = async (req, res) => {
       pages: limitNum ? Math.ceil(total / limitNum) : 1,
       currentPage: pageNum
     });
-
   } catch (err) {
     res.status(500).json({
       success: false,
@@ -582,7 +592,6 @@ exports.getAllProducts = async (req, res) => {
     });
   }
 };
-
 
 
 
@@ -1141,4 +1150,5 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
