@@ -1,6 +1,7 @@
 const Purchase = require('../model/Purchase');
 const Variant = require('../model/variantProduct');
 const Supplier = require('../model/Supplier');
+const mongoose  = require('mongoose')
 
 exports.createPurchase = async (req, res) => {
   try {
@@ -469,6 +470,7 @@ exports.deletePurchase = async (req, res) => {
   }
 
 };
+
 
 
 
