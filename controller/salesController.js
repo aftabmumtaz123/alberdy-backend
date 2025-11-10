@@ -334,7 +334,6 @@ exports.getAllSales = async (req, res) => {
 };
 
 
-Based on your Sale schema and the issue of stock going negative during cancellation, I’ll provide the optimized logic for the deleteSale and updateSale endpoints. The logic will ensure proper stock restoration when a sale is canceled or soft-deleted, prevent negative stock, and maintain consistency with the Order controller’s stock management. I’ll include transactions for atomicity, robust validation, and logging, aligning with the Sale schema and the flow of your existing code.
 
 Sale Schema Recap
 The Sale schema defines:
@@ -833,6 +832,7 @@ exports.deleteSale = async (req, res) => {
   }
 
 };
+
 
 
 
