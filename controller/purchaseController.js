@@ -60,10 +60,6 @@ exports.createPurchase = async (req, res) => {
       });
     }
 
-    // Validate subtotal if provided
-    if (summary.subtotal && summary.subtotal !== subtotal) {
-      return res.status(400).json({ success: false, message: 'Provided subtotal does not match calculated subtotal' });
-    }
 
     const grandTotal = subtotal + otherCharges - discount;
     if (grandTotal < 0) {
@@ -380,12 +376,7 @@ exports.updatePurchase = async (req, res) => {
     if (grandTotal < 0) {
       return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
     }
-    if (summary.subtotal && summary.subtotal !== subtotal) {
-      return res.status(400).json({ success: false, message: 'Provided subtotal does not match calculated subtotal' });
-    }
-    if (summary.grandTotal && summary.grandTotal !== grandTotal) {
-      return res.status(400).json({ success: false, message: 'Provided grandTotal does not match calculated grandTotal' });
-    }
+  
 
     // Validate payment
     const amountPaid = payment?.amountPaid ?? purchase.payment.amountPaid;
@@ -470,6 +461,7 @@ exports.deletePurchase = async (req, res) => {
   }
 
 };
+
 
 
 
