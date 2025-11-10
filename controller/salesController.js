@@ -67,7 +67,6 @@ exports.createSale = async (req, res) => {
 
     // Validate summary calculations
     const grandTotal = subTotal + otherCharges - discount;
-    if (discount > subTotal) return res.status(400).json({ status: false, message: 'Discount cannot exceed subtotal' });
     if (grandTotal < 0) return res.status(400).json({ status: false, message: 'Grand total cannot be negative' });
   
 
@@ -530,9 +529,7 @@ exports.updateSale = async (req, res) => {
 
     // Validate summary calculations
     const grandTotal = subTotal + otherCharges - discount;
-    if (discount > subTotal) {
-      return res.status(400).json({ status: false, message: 'Discount cannot exceed subtotal' });
-    }
+ 
     if (grandTotal < 0) {
       return res.status(400).json({ status: false, message: 'Grand total cannot be negative' });
     }
@@ -767,6 +764,7 @@ exports.deleteSale = async (req, res) => {
   }
 
 };
+
 
 
 
