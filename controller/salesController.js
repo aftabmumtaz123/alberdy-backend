@@ -1,7 +1,7 @@
 const Sale = require('../model/Sales');
 const Variant = require('../model/variantProduct');
 const User = require('../model/User');
-const mongoose = reqyire('mongoose')
+const mongoose = require('mongoose')
 exports.createSale = async (req, res) => {
   try {
     const { date, customerId, products, summary, payment, notes, status } = req.body;
@@ -778,6 +778,7 @@ exports.deleteSale = async (req, res) => {
   }
 
 };
+
 
 
 
