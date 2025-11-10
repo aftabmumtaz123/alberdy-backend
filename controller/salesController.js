@@ -69,13 +69,7 @@ exports.createSale = async (req, res) => {
     const grandTotal = subTotal + otherCharges - discount;
     if (discount > subTotal) return res.status(400).json({ status: false, message: 'Discount cannot exceed subtotal' });
     if (grandTotal < 0) return res.status(400).json({ status: false, message: 'Grand total cannot be negative' });
-    if (summary.subTotal && summary.subTotal !== subTotal) {
-      return res.status(400).json({ status: false, message: 'Provided subTotal does not match calculated subTotal' });
-    }
-    if (summary.grandTotal && summary.grandTotal !== grandTotal) {
-      return res.status(400).json({ status: false, message: 'Provided grandTotal does not match calculated grandTotal' });
-    }
-
+  
 
 
 
@@ -778,6 +772,7 @@ exports.deleteSale = async (req, res) => {
   }
 
 };
+
 
 
 
