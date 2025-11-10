@@ -184,6 +184,7 @@ const updateOffer = async (req, res) => {
     if (updateData.startDate || updateData.endDate || updateData.applicableProducts !== undefined) {
       const newStart = updateData.startDate ? new Date(updateData.startDate) : offer.startDate;
       const newEnd = updateData.endDate ? new Date(updateData.endDate) : offer.endDate;
+      const newStatus = updateData.status ? updateData.status : offer.status;
       let newProducts = updateData.applicableProducts !== undefined ? await resolveProducts(updateData.applicableProducts) : offer.applicableProducts.map(p => p._id.toString());
 
       if (updateData.applicableProducts !== undefined) {
@@ -240,3 +241,4 @@ module.exports = {
   updateOffer,
   deleteOffer
 };
+
