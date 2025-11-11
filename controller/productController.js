@@ -939,7 +939,6 @@ exports.updateProduct = async (req, res) => {
           product: productId,
           attribute: v.attribute.trim(),
           value: v.value.trim(),
-          sku: v.sku.trim(),
           unit: unit._id,
           purchasePrice: parseFloat(v.purchasePrice),
           price,
@@ -1147,6 +1146,7 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
   }
 };
+
 
 
 
