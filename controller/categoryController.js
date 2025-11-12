@@ -3,10 +3,6 @@ const Category = require('../model/Category');
 const Subcategory = require('../model/subCategory')
 const Product = require('../model/Product');
 
-<<<<<<< HEAD
-=======
-
->>>>>>> 9c5e5c041ba901da372504fbd2300e74100cd0eb
 exports.createCategory =  async (req, res) => {
   const { name, description, status = 'Active' } = req.body;
 
@@ -55,11 +51,8 @@ exports.getCategories = async (req, res) => {
 
   try {
     const categories = await Category.find(filter)
-<<<<<<< HEAD
       .populate('subcategories', 'name status') 
-=======
       .populate('subcategories', 'name status')
->>>>>>> 9c5e5c041ba901da372504fbd2300e74100cd0eb
       .limit(limit * 1)
       .skip((page - 1) * limit)
       .sort({ createdAt: -1 });
