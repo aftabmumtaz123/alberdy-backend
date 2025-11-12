@@ -1,7 +1,8 @@
 const Sale = require('../model/Sales');
 const Variant = require('../model/variantProduct');
 const User = require('../model/User');
-const mongoose = require('mongoose')
+const mongoose = require('mongoose');
+
 exports.createSale = async (req, res) => {
   try {
     const { date, customerId, products, summary, payment, notes, status } = req.body;
@@ -45,10 +46,10 @@ exports.createSale = async (req, res) => {
       }
       const variant = await Variant.findById(prod.variantId);
       if (!variant || variant.status === 'Inactive') {
-        return res.status(400).json({ status: false, message: `Only ${variant.stockQuantity} items available in stock` });
+        return res.status(400).json({ status: false, message: `Invalid or inactive variant: ${prod.variantId}` });
       }
-      if(variant.stockQuantity < prod.quantity){
-        return res.status(400).json({ status: false, message: `Insufficient stock for variant` });
+      if (variant.stockQuantity < prod.quantity) {
+        return res.status(400).json({ status: false, message: `Insufficient stock for variant ${prod.variantId}` });
       }
       const taxAmount = (prod.price * prod.quantity * (prod.taxPercent || 0)) / 100 * (prod.taxType === 'Exclusive' ? 1 : 0);
       const productTotal = prod.price * prod.quantity + taxAmount;
@@ -68,9 +69,6 @@ exports.createSale = async (req, res) => {
     // Validate summary calculations
     const grandTotal = subTotal + otherCharges - discount;
     if (grandTotal < 0) return res.status(400).json({ status: false, message: 'Grand total cannot be negative' });
-  
-
-
 
     // Validate payment
     if (payment) {
@@ -116,7 +114,7 @@ exports.createSale = async (req, res) => {
       summary: { 
         totalQuantity, 
         subTotal, 
-        taxTotal, // Save taxTotal
+        taxTotal,
         discount, 
         otherCharges, 
         grandTotal 
@@ -126,9 +124,11 @@ exports.createSale = async (req, res) => {
 
     await sale.save();
 
-    // Update inventory
-    for (let prod of validatedProducts) {
-      await Variant.findByIdAndUpdate(prod.variantId, { $inc: { stockQuantity: -prod.quantity } });
+    // Update inventory (skip if Cancelled)
+    if (status !== 'Cancelled') {
+      for (let prod of validatedProducts) {
+        await Variant.findByIdAndUpdate(prod.variantId, { $inc: { stockQuantity: -prod.quantity } });
+      }
     }
 
     // Populate response
@@ -169,30 +169,30 @@ exports.createSale = async (req, res) => {
             attribute: variant?.attribute || '',
             value: variant?.value || '',
             weightQuantity: variant?.weightQuantity || '',
-            unit: variant?.unit?.short_name || 'Unknown',
+            unit: variant?.unit?.name || 'Unknown',
             unitSymbol: variant?.unit?.symbol || '',
             image: variant?.product?.thumbnail || variant?.image || '',
             quantity: product.quantity,
-            price: parseFloat(product.price),
-            unitCost: parseFloat(product.unitCost),
+            price: parseFloat(product.price.toFixed(2)),
+            unitCost: parseFloat(product.unitCost.toFixed(2)),
             taxPercent: product.taxPercent || 0,
             taxType: product.taxType || 'Exclusive',
-            taxAmount: parseFloat(taxAmount),
-            total: parseFloat((product.price * product.quantity + taxAmount)),
+            taxAmount: parseFloat(taxAmount.toFixed(2)),
+            total: parseFloat((product.price * product.quantity + taxAmount).toFixed(2)),
           };
         }),
         summary: {
           totalQuantity: populatedSale.summary.totalQuantity,
-          subTotal: parseFloat(populatedSale.summary.subTotal),
-          taxTotal: parseFloat(populatedSale.summary.taxTotal),
-          discount: parseFloat(populatedSale.summary.discount),
-          otherCharges: parseFloat(populatedSale.summary.otherCharges),
-          grandTotal: parseFloat(populatedSale.summary.grandTotal ),
+          subTotal: parseFloat(populatedSale.summary.subTotal.toFixed(2)),
+          taxTotal: parseFloat(populatedSale.summary.taxTotal.toFixed(2)),
+          discount: parseFloat(populatedSale.summary.discount.toFixed(2)),
+          otherCharges: parseFloat(populatedSale.summary.otherCharges.toFixed(2)),
+          grandTotal: parseFloat(populatedSale.summary.grandTotal.toFixed(2)),
         },
         payment: {
           type: populatedSale.payment.type || null,
-          amountPaid: parseFloat(populatedSale.payment.amountPaid ),
-          amountDue: parseFloat(populatedSale.payment.amountDue ),
+          amountPaid: parseFloat(populatedSale.payment.amountPaid.toFixed(2)),
+          amountDue: parseFloat(populatedSale.payment.amountDue.toFixed(2)),
           notes: populatedSale.payment.notes || '',
         },
         createdAt: populatedSale.createdAt,
@@ -204,8 +204,6 @@ exports.createSale = async (req, res) => {
     res.status(500).json({ status: false, message: 'Server error', error: error.message });
   }
 };
-
-
 
 exports.getAllSales = async (req, res) => {
   try {
@@ -245,7 +243,7 @@ exports.getAllSales = async (req, res) => {
         select: 'sku attribute value unit purchasePrice price discountPrice stockQuantity expiryDate weightQuantity image',
         populate: [
           { path: 'product', select: 'name images thumbnail description' },
-          { path: 'unit', select: 'unit_name short_name' } // Include short_name
+          { path: 'unit', select: 'name symbol' } // Consistent with create/update
         ],
       })
       .lean();
@@ -297,7 +295,7 @@ exports.getAllSales = async (req, res) => {
               attribute: product.variantId?.attribute || '',
               value: product.variantId?.value || '',
               weightQuantity: product.variantId?.weightQuantity || '',
-              unit: product.variantId?.unit?.short_name || 'Unknown', 
+              unit: product.variantId?.unit?.name || 'Unknown',
               image: product.variantId?.product?.thumbnail || product.variantId?.image || '',
               quantity: product.quantity,
               price: parseFloat(product.price.toFixed(2)),
@@ -385,6 +383,7 @@ exports.deleteSale = async (req, res) => {
     session.endSession();
   }
 };
+
 exports.updateSale = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -500,40 +499,38 @@ exports.updateSale = async (req, res) => {
         });
       }
 
-      // Restore stock for old products
+      // Restore ALL stock for old products
       for (const oldProd of sale.products) {
-        const newProd = newProducts.find(p => p.variantId.toString() === oldProd.variantId.toString());
-        const diff = newProd ? oldProd.quantity - newProd.quantity : oldProd.quantity;
-        if (diff !== 0 && oldProd.variantId && mongoose.Types.ObjectId.isValid(oldProd.variantId)) {
+        if (oldProd.variantId && mongoose.Types.ObjectId.isValid(oldProd.variantId)) {
           await Variant.findByIdAndUpdate(
             oldProd.variantId,
-            { $inc: { stockQuantity: diff } },
+            { $inc: { stockQuantity: oldProd.quantity } },
             { runValidators: true, session }
           );
-          console.log(`Adjusted ${diff} units for variant ${oldProd.variantId} for sale ${sale.saleCode}`);
+          console.log(`Restored ${oldProd.quantity} units to variant ${oldProd.variantId} for sale ${sale.saleCode}`);
         }
       }
 
-      // Deduct stock for new products
-      for (const newProd of newProducts) {
-        if (newProd.variantId && mongoose.Types.ObjectId.isValid(newProd.variantId)) {
-          await Variant.findByIdAndUpdate(
-            newProd.variantId,
-            { $inc: { stockQuantity: -newProd.quantity } },
-            { runValidators: true, session }
-          );
-          console.log(`Deducted ${newProd.quantity} units from variant ${newProd.variantId} for sale ${sale.saleCode}`);
+      // Deduct stock for new products (only if not Cancelled)
+      if (status !== 'Cancelled') {
+        for (const newProd of newProducts) {
+          if (newProd.variantId && mongoose.Types.ObjectId.isValid(newProd.variantId)) {
+            await Variant.findByIdAndUpdate(
+              newProd.variantId,
+              { $inc: { stockQuantity: -newProd.quantity } },
+              { runValidators: true, session }
+            );
+            console.log(`Deducted ${newProd.quantity} units from variant ${newProd.variantId} for sale ${sale.saleCode}`);
+          }
         }
       }
     }
 
     // Validate summary calculations
     const grandTotal = subTotal + otherCharges - discount;
- 
     if (grandTotal < 0) {
       return res.status(400).json({ status: false, message: 'Grand total cannot be negative' });
     }
-
 
     // Validate payment
     if (payment) {
@@ -660,7 +657,6 @@ exports.updateSale = async (req, res) => {
   }
 };
 
-
 exports.getSaleById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -702,29 +698,30 @@ exports.getSaleById = async (req, res) => {
             attribute: variant?.attribute || '',
             value: variant?.value || '',
             weightQuantity: variant?.weightQuantity || '',
-            unit: variant?.unit?.short_name || 'Unknown', 
+            unit: variant?.unit?.name || 'Unknown',
+            unitSymbol: variant?.unit?.symbol || '',
             image: variant?.product?.thumbnail || variant?.image || '',
             quantity: product.quantity,
-            price: parseFloat(product.price ),
-            unitCost: parseFloat(product.unitCost ),
+            price: parseFloat(product.price.toFixed(2)),
+            unitCost: parseFloat(product.unitCost.toFixed(2)),
             taxPercent: product.taxPercent || 0,
             taxType: product.taxType || 'Exclusive',
-            taxAmount: parseFloat(taxAmount ),
-            total: parseFloat((product.price * product.quantity + taxAmount) ),
+            taxAmount: parseFloat(taxAmount.toFixed(2)),
+            total: parseFloat((product.price * product.quantity + taxAmount).toFixed(2)),
           };
         }),
         summary: {
           totalQuantity: sale.summary.totalQuantity,
-          subTotal: parseFloat(sale.summary.subTotal ),
-          taxTotal: parseFloat(sale.summary.taxTotal ),
-          discount: parseFloat(sale.summary.discount ),
-          otherCharges: parseFloat(sale.summary.otherCharges ),
-          grandTotal: parseFloat(sale.summary.grandTotal ),
+          subTotal: parseFloat(sale.summary.subTotal.toFixed(2)),
+          taxTotal: parseFloat(sale.summary.taxTotal.toFixed(2)),
+          discount: parseFloat(sale.summary.discount.toFixed(2)),
+          otherCharges: parseFloat(sale.summary.otherCharges.toFixed(2)),
+          grandTotal: parseFloat(sale.summary.grandTotal.toFixed(2)),
         },
         payment: {
           type: sale.payment.type || null,
-          amountPaid: parseFloat(sale.payment.amountPaid ),
-          amountDue: parseFloat(sale.payment.amountDue ),
+          amountPaid: parseFloat(sale.payment.amountPaid.toFixed(2)),
+          amountDue: parseFloat(sale.payment.amountDue.toFixed(2)),
           notes: sale.payment.notes || '',
         },
         createdAt: sale.createdAt,
@@ -736,39 +733,3 @@ exports.getSaleById = async (req, res) => {
     res.status(500).json({ status: false, message: 'Server error', error: error.message });
   }
 };
-
-
-exports.deleteSale = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const sale = await Sale.findById(id);
-    if (!sale || sale.isDeleted) return res.status(404).json({ status: false, message: 'Sale not found' });
-
-    sale.isDeleted = true;
-    sale.salesHistory.push({
-      action: 'Delete',
-      changes: { isDeleted: true },
-      date: Date.now(),
-    });
-    await sale.save();
-
-    // Restore inventory
-    for (let prod of sale.products) {
-      await Variant.findByIdAndUpdate(prod.variantId, { $inc: { stockQuantity: prod.quantity } });
-    }
-
-    res.status(200).json({ status: true, message: 'Sale soft deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting sale:', error);
-    res.status(500).json({ status: false, message: 'Server error', error: error.message });
-  }
-
-};
-
-
-
-
-
-
-
-

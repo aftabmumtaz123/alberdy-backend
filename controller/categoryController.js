@@ -3,7 +3,10 @@ const Category = require('../model/Category');
 const Subcategory = require('../model/subCategory')
 const Product = require('../model/Product');
 
+<<<<<<< HEAD
+=======
 
+>>>>>>> 9c5e5c041ba901da372504fbd2300e74100cd0eb
 exports.createCategory =  async (req, res) => {
   const { name, description, status = 'Active' } = req.body;
 
@@ -52,7 +55,11 @@ exports.getCategories = async (req, res) => {
 
   try {
     const categories = await Category.find(filter)
+<<<<<<< HEAD
+      .populate('subcategories', 'name status') 
+=======
       .populate('subcategories', 'name status')
+>>>>>>> 9c5e5c041ba901da372504fbd2300e74100cd0eb
       .limit(limit * 1)
       .skip((page - 1) * limit)
       .sort({ createdAt: -1 });
@@ -77,6 +84,8 @@ exports.getCategories = async (req, res) => {
 
     res.json({
       success: true,
+      categories,  
+      total, 
       categories: categoriesWithProductCount, // Now includes productCount
       total,
       pages: Math.ceil(total / limit),
@@ -91,7 +100,7 @@ exports.getCategories = async (req, res) => {
 exports.getCategoryById =   async (req, res) => {
   try {
     const category = await Category.findById(req.params.id)
-      .populate('subcategories', 'name status'); // ADD: Populate _id, name, status
+      .populate('subcategories', 'name status'); 
     if (!category) {
       return res.status(404).json({ success: false, msg: 'Category not found' });
     }
@@ -103,9 +112,7 @@ exports.getCategoryById =   async (req, res) => {
 }
 exports.updateCategory = async (req, res) => {
   const { name, description, status } = req.body;
-
-
-
+d
   try {
     const existingCategory = await Category.findById(req.params.id);
     if (!existingCategory) {
