@@ -1,7 +1,7 @@
 const Purchase = require('../model/Purchase');
 const Variant = require('../model/variantProduct');
 const Supplier = require('../model/Supplier');
-const mongoose  = require('mongoose')
+const mongoose = require('mongoose');
 
 exports.createPurchase = async (req, res) => {
   try {
@@ -60,13 +60,10 @@ exports.createPurchase = async (req, res) => {
       });
     }
 
-
     const grandTotal = subtotal + otherCharges - discount;
     if (grandTotal < 0) {
       return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
     }
-
-
 
     // Validate grandTotal if provided
     if (summary.grandTotal && summary.grandTotal !== grandTotal) {
@@ -81,25 +78,13 @@ exports.createPurchase = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid payment type' });
     }
 
-   const amountPaid = payment?.amountPaid ?? 0;
-const amountDue = grandTotal - amountPaid;
+    const amountPaid = payment?.amountPaid ?? 0;
+    const amountDue = grandTotal - amountPaid;
 
-// Prevent overpayment
-if (amountPaid > grandTotal) {
-  return res.status(400).json({
-    success: false,
-    message: 'Paid amount cannot exceed grand total'
-  });
-}
-
-// Ensure amountDue doesn’t go negative
-const safeAmountDue = Math.max(0, amountDue);
-    
-    // cannot charge more than grand total
+    // Prevent overpayment
     if (amountDue < 0) {
       return res.status(400).json({ success: false, message: 'Amount paid cannot exceed grand total' });
     }
-   
 
     // Generate unique purchase code
     let purchaseCode = `PUR-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
@@ -107,7 +92,7 @@ const safeAmountDue = Math.max(0, amountDue);
       purchaseCode = `PUR-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
     }
 
-    //status update payment is completely done
+    // Set status to 'Completed' if fully paid
     if (amountDue === 0) {
       req.body.status = 'Completed';
     }
@@ -119,7 +104,7 @@ const safeAmountDue = Math.max(0, amountDue);
       products: validatedProducts,
       payment: {
         amountPaid,
-        amountDue: safeAmountDue,
+        amountDue,
         type: payment?.type ?? null,
       },
       summary: {
@@ -150,7 +135,7 @@ const safeAmountDue = Math.max(0, amountDue);
 
 exports.getAllPurchases = async (req, res) => {
   try {
-    const { page = 1, limit  } = req.query;
+    const { page = 1, limit } = req.query;
     const skip = (page - 1) * limit;
 
     const purchases = await Purchase.find()
@@ -164,13 +149,13 @@ exports.getAllPurchases = async (req, res) => {
         populate: [
           {
             path: 'product',
-            select: 'name images thumbnail description'
+            select: 'name images thumbnail description',
           },
           {
             path: 'unit',
-            select: 'short_name'
-          }
-        ]
+            select: 'short_name',
+          },
+        ],
       });
 
     const total = await Purchase.countDocuments();
@@ -207,13 +192,13 @@ exports.getPurchaseById = async (req, res) => {
         populate: [
           {
             path: 'product',
-            select: 'name images thumbnail description'
+            select: 'name images thumbnail description',
           },
           {
             path: 'unit',
-            select: 'short_name' 
-          }
-        ]
+            select: 'short_name',
+          },
+        ],
       });
 
     if (!purchase)
@@ -233,7 +218,6 @@ exports.getPurchaseById = async (req, res) => {
     });
   }
 };
-
 
 exports.updatePurchase = async (req, res) => {
   const session = await mongoose.startSession();
@@ -283,7 +267,7 @@ exports.updatePurchase = async (req, res) => {
 
     // Handle cancellation
     if (status === 'Cancelled' && purchase.status !== 'Cancelled') {
-      // Remove all stock added by this purchase
+      // Remove stock added by this purchase
       for (const product of purchase.products) {
         if (product.variantId && mongoose.Types.ObjectId.isValid(product.variantId)) {
           const variant = await Variant.findById(product.variantId).session(session);
@@ -303,9 +287,9 @@ exports.updatePurchase = async (req, res) => {
           console.log(`Removed ${product.quantity} units from variant ${product.variantId} for purchase ${purchase.purchaseCode}`);
         }
       }
-      // Clear products and reset financials
-      newProducts = [];
-      purchase.products = [];
+      // Do NOT clear products; keep them for reference
+      newProducts = purchase.products; // Preserve existing products
+      // Reset financials
       purchase.payment.amountDue = 0;
       purchase.payment.amountPaid = 0;
       purchase.summary.subtotal = 0;
@@ -384,7 +368,6 @@ exports.updatePurchase = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
     }
 
-
     // Validate payment
     const amountPaid = payment?.amountPaid ?? purchase.payment.amountPaid;
     const amountDue = grandTotal - amountPaid;
@@ -454,7 +437,7 @@ exports.deletePurchase = async (req, res) => {
   try {
     const { id } = req.params;
     const purchase = await Purchase.findByIdAndDelete(id);
-    if (!purchase) return res.status(404).json({ success: false, message: 'Purchase not found' });
+    if (!purchase) return res.status(404).json({ success: softDeletedSale, message: 'Purchase not found' });
 
     // Decrease stock levels
     for (let prod of purchase.products) {
@@ -465,15 +448,4 @@ exports.deletePurchase = async (req, res) => {
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
-
 };
-
-
-
-
-
-
-
-
-
-
