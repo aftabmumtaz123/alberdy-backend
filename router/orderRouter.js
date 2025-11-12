@@ -1,12 +1,12 @@
-// routes/order.js
-const express   = require('express');
-const router    = express.Router();
-const mongoose  = require('mongoose');
+const express = require('express');
+const router = express.Router();
+const mongoose = require('mongoose');
 
-const Order   = require('../model/Order');
+const Order = require('../model/Order');
 const Product = require('../model/Product');
-const Variant = require('../model/variantProduct');   // <-- correct model name
-const User    = require('../model/User');
+const Variant = require('../model/variantProduct');
+const User = require('../model/User');
+const AppConfiguration = require('../model/app_configuration'); // Import AppConfiguration model
 const authMiddleware = require('../middleware/auth');
 
 const requireRole = roles => (req, res, next) => {
@@ -31,8 +31,36 @@ const generateTrackingNumber = async () => {
   return `#TRK-LEY-321-${num.toString().padStart(3, '0')}`;
 };
 
+/* ---------- Helper: fetch currency settings ---------- */
+const getCurrencySettings = async () => {
+  try {
+    const config = await AppConfiguration.findOne().lean().select('currencyName currencyCode currencySign');
+    if (!config) {
+      // Fallback if no configuration is found
+      return {
+        currencyName: 'US Dollar',
+        currencyCode: 'USD',
+        currencySign: '$',
+      };
+    }
+    return {
+      currencyName: config.currencyName,
+      currencyCode: config.currencyCode,
+      currencySign: config.currencySign,
+    };
+  } catch (err) {
+    console.error('Error fetching currency settings:', err);
+    // Fallback on error
+    return {
+      currencyName: 'US Dollar',
+      currencyCode: 'USD',
+      currencySign: '$',
+    };
+  }
+};
+
 /* -------------------------- CREATE ORDER -------------------------- */
-router.post('/', authMiddleware, requireRole(['Super Admin','Manager','Customer']), async (req, res) => {
+router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
     const {
       items, subtotal, tax = 0, discount = 0, total,
@@ -47,7 +75,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin','Manager','Customer'
       return res.status(400).json({ success: false, msg: 'Complete shipping address required' });
     }
 
-    if( !shippingAddress?.email){
+    if (!shippingAddress?.email) {
       return res.status(400).json({ success: false, msg: 'Email required' });
     }
     // ---- compute subtotal & validate stock ----
@@ -156,7 +184,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin','Manager','Customer'
 });
 
 /* -------------------------- GET ONE ORDER -------------------------- */
-router.get('/:id' ,authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
+router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
       .populate('items.product', 'name thumbnail images')
@@ -165,14 +193,24 @@ router.get('/:id' ,authMiddleware, requireRole(['Super Admin', 'Manager', 'Custo
 
     if (!order) return res.status(404).json({ success: false, msg: 'Order not found' });
 
-    res.json({ success: true, data: order });
+    // Fetch currency settings
+    const currency = await getCurrencySettings();
+
+    res.json({
+      success: true,
+      data: {
+        order,
+        currency, // Include currency details
+      },
+    });
   } catch (err) {
+    console.error('Error fetching order:', err);
     res.status(500).json({ success: false, msg: 'Server error', details: err.message });
   }
 });
 
 /* -------------------------- LIST ORDERS -------------------------- */
-router.get('/', authMiddleware, requireRole(['Super Admin','Manager','Customer']), async (req, res) => {
+router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
     const { page = 1, limit, status } = req.query;
     const query = status ? { status } : {};
@@ -187,16 +225,23 @@ router.get('/', authMiddleware, requireRole(['Super Admin','Manager','Customer']
       .limit(parseInt(limit));
 
     const total = await Order.countDocuments(query);
+
+    // Fetch currency settings
+    const currency = await getCurrencySettings();
+
     res.json({
       success: true,
-      data: orders,
-      pagination: { current: +page, pages: Math.ceil(total / limit), total }
+      data: {
+        orders,
+        currency, // Include currency details
+      },
+      pagination: { current: +page, pages: Math.ceil(total / limit), total },
     });
   } catch (err) {
+    console.error('Error fetching orders:', err);
     res.status(500).json({ success: false, msg: 'Server error', details: err.message });
   }
 });
-
 
 /* -------------------------- UPDATE ORDER -------------------------- */
 router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
@@ -256,7 +301,7 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
     }
 
     // 4️⃣ Restore stock for cancelled orders
-    if (status === 'cancelled' ) {
+    if (status === 'cancelled') {
       for (const item of order.items) {
         if (item.variant && mongoose.Types.ObjectId.isValid(item.variant._id)) {
           await Variant.findByIdAndUpdate(
@@ -285,9 +330,8 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
   }
 });
 
-
 /* -------------------------- DELETE ORDER (restore stock) -------------------------- */
-router.delete('/:id', authMiddleware, requireRole(['Super Admin','Manager']), async (req, res) => {
+router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { id } = req.params;
     if (!mongoose.Types.ObjectId.isValid(id))
@@ -301,7 +345,7 @@ router.delete('/:id', authMiddleware, requireRole(['Super Admin','Manager']), as
     if (order.status === 'delivered' || order.paymentStatus === 'paid')
       return res.status(400).json({ success: false, msg: 'Cannot delete delivered/paid orders' });
 
-   if (order.status === 'pending') {
+    if (order.status === 'pending') {
       for (const item of order.items) {
         if (item.variant) {
           await Variant.findByIdAndUpdate(item.variant, { $inc: { stockQuantity: item.quantity } });
@@ -313,26 +357,27 @@ router.delete('/:id', authMiddleware, requireRole(['Super Admin','Manager']), as
       return res.status(400).json({ success: false, msg: 'Only pending orders can be deleted' });
     }
   } catch (err) {
+    console.error('Error deleting order:', err);
     res.status(500).json({ success: false, msg: 'Server error', details: err.message });
   }
 });
 
 /* -------------------------- UPDATE TRACKING -------------------------- */
-router.put('/:id/tracking', authMiddleware, requireRole(['Super Admin','Manager']), async (req, res) => {
+router.put('/:id/tracking', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { id } = req.params;
     const { trackingStatus, orderTrackingNumber } = req.body;
     if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ success: false, msg: 'Invalid order ID' });
 
-    const valid = ['not shipped','shipped','in transit','out for delivery','delivered','cancelled'];
+    const valid = ['not shipped', 'shipped', 'in transit', 'out for delivery', 'delivered', 'cancelled'];
     if (trackingStatus && !valid.includes(trackingStatus))
       return res.status(400).json({ success: false, msg: `Invalid tracking status: ${trackingStatus}` });
 
     const order = await Order.findById(id);
     if (!order) return res.status(404).json({ success: false, msg: 'Order not found' });
 
-    if (trackingStatus && ['delivered','cancelled'].includes(order.trackingStatus))
+    if (trackingStatus && ['delivered', 'cancelled'].includes(order.trackingStatus))
       return res.status(400).json({ success: false,
         msg: `Cannot change tracking from ${order.trackingStatus}` });
 
@@ -353,6 +398,7 @@ router.put('/:id/tracking', authMiddleware, requireRole(['Super Admin','Manager'
 
     res.json({ success: true, data: updated, msg: `Tracking updated for ${updated.orderNumber}` });
   } catch (err) {
+    console.error('Error updating tracking:', err);
     res.status(500).json({ success: false, msg: 'Server error', details: err.message });
   }
 });
@@ -385,23 +431,22 @@ router.get('/track/:identifier', async (req, res) => {
       updatedAt: order.updatedAt,
       items: order.items
     };
-    res.json({ success: true, data: slim, msg: `Tracking for ${order.orderNumber}` });
+
+    // Fetch currency settings
+    const currency = await getCurrencySettings();
+
+    res.json({
+      success: true,
+      data: {
+        order: slim,
+        currency, // Include currency details
+      },
+      msg: `Tracking for ${order.orderNumber}`
+    });
   } catch (err) {
+    console.error('Error tracking order:', err);
     res.status(500).json({ success: false, msg: 'Server error', details: err.message });
   }
 });
 
 module.exports = router;
-
-
-
-
-
-
-
-
-
-
-
-
-

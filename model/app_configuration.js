@@ -56,7 +56,7 @@ const appConfigurationSchema = new mongoose.Schema({
 
   currencySign: {
     type: String
-  }
+  },
   
   facebook: { type: String, trim: true },
   instagram: { type: String, trim: true },

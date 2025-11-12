@@ -1,8 +1,9 @@
 const Offer = require('../model/Offer');
 const Product = require('../model/Product');
+const AppConfiguration = require('../model/app_configuration'); // Import AppConfiguration model
 const mongoose = require('mongoose');
 
-// Helper: Resolve Product IDs
+// Helper: Resolve Product IDs (unchanged)
 const resolveProducts = async (productRefs) => {
   const ids = [];
   for (const ref of productRefs) {
@@ -21,7 +22,7 @@ const resolveProducts = async (productRefs) => {
   return [...new Set(ids)];
 };
 
-// Helper: Check Overlapping Offers
+// Helper: Check Overlapping Offers (unchanged)
 const checkOverlaps = async (applicableProducts, startDate, endDate, excludeOfferId = null) => {
   const now = new Date();
   for (const prodId of applicableProducts) {
@@ -44,7 +45,35 @@ const checkOverlaps = async (applicableProducts, startDate, endDate, excludeOffe
   }
 };
 
-// Create Offer Controller (unchanged, included for context)
+// Helper: Fetch Currency Settings
+const getCurrencySettings = async () => {
+  try {
+    const config = await AppConfiguration.findOne().lean().select('currencyName currencyCode currencySign');
+    if (!config) {
+      // Fallback if no configuration is found
+      return {
+        currencyName: 'US Dollar',
+        currencyCode: 'USD',
+        currencySign: '$',
+      };
+    }
+    return {
+      currencyName: config.currencyName,
+      currencyCode: config.currencyCode,
+      currencySign: config.currencySign,
+    };
+  } catch (err) {
+    console.error('Error fetching currency settings:', err);
+    // Fallback on error
+    return {
+      currencyName: 'US Dollar',
+      currencyCode: 'USD',
+      currencySign: '$',
+    };
+  }
+};
+
+// Create Offer Controller (unchanged)
 const createOffer = async (req, res) => {
   try {
     const { offerName, discountType, discountValue, applicableProducts, startDate, endDate, status = 'active' } = req.body;
@@ -101,8 +130,8 @@ const getAllOffers = async (req, res) => {
 
     const total = await Offer.countDocuments(query);
 
-    // Current date: 12:23 PM PKT, November 10, 2025
-    const currentDate = new Date('2025-11-10T12:23:00+05:00'); // Explicitly set to PKT
+    // Current date: Use server's current date (adjusted for PKT if needed)
+    const currentDate = new Date(); // Dynamic date, no hardcoded value
 
     // Update status for expired offers and re-fetch if needed
     const updatedOffers = await Promise.all(offers.map(async (offer) => {
@@ -123,9 +152,15 @@ const getAllOffers = async (req, res) => {
       productCount: offer.applicableProducts.length
     }));
 
+    // Fetch currency settings
+    const currency = await getCurrencySettings();
+
     res.status(200).json({
       success: true,
-      data: offersWithProductCount,
+      data: {
+        offers: offersWithProductCount,
+        currency, // Include currency details
+      },
       pagination: {
         current: parseInt(page),
         pages: Math.ceil(total / parseInt(limit)),
@@ -138,7 +173,7 @@ const getAllOffers = async (req, res) => {
   }
 };
 
-// Get Offer by ID (unchanged, included for context)
+// Get Offer by ID
 const getOfferById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -148,7 +183,9 @@ const getOfferById = async (req, res) => {
       return res.status(404).json({ message: 'Offer not found' });
     }
 
-    const currentDate = new Date('2025-11-10T12:23:00+05:00'); // Explicitly set to PKT
+    // Current date: Use server's current date
+    const currentDate = new Date(); // Dynamic date, no hardcoded value
+
     if (currentDate > offer.endDate && offer.status === 'active') {
       offer = await Offer.findByIdAndUpdate(
         id,
@@ -157,6 +194,9 @@ const getOfferById = async (req, res) => {
       ).populate('applicableProducts', 'name price brand');
     }
 
+    // Fetch currency settings
+    const currency = await getCurrencySettings();
+
     const responseData = {
       ...offer.toObject(),
       productCount: offer.applicableProducts.length
@@ -164,7 +204,10 @@ const getOfferById = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: responseData
+      data: {
+        offer: responseData,
+        currency, // Include currency details
+      }
     });
   } catch (error) {
     console.error('Error fetching offer:', error);
@@ -172,7 +215,7 @@ const getOfferById = async (req, res) => {
   }
 };
 
-// Update Offer (unchanged, included for context)
+// Update Offer (unchanged)
 const updateOffer = async (req, res) => {
   try {
     const { id } = req.params;
@@ -215,7 +258,7 @@ const updateOffer = async (req, res) => {
   }
 };
 
-// Delete Offer (unchanged, included for context)
+// Delete Offer (unchanged)
 const deleteOffer = async (req, res) => {
   try {
     const { id } = req.params;
@@ -241,4 +284,3 @@ module.exports = {
   updateOffer,
   deleteOffer
 };
-
