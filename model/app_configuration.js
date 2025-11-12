@@ -35,6 +35,8 @@ const appConfigurationSchema = new mongoose.Schema({
     trim: true,
   },
 
+
+
   street_address: {
     type: String,
     trim: true,
@@ -44,6 +46,17 @@ const appConfigurationSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
+
+  currencyName: {
+    type: String
+  },
+  currencyCode: {
+    type: String
+  },
+
+  currencySign: {
+    type: String
+  }
   
   facebook: { type: String, trim: true },
   instagram: { type: String, trim: true },

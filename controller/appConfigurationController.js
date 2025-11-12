@@ -1,10 +1,6 @@
 const Configuration = require("../model/app_configuration");
 const cloudinary = require("cloudinary").v2;
-
 const mongoose = require('mongoose');
-
-
-
 
 exports.createAppConfiguration = async (req, res) => {
   try {
@@ -16,7 +12,7 @@ exports.createAppConfiguration = async (req, res) => {
     if (!req.body) {
       return res.status(400).json({
         success: false,
-        msg: 'Request body is missing',
+        message: 'Request body is missing',
       });
     }
 
@@ -32,30 +28,53 @@ exports.createAppConfiguration = async (req, res) => {
       youtube,
       linkedin,
       street_address,
-      zip_code
+      zip_code,
+      currencyName,
+      currencyCode,
+      currencySign
     } = req.body;
     const appLogo = req.file ? req.file.path : ''; // Use appLogo to match schema
 
     // Validate required fields
-    if (!appName || !primaryColor || !secondaryColor) {
+    if (!appName || !primaryColor || !secondaryColor || !currencyName || !currencyCode || !currencySign) {
       return res.status(400).json({
         success: false,
-        msg: 'App Name, Primary Color, and Secondary Color are required',
+        message: 'App Name, Primary Color, Secondary Color, Currency Name, Currency Code, and Currency Sign are required',
       });
     }
 
     // Validate color formats (hex or rgb)
-    const validateColor = (color) => /^#([0-9A-F]{3}|[0-9A-F]{6})|rgb\(\d{1,3}%?,\s*\d{1,3}%?,\s*\d{1,3}%?\)$/.test(color.toLowerCase());
+    const validateColor = (color) => /^#([0-9A-F]{3}|[0-9A-F]{6})|rgb\(\d{1,3}%?,\s*\d{1,3}%?,\s*\d{1,3}%?\)$/i.test(color);
     if (!validateColor(primaryColor)) {
       return res.status(400).json({
         success: false,
-        msg: 'Invalid Primary Color format (e.g., #FF0000 or rgba(43, 32, 32, 1))',
+        message: 'Invalid Primary Color format (e.g., #FF0000 or rgb(255, 0, 0))',
       });
     }
     if (!validateColor(secondaryColor)) {
       return res.status(400).json({
         success: false,
-        msg: 'Invalid Secondary Color format (e.g., #123456 or rgba(49, 38, 48, 1))',
+        message: 'Invalid Secondary Color format (e.g., #123456 or rgb(0, 128, 255))',
+      });
+    }
+
+    // Validate currency fields
+    if (!/^[A-Za-z\s]{1,50}$/.test(currencyName)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Currency Name must be 1-50 letters or spaces (e.g., US Dollar)',
+      });
+    }
+    if (!/^[A-Z]{3}$/.test(currencyCode)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Currency Code must be a 3-letter ISO 4217 code (e.g., USD, EUR)',
+      });
+    }
+    if (!/^[\p{Sc}A-Za-z]{1,5}$/u.test(currencySign)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Currency Sign must be 1-5 characters (e.g., $, €, USD)',
       });
     }
 
@@ -64,7 +83,7 @@ exports.createAppConfiguration = async (req, res) => {
     if (!validateUrl(facebook) || !validateUrl(instagram) || !validateUrl(youtube) || !validateUrl(linkedin)) {
       return res.status(400).json({
         success: false,
-        msg: 'Social links must be valid URLs if provided',
+        message: 'Social links must be valid URLs if provided',
       });
     }
 
@@ -72,13 +91,13 @@ exports.createAppConfiguration = async (req, res) => {
     if (contactEmails && !Array.isArray(contactEmails)) {
       return res.status(400).json({
         success: false,
-        msg: 'contactEmails must be an array',
+        message: 'contactEmails must be an array',
       });
     }
     if (supportPhones && !Array.isArray(supportPhones)) {
       return res.status(400).json({
         success: false,
-        msg: 'supportPhones must be an array',
+        message: 'supportPhones must be an array',
       });
     }
 
@@ -87,11 +106,11 @@ exports.createAppConfiguration = async (req, res) => {
     if (existingConfig) {
       return res.status(400).json({
         success: false,
-        msg: 'Configuration with this App Name already exists',
+        message: 'Configuration with this App Name already exists',
       });
     }
 
-    // Create configuration with defaults
+    // Create configuration
     const configuration = await Configuration.create({
       appName,
       appLogo,
@@ -105,16 +124,20 @@ exports.createAppConfiguration = async (req, res) => {
       youtube: youtube || '',
       linkedin: linkedin || '',
       street_address: street_address || '',
-      zip_code: zip_code || ''
+      zip_code: zip_code || '',
+      currencyName,
+      currencyCode,
+      currencySign,
+      lastUpdated: new Date().toISOString(),
     });
 
     res.status(201).json({
       success: true,
-      msg: 'Configuration created successfully',
+      message: 'Configuration created successfully',
       configuration,
     });
   } catch (error) {
-    // Handle Cloudinary file cleanup on error with error catching
+    // Handle Cloudinary file cleanup on error
     if (req.file && req.file.filename) {
       await cloudinary.uploader.destroy(req.file.filename).catch(err => console.error('Cloudinary cleanup failed:', err));
     }
@@ -122,48 +145,56 @@ exports.createAppConfiguration = async (req, res) => {
     if (error.name === 'ValidationError') {
       return res.status(400).json({
         success: false,
-        msg: error.msg,
+        message: Object.values(error.errors).map(e => e.message).join(', '),
       });
     } else if (error.name === 'MongoError' && error.code === 11000) {
       return res.status(400).json({
         success: false,
-        msg: 'Duplicate key error (e.g., appName already exists)',
+        message: 'Duplicate key error (e.g., appName already exists)',
       });
     } else {
       console.error('Error creating configuration:', error);
       return res.status(500).json({
         success: false,
-        msg: 'Internal server error',
+        message: 'Internal server error',
       });
     }
   }
 };
+
 exports.getAppConfigurationById = async (req, res) => {
   try {
+    const { id } = req.params;
 
-   
+    // Validate ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid configuration ID',
+      });
+    }
+
     // Find configuration
-    const configuration = await Configuration.find().lean(); 
-    // .lean() returns a plain JS object (faster, no mongoose overhead if no methods needed)
+    const configuration = await Configuration.findById(id).lean(); // Use findById instead of find
 
     if (!configuration) {
       return res.status(404).json({
         success: false,
-        msg: "Configuration not found",
+        message: 'Configuration not found',
       });
     }
 
     res.status(200).json({
       success: true,
-      msg: "Configuration fetched successfully",
+      message: 'Configuration fetched successfully',
       configuration,
     });
   } catch (error) {
-    console.error("Error fetching configuration:", error);
+    console.error('Error fetching configuration:', error);
     res.status(500).json({
       success: false,
-      msg: "Internal server error",
-      error: error.msg, // include error for debugging in dev
+      message: 'Internal server error',
+      error: error.message,
     });
   }
 };
@@ -171,13 +202,12 @@ exports.getAppConfigurationById = async (req, res) => {
 exports.updateAppConfiguration = async (req, res) => {
   try {
     const { id } = req.params;
-    
-    // Validate ObjectId
 
+    // Validate ObjectId
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        msg: "Invalid configuration ID",
+        message: 'Invalid configuration ID',
       });
     }
 
@@ -192,9 +222,12 @@ exports.updateAppConfiguration = async (req, res) => {
       facebook,
       instagram,
       youtube,
+      linkedin,
       street_address,
       zip_code,
-      linkedin,
+      currencyName,
+      currencyCode,
+      currencySign,
     } = req.body;
 
     // Get new logo if uploaded
@@ -202,40 +235,82 @@ exports.updateAppConfiguration = async (req, res) => {
 
     // Find existing configuration
     const existingConfig = await Configuration.findById(id);
-    console.log('Existing config:', existingConfig);
     if (!existingConfig) {
       return res.status(404).json({
         success: false,
-        msg: "Configuration not found",
+        message: 'Configuration not found',
       });
     }
 
     // Prevent empty required fields
     if (
-      appName === "" ||
-      primaryColor === "" ||
-      secondaryColor === ""
+      appName === '' ||
+      primaryColor === '' ||
+      secondaryColor === '' ||
+      currencyName === '' ||
+      currencyCode === '' ||
+      currencySign === ''
     ) {
       return res.status(400).json({
         success: false,
-        msg:
-          "appName, primaryColor, and secondaryColor cannot be empty",
+        message: 'appName, primaryColor, secondaryColor, currencyName, currencyCode, and currencySign cannot be empty',
       });
     }
 
+    // Validate color formats (hex or rgb)
+    if (primaryColor && !/^#([0-9A-F]{3}|[0-9A-F]{6})|rgb\(\d{1,3}%?,\s*\d{1,3}%?,\s*\d{1,3}%?\)$/i.test(primaryColor)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid Primary Color format (e.g., #FF0000 or rgb(255, 0, 0))',
+      });
+    }
+    if (secondaryColor && !/^#([0-9A-F]{3}|[0-9A-F]{6})|rgb\(\d{1,3}%?,\s*\d{1,3}%?,\s*\d{1,3}%?\)$/i.test(secondaryColor)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid Secondary Color format (e.g., #123456 or rgb(0, 128, 255))',
+      });
+    }
 
+    // Validate currency fields
+    if (currencyName && !/^[A-Za-z\s]{1,50}$/.test(currencyName)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Currency Name must be 1-50 letters or spaces (e.g., US Dollar)',
+      });
+    }
+    if (currencyCode && !/^[A-Z]{3}$/.test(currencyCode)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Currency Code must be a 3-letter ISO 4217 code (e.g., USD, EUR)',
+      });
+    }
+    if (currencySign && !/^[\p{Sc}A-Za-z]{1,5}$/u.test(currencySign)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Currency Sign must be 1-5 characters (e.g., $, €, USD)',
+      });
+    }
+
+    // Validate social fields as URLs if provided
+    const validateUrl = (url) => url ? /^https?:\/\/.+/.test(url) : true;
+    if (!validateUrl(facebook) || !validateUrl(instagram) || !validateUrl(youtube) || !validateUrl(linkedin)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Social links must be valid URLs if provided',
+      });
+    }
 
     // Arrays validation
     if (contactEmails && !Array.isArray(contactEmails)) {
       return res.status(400).json({
         success: false,
-        msg: "contactEmails must be an array",
+        message: 'contactEmails must be an array',
       });
     }
     if (supportPhones && !Array.isArray(supportPhones)) {
       return res.status(400).json({
         success: false,
-        msg: "supportPhones must be an array",
+        message: 'supportPhones must be an array',
       });
     }
 
@@ -245,8 +320,7 @@ exports.updateAppConfiguration = async (req, res) => {
       if (duplicateConfig) {
         return res.status(400).json({
           success: false,
-          msg:
-            "Configuration with this appName already exists",
+          message: 'Configuration with this appName already exists',
         });
       }
     }
@@ -261,24 +335,21 @@ exports.updateAppConfiguration = async (req, res) => {
       supportPhones: supportPhones ?? existingConfig.supportPhones,
       facebook: facebook ?? existingConfig.facebook,
       instagram: instagram ?? existingConfig.instagram,
-      street_address: street_address?? existingConfig.street_address,
-      zip_code: zip_code?? existingConfig.zip_code,
       youtube: youtube ?? existingConfig.youtube,
       linkedin: linkedin ?? existingConfig.linkedin,
+      street_address: street_address ?? existingConfig.street_address,
+      zip_code: zip_code ?? existingConfig.zip_code,
+      currencyName: currencyName ?? existingConfig.currencyName,
+      currencyCode: currencyCode ?? existingConfig.currencyCode,
+      currencySign: currencySign ?? existingConfig.currencySign,
+      lastUpdated: new Date().toISOString(),
     };
 
     // Handle logo update
     if (appLogo) {
       if (existingConfig.appLogo) {
-        const publicId = existingConfig.appLogo
-          .split("/")
-          .pop()
-          .split(".")[0];
-        await cloudinary.uploader
-          .destroy(publicId)
-          .catch((err) =>
-            console.error("Failed to delete old logo:", err)
-          );
+        const publicId = existingConfig.appLogo.split('/').pop().split('.')[0];
+        await cloudinary.uploader.destroy(publicId).catch(err => console.error('Failed to delete old logo:', err));
       }
       updateData.appLogo = appLogo;
     }
@@ -292,26 +363,27 @@ exports.updateAppConfiguration = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      msg: "Configuration updated successfully",
+      message: 'Configuration updated successfully',
       configuration: updatedConfig,
     });
   } catch (error) {
-    console.error("Error updating configuration:", error);
-
+    // Handle Cloudinary file cleanup on error
     if (req.file?.filename) {
-      await cloudinary.uploader
-        .destroy(req.file.filename)
-        .catch((err) =>
-          console.error("Cloudinary cleanup failed:", err)
-        );
+      await cloudinary.uploader.destroy(req.file.filename).catch(err => console.error('Cloudinary cleanup failed:', err));
     }
 
-    res.status(500).json({
-      success: false,
-      msg: "Internal server error",
-      error: error.msg,
-    });
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: Object.values(error.errors).map(e => e.message).join(', '),
+      });
+    } else {
+      console.error('Error updating configuration:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Internal server error',
+        error: error.message,
+      });
+    }
   }
 };
-
-

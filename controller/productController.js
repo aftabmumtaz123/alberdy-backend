@@ -7,6 +7,7 @@ const Category = require('../model/Category');
 const Subcategory = require('../model/subCategory');
 const Brand = require('../model/Brand');
 const Unit = require('../model/Unit');
+const Configuration = require('../model/app_configuration');
 const mongoose = require('mongoose');
 
 const findCategoryByIdOrName = async (value) => {
@@ -367,12 +368,24 @@ exports.createProduct = async (req, res) => {
 
 
 
-
-
 exports.getAllProducts = async (req, res) => {
   const { page = 1, limit, category, subcategory, brand, status, name, lowStock } = req.query;
   const filter = {};
   try {
+    // Fetch currency configuration
+    const config = await Configuration.findOne().lean(); // Fetch the first configuration
+    if (!config) {
+      return res.status(404).json({
+        success: false,
+        msg: 'App configuration not found',
+      });
+    }
+    const currency = {
+      currencyName: config.currencyName || 'US Dollar',
+      currencyCode: config.currencyCode || 'USD',
+      currencySign: config.currencySign || '$',
+    };
+
     // ---------- FILTER HANDLING ----------
     if (category) {
       const cat = await findCategoryByIdOrName(category);
@@ -400,8 +413,8 @@ exports.getAllProducts = async (req, res) => {
           from: 'categories',
           localField: 'category',
           foreignField: '_id',
-          as: 'category'
-        }
+          as: 'category',
+        },
       },
       { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
       {
@@ -409,8 +422,8 @@ exports.getAllProducts = async (req, res) => {
           from: 'subcategories',
           localField: 'subcategory',
           foreignField: '_id',
-          as: 'subcategory'
-        }
+          as: 'subcategory',
+        },
       },
       { $unwind: { path: '$subcategory', preserveNullAndEmptyArrays: true } },
       {
@@ -418,8 +431,8 @@ exports.getAllProducts = async (req, res) => {
           from: 'brands',
           localField: 'brand',
           foreignField: '_id',
-          as: 'brand'
-        }
+          as: 'brand',
+        },
       },
       { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
       {
@@ -429,16 +442,16 @@ exports.getAllProducts = async (req, res) => {
           pipeline: [
             {
               $match: {
-                $expr: { $in: ['$_id', '$$varIds'] }
-              }
+                $expr: { $in: ['$_id', '$$varIds'] },
+              },
             },
             {
               $lookup: {
                 from: 'units',
                 localField: 'unit',
                 foreignField: '_id',
-                as: 'unit'
-              }
+                as: 'unit',
+              },
             },
             { $unwind: { path: '$unit', preserveNullAndEmptyArrays: true } },
             {
@@ -447,15 +460,15 @@ exports.getAllProducts = async (req, res) => {
                   $cond: {
                     if: {
                       $and: [
-                        { $ifNull: ['$expiryDate', false] }, // Check if expiryDate exists
-                        { $lt: ['$expiryDate', new Date('2025-11-10T15:58:00+05:00')] } // expiryDate < current date
-                      ]
+                        { $ifNull: ['$expiryDate', false] },
+                        { $lt: ['$expiryDate', new Date()] },
+                      ],
                     },
                     then: 'inactive',
-                    else: { $ifNull: ['$status', 'active'] } // Preserve existing status or default to 'active'
-                  }
-                }
-              }
+                    else: { $ifNull: ['$status', 'active'] },
+                  },
+                },
+              },
             },
             {
               $project: {
@@ -471,17 +484,17 @@ exports.getAllProducts = async (req, res) => {
                 weightQuantity: 1,
                 image: 1,
                 status: 1,
-                _id: 1
-              }
-            }
+                _id: 1,
+              },
+            },
           ],
-          as: 'variations'
-        }
+          as: 'variations',
+        },
       },
       {
         $lookup: {
           from: 'offers',
-          let: { prodId: '$_id', currentDate: new Date('2025-11-10T15:58:00+05:00') },
+          let: { prodId: '$_id', currentDate: new Date() },
           pipeline: [
             {
               $match: {
@@ -490,10 +503,10 @@ exports.getAllProducts = async (req, res) => {
                 $expr: {
                   $and: [
                     { $lte: ['$startDate', '$$currentDate'] },
-                    { $gte: ['$endDate', '$$currentDate'] }
-                  ]
-                }
-              }
+                    { $gte: ['$endDate', '$$currentDate'] },
+                  ],
+                },
+              },
             },
             { $sort: { createdAt: -1 } },
             { $limit: 1 },
@@ -501,12 +514,12 @@ exports.getAllProducts = async (req, res) => {
               $project: {
                 discountType: 1,
                 discountValue: 1,
-                _id: 0
-              }
-            }
+                _id: 0,
+              },
+            },
           ],
-          as: 'activeOffer'
-        }
+          as: 'activeOffer',
+        },
       },
       { $unwind: { path: '$activeOffer', preserveNullAndEmptyArrays: true } },
       {
@@ -528,28 +541,38 @@ exports.getAllProducts = async (req, res) => {
                             then: {
                               $subtract: [
                                 { $ifNull: ['$$var.price', 0] },
-                                { $multiply: [{ $ifNull: ['$$var.price', 0] }, { $divide: ['$activeOffer.discountValue', 100] }] }
-                              ]
+                                {
+                                  $multiply: [
+                                    { $ifNull: ['$$var.price', 0] },
+                                    { $divide: ['$activeOffer.discountValue', 100] },
+                                  ],
+                                },
+                              ],
                             },
-                            else: { $subtract: [{ $ifNull: ['$$var.price', 0] }, '$activeOffer.discountValue'] }
-                          }
+                            else: {
+                              $subtract: [
+                                { $ifNull: ['$$var.price', 0] },
+                                '$activeOffer.discountValue',
+                              ],
+                            },
+                          },
                         },
-                        else: { $ifNull: ['$$var.price', 0] }
-                      }
-                    }
-                  }
-                ]
-              }
-            }
-          }
-        }
-      }
+                        else: { $ifNull: ['$$var.price', 0] },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
     ];
 
     // ---------- LOW STOCK FILTER ----------
     if (lowStock === 'true') {
       pipeline.push({
-        $addFields: { totalStock: { $sum: '$variations.stockQuantity' } }
+        $addFields: { totalStock: { $sum: '$variations.stockQuantity' } },
       });
       pipeline.push({ $match: { totalStock: { $lt: 10 } } });
     }
@@ -562,7 +585,7 @@ exports.getAllProducts = async (req, res) => {
 
     // ---------- PAGINATION STAGES ----------
     const pageNum = parseInt(page);
-    const limitNum = limit ? parseInt(limit) : null; // null means no limit
+    const limitNum = limit ? parseInt(limit) : null;
     const sortStage = { $sort: { createdAt: -1 } };
     const projectStage = { $project: { __v: 0, activeOffer: 0 } };
     let fullPipeline = [...pipeline, sortStage];
@@ -577,15 +600,16 @@ exports.getAllProducts = async (req, res) => {
     res.json({
       success: true,
       products,
+      currency, // Add currency details to response
       total,
       pages: limitNum ? Math.ceil(total / limitNum) : 1,
-      currentPage: pageNum
+      currentPage: pageNum,
     });
   } catch (err) {
     res.status(500).json({
       success: false,
       msg: 'Server error fetching products',
-      details: err.message || 'Unknown error'
+      details: err.message || 'Unknown error',
     });
   }
 };
@@ -600,6 +624,20 @@ exports.getProductById = async (req, res) => {
       return res.status(400).json({ success: false, msg: 'Invalid product ID' });
     }
 
+    // Fetch currency configuration
+    const config = await Configuration.findOne().lean();
+    if (!config) {
+      return res.status(404).json({
+        success: false,
+        msg: 'App configuration not found',
+      });
+    }
+    const currency = {
+      currencyName: config.currencyName || 'US Dollar',
+      currencyCode: config.currencyCode || 'USD',
+      currencySign: config.currencySign || '$',
+    };
+
     const pipeline = [
       { $match: { _id: new mongoose.Types.ObjectId(id) } },
       {
@@ -607,8 +645,8 @@ exports.getProductById = async (req, res) => {
           from: 'categories',
           localField: 'category',
           foreignField: '_id',
-          as: 'category'
-        }
+          as: 'category',
+        },
       },
       { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
       {
@@ -616,8 +654,8 @@ exports.getProductById = async (req, res) => {
           from: 'subcategories',
           localField: 'subcategory',
           foreignField: '_id',
-          as: 'subcategory'
-        }
+          as: 'subcategory',
+        },
       },
       { $unwind: { path: '$subcategory', preserveNullAndEmptyArrays: true } },
       {
@@ -625,8 +663,8 @@ exports.getProductById = async (req, res) => {
           from: 'brands',
           localField: 'brand',
           foreignField: '_id',
-          as: 'brand'
-        }
+          as: 'brand',
+        },
       },
       { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
       {
@@ -636,16 +674,16 @@ exports.getProductById = async (req, res) => {
           pipeline: [
             {
               $match: {
-                $expr: { $in: ['$_id', '$$varIds'] }
-              }
+                $expr: { $in: ['$_id', '$$varIds'] },
+              },
             },
             {
               $lookup: {
                 from: 'units',
                 localField: 'unit',
                 foreignField: '_id',
-                as: 'unit'
-              }
+                as: 'unit',
+              },
             },
             { $unwind: { path: '$unit', preserveNullAndEmptyArrays: true } },
             {
@@ -662,12 +700,12 @@ exports.getProductById = async (req, res) => {
                 weightQuantity: 1,
                 image: 1,
                 status: 1,
-                _id: 1
-              }
-            }
+                _id: 1,
+              },
+            },
           ],
-          as: 'variations'
-        }
+          as: 'variations',
+        },
       },
       {
         $lookup: {
@@ -681,10 +719,10 @@ exports.getProductById = async (req, res) => {
                 $expr: {
                   $and: [
                     { $lte: ['$startDate', '$$currentDate'] },
-                    { $gte: ['$endDate', '$$currentDate'] }
-                  ]
-                }
-              }
+                    { $gte: ['$endDate', '$$currentDate'] },
+                  ],
+                },
+              },
             },
             { $sort: { createdAt: -1 } },
             { $limit: 1 },
@@ -692,12 +730,12 @@ exports.getProductById = async (req, res) => {
               $project: {
                 discountType: 1,
                 discountValue: 1,
-                _id: 0
-              }
-            }
+                _id: 0,
+              },
+            },
           ],
-          as: 'activeOffer'
-        }
+          as: 'activeOffer',
+        },
       },
       { $unwind: { path: '$activeOffer', preserveNullAndEmptyArrays: true } },
       {
@@ -719,23 +757,33 @@ exports.getProductById = async (req, res) => {
                             then: {
                               $subtract: [
                                 { $ifNull: ['$$var.price', 0] },
-                                { $multiply: [{ $ifNull: ['$$var.price', 0] }, { $divide: ['$activeOffer.discountValue', 100] }] }
-                              ]
+                                {
+                                  $multiply: [
+                                    { $ifNull: ['$$var.price', 0] },
+                                    { $divide: ['$activeOffer.discountValue', 100] },
+                                  ],
+                                },
+                              ],
                             },
-                            else: { $subtract: [{ $ifNull: ['$$var.price', 0] }, '$activeOffer.discountValue'] }
-                          }
+                            else: {
+                              $subtract: [
+                                { $ifNull: ['$$var.price', 0] },
+                                '$activeOffer.discountValue',
+                              ],
+                            },
+                          },
                         },
-                        else: { $ifNull: ['$$var.price', 0] }
-                      }
-                    }
-                  }
-                ]
-              }
-            }
-          }
-        }
+                        else: { $ifNull: ['$$var.price', 0] },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
       },
-      { $unset: '__v' }
+      { $unset: '__v' },
     ];
 
     const products = await Product.aggregate(pipeline);
@@ -745,11 +793,23 @@ exports.getProductById = async (req, res) => {
 
     const product = products[0];
 
-    res.json({ success: true, message: "Product fetched successfully", product });
+    res.json({
+      success: true,
+      message: 'Product fetched successfully',
+      product,
+      currency, // Add currency details to response
+    });
   } catch (err) {
-    res.status(500).json({ success: false, msg: 'Server error fetching product', details: err.message || 'Unknown error' });
+    res.status(500).json({
+      success: false,
+      msg: 'Server error fetching product',
+      details: err.message || 'Unknown error',
+    });
   }
 };
+
+
+
 
 exports.updateProduct = async (req, res) => {
   const cleanupAllFiles = async (files = [], varImgs = {}) => {
@@ -814,11 +874,6 @@ exports.updateProduct = async (req, res) => {
       }
     }
 
-    // // Enum validations
-    // if (suitableFor && !['Puppy', 'Adult', 'Senior', 'All Ages'].includes(suitableFor)) {
-    //   await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
-    //   return res.status(400).json({ success: false, msg: 'Invalid suitableFor' });
-    // }
     if (status && !['Active', 'Inactive'].includes(status)) {
       await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
       return res.status(400).json({ success: false, msg: 'Invalid status' });
