@@ -164,17 +164,12 @@ exports.createProduct = async (req, res) => {
       sku = `${productCode}-${(i + 1).toString().padStart(3, '0')}-${timestamp}`;
     }
 
-    // Check for SKU uniqueness
-    const skuExists = await Variant.findOne({ sku });
-    if (skuExists) {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `SKU '${sku}' already exists` });
-    }
-    const duplicateInBatch = parsedVariations.some((v, idx) => idx !== i && v.sku && v.sku.trim() === sku);
-    if (duplicateInBatch) {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Duplicate SKU '${sku}' in variations` });
-    }
+  
+    // const duplicateInBatch = parsedVariations.some((v, idx) => idx !== i && v.sku && v.sku.trim() === sku);
+    // if (duplicateInBatch) {
+    //   await cleanupAllFiles();
+    //   return res.status(400).json({ success: false, msg: `Duplicate SKU '${sku}' in variations` });
+    // }
     varObj.sku = sku; // Ensure SKU is set
 
     // Validate expiryDate and status
@@ -971,13 +966,7 @@ exports.updateProduct = async (req, res) => {
           sku = `${productCode}-${(i + 1).toString().padStart(3, '0')}-${timestamp}`;
         }
 
-        // Check SKU uniqueness (exclude current variant if updating)
-        const skuExists = await Variant.findOne({ sku, _id: { $ne: v._id } });
-        if (skuExists) {
-          await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
-          return res.status(400).json({ success: false, msg: `SKU '${sku}' already exists` });
-        }
-
+     
         // Find existing variant
         let existingVariant = null;
         if (v.sku) {
@@ -1011,7 +1000,7 @@ exports.updateProduct = async (req, res) => {
           product: productId,
           attribute: v.attribute.trim(),
           value: v.value.trim(),
-          sku,
+          sku: v.sku,
           unit: unit._id,
           purchasePrice: parseFloat(v.purchasePrice),
           price,
