@@ -373,7 +373,7 @@ exports.getAllProducts = async (req, res) => {
   const filter = {};
   try {
     // Fetch currency configuration
-    const config = await Configuration.findOne().lean(); // Fetch the first configuration
+    const config = await Configuration.findOne().lean();
     if (!config) {
       return res.status(404).json({
         success: false,
@@ -460,12 +460,12 @@ exports.getAllProducts = async (req, res) => {
                   $cond: {
                     if: {
                       $and: [
-                        { $ifNull: ['$expiryDate', false] },
-                        { $lt: ['$expiryDate', new Date()] },
+                        { $ne: ['$expiryDate', null] }, // Check if expiryDate exists
+                        { $lt: ['$expiryDate', new Date()] }, // Check if expiryDate is in the past
                       ],
                     },
                     then: 'inactive',
-                    else: { $ifNull: ['$status', 'active'] },
+                    else: { $ifNull: ['$status', 'active'] }, // Use existing status or default to active
                   },
                 },
               },
@@ -600,7 +600,7 @@ exports.getAllProducts = async (req, res) => {
     res.json({
       success: true,
       products,
-      currency, // Add currency details to response
+      currency,
       total,
       pages: limitNum ? Math.ceil(total / limitNum) : 1,
       currentPage: pageNum,
