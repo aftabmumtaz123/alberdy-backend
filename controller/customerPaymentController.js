@@ -1,16 +1,31 @@
 const CustomerPayment = require('../model/CustomerPayment');
 const User = require('../model/User');
 
+// Generate unique invoice number
+const generateInvoiceNo = async () => {
+  let isUnique = false;
+  let invoiceNo;
+  while (!isUnique) {
+    const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    invoiceNo = `INV-${randomCode}`;
+    const existingPayment = await CustomerPayment.findOne({ invoiceNo });
+    if (!existingPayment) {
+      isUnique = true;
+    }
+  }
+  return invoiceNo;
+};
+
 // Create a new customer payment
 exports.createPayment = async (req, res) => {
   try {
-    const { customer_id, amountPaid, amountDue, payment_method, invoice_no, date, notes } = req.body;
+    const { customer_id, amountPaid, amountDue, payment_method, date, notes } = req.body;
 
     // Validate input
-    if (!customer_id || !amountPaid || !payment_method || !invoice_no) {
+    if (!customer_id || !amountPaid || !payment_method) {
       return res.status(400).json({
         success: false,
-        msg: 'Customer ID, amount paid, payment method, and invoice number are required',
+        msg: 'Customer ID, amount paid, and payment method are required',
       });
     }
 
@@ -54,13 +69,16 @@ exports.createPayment = async (req, res) => {
       });
     }
 
+    // Generate unique invoice number
+    const invoiceNo = await generateInvoiceNo();
+
     // Create payment
     const payment = new CustomerPayment({
       customer: customer_id,
       amountPaid,
       amountDue,
       paymentMethod: payment_method,
-      invoiceNo: invoice_no,
+      invoiceNo,
       date: date || Date.now(),
       notes,
     });
@@ -147,6 +165,24 @@ exports.updatePayment = async (req, res) => {
       }
     }
 
+    // Validate invoiceNo if provided
+    if (invoice_no) {
+      if (invoice_no.trim() === '') {
+        return res.status(400).json({
+          success: false,
+          msg: 'Invoice number cannot be empty',
+        });
+      }
+      // Check for uniqueness if invoiceNo is being updated
+      const existingPayment = await CustomerPayment.findOne({ invoiceNo: invoice_no, _id: { $ne: id } });
+      if (existingPayment) {
+        return res.status(400).json({
+          success: false,
+          msg: 'Invoice number already exists',
+        });
+      }
+    }
+
     // Prepare update object
     const updateData = {
       ...(customer_id && { customer: customer_id }),
@@ -218,7 +254,7 @@ exports.deletePayment = async (req, res) => {
 // List all customer payments with filters
 exports.getAllPayments = async (req, res) => {
   try {
-    const { customer, startDate, endDate, paymentMethod, reference, page = 1, limit} = req.query;
+    const { customer, startDate, endDate, paymentMethod, reference, page = 1, limit = 10 } = req.query;
 
     // Build query
     const query = {};

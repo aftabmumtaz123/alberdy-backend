@@ -13,12 +13,16 @@ const PaymentSchema = new mongoose.Schema({
   },
   amountDue: {
     type: Number,
-    min: 0
+    min: 0,
   },
   paymentMethod: {
     type: String,
     required: true,
     enum: ['Bank Transfer', 'Credit Card', 'Cash', 'Check', 'Other'],
+  },
+  invoiceNo: {
+    type: String,
+    trim: true,
   },
   date: {
     type: Date,

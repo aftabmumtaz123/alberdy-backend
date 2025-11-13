@@ -1,6 +1,21 @@
 const Payment = require('../model/Payment');
 const Supplier = require('../model/Supplier');
 
+// Generate unique invoice number
+const generateInvoiceNo = async () => {
+  let isUnique = false;
+  let invoiceNo;
+  while (!isUnique) {
+    const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    invoiceNo = `INV-${randomCode}`;
+    const existingPayment = await Payment.findOne({ invoiceNo });
+    if (!existingPayment) {
+      isUnique = true;
+    }
+  }
+  return invoiceNo;
+};
+
 // Create a new payment
 exports.createPayment = async (req, res) => {
   try {
@@ -48,12 +63,16 @@ exports.createPayment = async (req, res) => {
       });
     }
 
+    // Generate unique invoice number
+    const invoiceNo = await generateInvoiceNo();
+
     // Create payment
     const payment = new Payment({
       supplier: supplier_id,
       amountPaid,
       amountDue,
       paymentMethod: payment_method,
+      invoiceNo,
       date: date || Date.now(),
       notes,
     });
@@ -86,7 +105,7 @@ exports.createPayment = async (req, res) => {
 exports.updatePayment = async (req, res) => {
   try {
     const { id } = req.params;
-    const { supplier_id, amountPaid, amountDue, payment_method, date, notes } = req.body;
+    const { supplier_id, amountPaid, amountDue, payment_method, invoice_no, date, notes } = req.body;
 
     // Check if payment exists
     const payment = await Payment.findById(id);
@@ -135,12 +154,31 @@ exports.updatePayment = async (req, res) => {
       }
     }
 
+    // Validate invoiceNo if provided
+    if (invoice_no) {
+      if (invoice_no.trim() === '') {
+        return res.status(400).json({
+          success: false,
+          message: 'Invoice number cannot be empty',
+        });
+      }
+      // Check for uniqueness if invoiceNo is being updated
+      const existingPayment = await Payment.findOne({ invoiceNo: invoice_no, _id: { $ne: id } });
+      if (existingPayment) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invoice number already exists',
+        });
+      }
+    }
+
     // Prepare update object
     const updateData = {
       ...(supplier_id && { supplier: supplier_id }),
       ...(amountPaid && { amountPaid }),
       ...(amountDue !== undefined && { amountDue }),
       ...(payment_method && { paymentMethod: payment_method }),
+      ...(invoice_no && { invoiceNo: invoice_no }),
       ...(date && { date }),
       ...(notes !== undefined && { notes }),
     };
@@ -207,7 +245,7 @@ exports.deletePayment = async (req, res) => {
 // List all payments with filters
 exports.getAllPayments = async (req, res) => {
   try {
-    const { supplier, startDate, endDate, paymentMethod, page = 1, limit } = req.query;
+    const { supplier, startDate, endDate, paymentMethod, reference, page = 1, limit = 10 } = req.query;
 
     // Build query
     const query = {};
@@ -224,6 +262,10 @@ exports.getAllPayments = async (req, res) => {
 
     if (paymentMethod) {
       query.paymentMethod = paymentMethod;
+    }
+
+    if (reference) {
+      query.invoiceNo = { $regex: reference, $options: 'i' };
     }
 
     // Pagination
