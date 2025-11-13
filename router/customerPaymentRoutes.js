@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const customerPaymentController = require('../controller/CustomerPaymentController');
+const customerPaymentController = require('../controller/customerPaymentController');
 const authMiddleware = require('../middleware/auth');
 
 // All routes require authentication
