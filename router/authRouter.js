@@ -259,19 +259,23 @@ router.get('/api/auth/users', authMiddleware, async (req, res) => {
 });
 
 
-
-
-
 router.get('/api/auth/users/:id', authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.params.id).select('-password -__v');
+    const user = await User.findById(req.params.id)
+      .select('-password -__v')
+      .populate({
+        path: 'paymentHistory',
+        select: 'amountPaid amountDue paymentMethod invoiceNo date notes createdAt',
+        options: { sort: { date: -1 } },
+      });
+
     if (!user) {
       return res.status(404).json({ success: false, msg: 'User not found' });
     }
 
     // Optional: Restrict to only 'Customer' role
     if (user.role !== 'Customer') {
-      return res.status(403).json({ success: false, msg: 'Access denied. Only customers can be viewed with order details.' });
+      return res.status(403).json({ success: false, msg: 'Access denied. Only customers can be viewed with payment details.' });
     }
 
     // Count orders for this customer
@@ -280,7 +284,7 @@ router.get('/api/auth/users/:id', authMiddleware, async (req, res) => {
     // Build response with ordersCount
     const response = {
       ...user.toObject(),
-      ordersCount
+      ordersCount,
     };
 
     res.json({ success: true, data: response });
@@ -381,10 +385,3 @@ router.delete('/api/auth/users/:id', authMiddleware, async (req, res) => {
   }
 });
 module.exports = router;
-
-
-
-
-
-
-

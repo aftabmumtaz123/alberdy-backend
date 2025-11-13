@@ -29,6 +29,10 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  paymentHistory: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'CustomerPayment',
+  }],
 }, { timestamps: true });
 
 // Hash password before save
