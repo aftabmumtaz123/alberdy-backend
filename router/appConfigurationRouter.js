@@ -28,3 +28,4 @@ router.put("/set/:id", authMiddleware, requireRole(['Super Admin', 'Manager']), 
 router.get("/get",  getAppConfigurationById);
 
 module.exports = router;
+
