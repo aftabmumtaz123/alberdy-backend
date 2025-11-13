@@ -6,7 +6,7 @@ const PaymentSchema = new mongoose.Schema({
     ref: 'Supplier',
     required: true,
   },
-  amoutPaid: {
+  amountPaid: {
     type: Number,
     required: true,
     min: 0,
