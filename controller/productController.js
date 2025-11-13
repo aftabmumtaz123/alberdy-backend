@@ -53,6 +53,7 @@ const findUnitByIdOrName = async (value) => {
   return await Unit.findOne({ unit_name: trimmedValue, unit_status: 'enable' });
 };
 
+
 exports.createProduct = async (req, res) => {
   const {
     name,
@@ -112,7 +113,6 @@ exports.createProduct = async (req, res) => {
     }
   };
 
-
   if (!['Active', 'Inactive'].includes(status)) {
     await cleanupAllFiles();
     return res.status(400).json({ success: false, msg: 'Invalid status' });
@@ -149,13 +149,33 @@ exports.createProduct = async (req, res) => {
       await cleanupAllFiles();
       return res.status(400).json({
         success: false,
-        msg: `Variation for ${i + 1} invalid price, stock, or weightQuantity`,
+        msg: `Variation ${i + 1} invalid price, stock, or weightQuantity`,
       });
     }
     if (varObj.discountPrice !== undefined && (isNaN(varDiscount) || varDiscount > varPrice)) {
       await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Variation for ${i + 1} invalid discountPrice` });
+      return res.status(400).json({ success: false, msg: `Variation ${i + 1} invalid discountPrice` });
     }
+
+    // Validate and set SKU
+    let sku = varObj.sku ? varObj.sku.trim() : '';
+    if (!sku) {
+      const timestamp = Math.floor(Date.now() / 1000);
+      sku = `${productCode}-${(i + 1).toString().padStart(3, '0')}-${timestamp}`;
+    }
+
+    // Check for SKU uniqueness
+    const skuExists = await Variant.findOne({ sku });
+    if (skuExists) {
+      await cleanupAllFiles();
+      return res.status(400).json({ success: false, msg: `SKU '${sku}' already exists` });
+    }
+    const duplicateInBatch = parsedVariations.some((v, idx) => idx !== i && v.sku && v.sku.trim() === sku);
+    if (duplicateInBatch) {
+      await cleanupAllFiles();
+      return res.status(400).json({ success: false, msg: `Duplicate SKU '${sku}' in variations` });
+    }
+    varObj.sku = sku; // Ensure SKU is set
 
     // Validate expiryDate and status
     if (varObj.expiryDate) {
@@ -164,31 +184,9 @@ exports.createProduct = async (req, res) => {
         await cleanupAllFiles();
         return res.status(400).json({ success: false, msg: `Variation ${i + 1}: Invalid expiry date format` });
       }
-      if (expiry.getTime() < Date.now() && varObj.status === 'Active') {
-        await cleanupAllFiles();
-        return res.status(400).json({
-          success: false,
-          msg: `Variation ${i + 1}: Expiry date cannot be today or in the past. Please select a future date.`,
-        });
+      if (expiry.getTime() <= Date.now()) {
+        varObj.status = 'Inactive'; // Set status to Inactive for expired variants
       }
-    }
-
-    if (!varObj.sku || varObj.sku.trim() === '') {
-      const timestamp = Math.floor(Date.now() / 1000);
-      varObj.sku = `${productCode}-${(i + 1).toString().padStart(3, '0')}-${timestamp}`;
-    } else {
-      varObj.sku = varObj.sku.trim();
-    }
-
-    const skuExists = await Variant.findOne({ sku: varObj.sku });
-    if (skuExists) {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `SKU '${varObj.sku}' already exists` });
-    }
-    const duplicateInBatch = parsedVariations.some((v, idx) => idx !== i && v.sku && v.sku.trim() === varObj.sku);
-    if (duplicateInBatch) {
-      await cleanupAllFiles();
-      return res.status(400).json({ success: false, msg: `Duplicate SKU '${varObj.sku}' in variations` });
     }
   }
 
@@ -240,10 +238,6 @@ exports.createProduct = async (req, res) => {
     if (thumbnail) productData.thumbnail = thumbnail;
     if (description) productData.description = description.trim();
 
-
-
-
-
     const newProduct = new Product(productData);
     await newProduct.validate();
     await newProduct.save();
@@ -255,7 +249,7 @@ exports.createProduct = async (req, res) => {
         product: newProduct._id,
         attribute: varObj.attribute.trim(),
         value: varObj.value.trim(),
-        sku: varObj.sku.trim(),
+        sku: varObj.sku, // Use validated SKU
         unit: unit._id,
         purchasePrice: parseFloat(varObj.purchasePrice),
         price: parseFloat(varObj.price),
@@ -274,9 +268,13 @@ exports.createProduct = async (req, res) => {
       }
       if (varObj.status && ['Active', 'Inactive'].includes(varObj.status)) {
         variantData.status = varObj.status;
+      } else {
+        variantData.status = variantData.expiryDate && variantData.expiryDate <= new Date() ? 'Inactive' : 'Active';
       }
 
-      if(varObj.stockQuantity <= 0){
+      if (varObj.stockQuantity <= 0) {
+        await cleanupAllFiles();
+        await Product.findByIdAndDelete(newProduct._id);
         return res.status(400).json({ success: false, msg: `Stock quantity must be greater than zero for variant ${i + 1}` });
       }
 
@@ -300,7 +298,7 @@ exports.createProduct = async (req, res) => {
             await fs.unlink(newProduct.thumbnail);
           } catch {}
         }
-        return res.status(400).json({ success: false, msg: `Variant validation failed: ${validationError.message}` });
+        return res.status(400).json({ success: false, msg: `Variant ${i + 1} validation failed: ${validationError.message}` });
       }
     }
 
@@ -365,7 +363,6 @@ exports.createProduct = async (req, res) => {
     });
   }
 };
-
 
 
 exports.getAllProducts = async (req, res) => {
@@ -809,8 +806,6 @@ exports.getProductById = async (req, res) => {
 };
 
 
-
-
 exports.updateProduct = async (req, res) => {
   const cleanupAllFiles = async (files = [], varImgs = {}) => {
     const all = [...files, ...Object.values(varImgs).filter(Boolean)].filter(f => f?.path);
@@ -924,6 +919,14 @@ exports.updateProduct = async (req, res) => {
     const variantIds = [];
 
     if (parsedVariations.length) {
+      const productCode = existingProduct.name
+        .trim()
+        .split(/\s+/)
+        .map((word) => word[0])
+        .join('')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '') + (existingProduct.name.match(/\d+/) ? existingProduct.name.match(/\d+/)[0] : '');
+
       for (let i = 0; i < parsedVariations.length; i++) {
         const v = parsedVariations[i];
 
@@ -961,10 +964,24 @@ exports.updateProduct = async (req, res) => {
           }
         }
 
+        // Validate and set SKU
+        let sku = v.sku ? v.sku.trim() : '';
+        if (!sku) {
+          const timestamp = Math.floor(Date.now() / 1000);
+          sku = `${productCode}-${(i + 1).toString().padStart(3, '0')}-${timestamp}`;
+        }
+
+        // Check SKU uniqueness (exclude current variant if updating)
+        const skuExists = await Variant.findOne({ sku, _id: { $ne: v._id } });
+        if (skuExists) {
+          await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
+          return res.status(400).json({ success: false, msg: `SKU '${sku}' already exists` });
+        }
+
         // Find existing variant
         let existingVariant = null;
         if (v.sku) {
-          existingVariant = await Variant.findOne({ sku: v.sku.trim() });
+          existingVariant = await Variant.findOne({ sku });
         }
 
         // Final discount price
@@ -994,6 +1011,7 @@ exports.updateProduct = async (req, res) => {
           product: productId,
           attribute: v.attribute.trim(),
           value: v.value.trim(),
+          sku,
           unit: unit._id,
           purchasePrice: parseFloat(v.purchasePrice),
           price,
@@ -1022,21 +1040,15 @@ exports.updateProduct = async (req, res) => {
           variantUpdate.expiryDate = existingVariant.expiryDate;
         }
 
-        // Validate expiryDate and status
-        if (variantUpdate.expiryDate) {
-          const expiry = new Date(variantUpdate.expiryDate);
-          if (expiry.getTime() < Date.now() && v.status === 'Active') {
-            await cleanupAllFiles([...imagesFiles, thumbnailFile], variationImages);
-            return res.status(400).json({
-              success: false,
-              msg: `Variation ${i + 1}: Expiry date cannot be today or in the past. Please select a future date.`,
-            });
-          }
-        }
-
-        // Handle status
-        if (v.status && ['Active', 'Inactive'].includes(v.status)) {
+        // Set status based on expiryDate
+        if (variantUpdate.expiryDate && variantUpdate.expiryDate <= new Date()) {
+          variantUpdate.status = 'Inactive';
+        } else if (v.status && ['Active', 'Inactive'].includes(v.status)) {
           variantUpdate.status = v.status;
+        } else if (existingVariant) {
+          variantUpdate.status = existingVariant.status;
+        } else {
+          variantUpdate.status = 'Active';
         }
 
         if (variationImages[i]) variantUpdate.image = variationImages[i];
@@ -1168,6 +1180,7 @@ exports.updateProduct = async (req, res) => {
     });
   }
 };
+
 
 exports.deleteProduct = async (req, res) => {
   try {
