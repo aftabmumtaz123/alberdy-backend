@@ -74,7 +74,6 @@ exports.createProduct = async (req, res) => {
   const images = imagesFiles.map((file) => file.path);
   const thumbnail = thumbnailFile ? thumbnailFile.path : null;
 
-  const variationImages = {};
   let parsedVariations = [];
   if (variations) {
     if (typeof variations === 'string') {

@@ -155,12 +155,15 @@ exports.getAllSuppliers = async (req, res) => {
   }
 };
 
-// Get a single supplier by ID
 exports.getSupplierById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const supplier = await Supplier.findById(id)
+    const supplier = await Supplier.findById(id).populate({
+      path: 'paymentHistory',
+      select: 'amount paymentMethod invoiceNo date notes createdAt',
+      options: { sort: { date: -1 } },
+    });
 
     if (!supplier) {
       return res.status(404).json({
@@ -183,7 +186,6 @@ exports.getSupplierById = async (req, res) => {
     });
   }
 };
-
 
 
 exports.updateSupplier = async (req, res) => {
