@@ -6,20 +6,19 @@ const PaymentSchema = new mongoose.Schema({
     ref: 'Supplier',
     required: true,
   },
-  amount: {
+  amoutPaid: {
     type: Number,
     required: true,
     min: 0,
   },
+  amountDue: {
+    type: Number,
+    min: 0
+  }
   paymentMethod: {
     type: String,
     required: true,
     enum: ['Bank Transfer', 'Credit Card', 'Cash', 'Check', 'Other'],
-  },
-  invoiceNo: {
-    type: String,
-    required: true,
-    trim: true,
   },
   date: {
     type: Date,

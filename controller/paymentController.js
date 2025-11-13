@@ -1,11 +1,18 @@
-const Payment = require('../model/Payment');
-const Supplier = require('../model/Supplier');
+const Payment = require('../models/Payment');
+const Supplier = require('../models/Supplier');
 
 // Create a new payment
 exports.createPayment = async (req, res) => {
   try {
-    const { supplier_id, amount, payment_method, invoice_no, date, notes } = req.body;
+    const { supplier_id, amountPaid, amountDue, payment_method, date, notes } = req.body;
 
+    // Validate input
+    if (!supplier_id || !amountPaid || !payment_method) {
+      return res.status(400).json({
+        success: false,
+        message: 'Supplier ID, amount paid, and payment method are required',
+      });
+    }
 
     // Check if supplier exists
     const supplier = await Supplier.findById(supplier_id);
@@ -16,11 +23,19 @@ exports.createPayment = async (req, res) => {
       });
     }
 
-    // Validate amount
-    if (amount <= 0) {
+    // Validate amountPaid
+    if (amountPaid <= 0) {
       return res.status(400).json({
         success: false,
-        message: 'Amount must be greater than zero',
+        message: 'Amount paid must be greater than zero',
+      });
+    }
+
+    // Validate amountDue (if provided)
+    if (amountDue !== undefined && amountDue < 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Amount due cannot be negative',
       });
     }
 
@@ -36,9 +51,9 @@ exports.createPayment = async (req, res) => {
     // Create payment
     const payment = new Payment({
       supplier: supplier_id,
-      amount,
+      amountPaid,
+      amountDue,
       paymentMethod: payment_method,
-      invoiceNo: invoice_no,
       date: date || Date.now(),
       notes,
     });
@@ -71,7 +86,7 @@ exports.createPayment = async (req, res) => {
 exports.updatePayment = async (req, res) => {
   try {
     const { id } = req.params;
-    const { supplier_id, amount, payment_method, invoice_no, date, notes } = req.body;
+    const { supplier_id, amountPaid, amountDue, payment_method, date, notes } = req.body;
 
     // Check if payment exists
     const payment = await Payment.findById(id);
@@ -93,11 +108,19 @@ exports.updatePayment = async (req, res) => {
       }
     }
 
-    // Validate amount if provided
-    if (amount && amount <= 0) {
+    // Validate amountPaid if provided
+    if (amountPaid && amountPaid <= 0) {
       return res.status(400).json({
         success: false,
-        message: 'Amount must be greater than zero',
+        message: 'Amount paid must be greater than zero',
+      });
+    }
+
+    // Validate amountDue if provided
+    if (amountDue !== undefined && amountDue < 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Amount due cannot be negative',
       });
     }
 
@@ -115,9 +138,9 @@ exports.updatePayment = async (req, res) => {
     // Prepare update object
     const updateData = {
       ...(supplier_id && { supplier: supplier_id }),
-      ...(amount && { amount }),
+      ...(amountPaid && { amountPaid }),
+      ...(amountDue !== undefined && { amountDue }),
       ...(payment_method && { paymentMethod: payment_method }),
-      ...(invoice_no && { invoiceNo: invoice_no }),
       ...(date && { date }),
       ...(notes !== undefined && { notes }),
     };
@@ -184,7 +207,7 @@ exports.deletePayment = async (req, res) => {
 // List all payments with filters
 exports.getAllPayments = async (req, res) => {
   try {
-    const { supplier, startDate, endDate, paymentMethod, reference, page = 1, limit = 10 } = req.query;
+    const { supplier, startDate, endDate, paymentMethod, page = 1, limit = 10 } = req.query;
 
     // Build query
     const query = {};
@@ -201,10 +224,6 @@ exports.getAllPayments = async (req, res) => {
 
     if (paymentMethod) {
       query.paymentMethod = paymentMethod;
-    }
-
-    if (reference) {
-      query.invoiceNo = { $regex: reference, $options: 'i' };
     }
 
     // Pagination

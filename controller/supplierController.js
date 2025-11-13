@@ -154,14 +154,13 @@ exports.getAllSuppliers = async (req, res) => {
     });
   }
 };
-
 exports.getSupplierById = async (req, res) => {
   try {
     const { id } = req.params;
 
     const supplier = await Supplier.findById(id).populate({
       path: 'paymentHistory',
-      select: 'amount paymentMethod invoiceNo date notes createdAt',
+      select: 'amountPaid amountDue paymentMethod date notes createdAt',
       options: { sort: { date: -1 } },
     });
 
