@@ -19,13 +19,13 @@ const generateInvoiceNo = async () => {
 // Create a new payment
 exports.createPayment = async (req, res) => {
   try {
-    const { supplier_id, amountPaid, amountDue, payment_method, date, notes } = req.body;
+    const { supplier_id, amountPaid, amountDue, payment_method, date, notes, totalAmount } = req.body;
 
     // Validate input
-    if (!supplier_id || !amountPaid || !payment_method) {
+    if (!supplier_id || !amountPaid || !payment_method || totalAmount === undefined) {
       return res.status(400).json({
         success: false,
-        message: 'Supplier ID, amount paid, and payment method are required',
+        message: 'Supplier ID, amount paid, payment method, and total amount are required',
       });
     }
 
@@ -35,6 +35,14 @@ exports.createPayment = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'Supplier not found',
+      });
+    }
+
+    // Validate totalAmount
+    if (totalAmount < 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Total amount cannot be negative',
       });
     }
 
@@ -54,6 +62,15 @@ exports.createPayment = async (req, res) => {
       });
     }
 
+    // Validate consistency: totalAmount = amountPaid + amountDue
+    const calculatedTotal = amountPaid + (amountDue || 0);
+    if (totalAmount !== calculatedTotal) {
+      return res.status(400).json({
+        success: false,
+        message: 'Total amount must equal amount paid plus amount due',
+      });
+    }
+
     // Validate payment method
     const allowedMethods = ['Bank Transfer', 'Credit Card', 'Cash', 'Check', 'Other'];
     if (!allowedMethods.includes(payment_method)) {
@@ -69,6 +86,7 @@ exports.createPayment = async (req, res) => {
     // Create payment
     const payment = new Payment({
       supplier: supplier_id,
+      totalAmount,
       amountPaid,
       amountDue,
       paymentMethod: payment_method,
@@ -105,7 +123,7 @@ exports.createPayment = async (req, res) => {
 exports.updatePayment = async (req, res) => {
   try {
     const { id } = req.params;
-    const { supplier_id, amountPaid, amountDue, payment_method, invoice_no, date, notes } = req.body;
+    const { supplier_id, amountPaid, amountDue, payment_method, invoice_no, date, notes, totalAmount } = req.body;
 
     // Check if payment exists
     const payment = await Payment.findById(id);
@@ -127,6 +145,14 @@ exports.updatePayment = async (req, res) => {
       }
     }
 
+    // Validate totalAmount if provided
+    if (totalAmount !== undefined && totalAmount < 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Total amount cannot be negative',
+      });
+    }
+
     // Validate amountPaid if provided
     if (amountPaid && amountPaid <= 0) {
       return res.status(400).json({
@@ -141,6 +167,20 @@ exports.updatePayment = async (req, res) => {
         success: false,
         message: 'Amount due cannot be negative',
       });
+    }
+
+    // Validate consistency if totalAmount, ascended
+    // Validate consistency: totalAmount = amountPaid + amountDue
+    if (totalAmount !== undefined || amountPaid !== undefined || amountDue !== undefined) {
+      const updatedTotal = totalAmount !== undefined ? totalAmount : payment.totalAmount;
+      const updatedPaid = amountPaid !== undefined ? amountPaid : payment.amountPaid;
+      const updatedDue = amountDue !== undefined ? amountDue : payment.amountDue || 0;
+      if (updatedTotal !== updatedPaid + updatedDue) {
+        return res.status(400).json({
+          success: false,
+          message: 'Total amount must equal amount paid plus amount due',
+        });
+      }
     }
 
     // Validate payment method if provided
@@ -175,6 +215,7 @@ exports.updatePayment = async (req, res) => {
     // Prepare update object
     const updateData = {
       ...(supplier_id && { supplier: supplier_id }),
+      ...(totalAmount !== undefined && { totalAmount }),
       ...(amountPaid && { amountPaid }),
       ...(amountDue !== undefined && { amountDue }),
       ...(payment_method && { paymentMethod: payment_method }),
