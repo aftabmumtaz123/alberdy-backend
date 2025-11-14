@@ -105,12 +105,12 @@ exports.createPayment = async (req, res) => {
     // Validate status (if provided)
     const allowedStatuses = ['Pending', 'Completed', 'Partial', 'Cancelled'];
     let paymentStatus = status || (amountDue > 0 ? 'Partial' : 'Completed');
-    if (!allowedStatuses.includes(paymentStatus)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid payment status',
-      });
-    }
+    // if (!allowedStatuses.includes(paymentStatus)) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: 'Invalid payment status',
+    //   });
+    // }
 
     // Generate unique invoice number
     const invoiceNo = await generateInvoiceNo();
