@@ -84,14 +84,14 @@ exports.createPayment = async (req, res) => {
       });
     }
 
-    // Validate consistency: totalAmount = amountPaid + amountDue
-    const calculatedTotal = amountPaid + (amountDue || 0);
-    if (totalAmount !== calculatedTotal) {
-      return res.status(400).json({
-        success: false,
-        message: 'Total amount must equal amount paid plus amount due',
-      });
-    }
+    // // Validate consistency: totalAmount = amountPaid + amountDue
+    // const calculatedTotal = amountPaid + (amountDue || 0);
+    // if (totalAmount !== calculatedTotal) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: 'Total amount must equal amount paid plus amount due',
+    //   });
+    // }
 
     // Validate payment method
     const allowedMethods = ['Bank Transfer', 'Credit Card', 'Cash', 'Check', 'Other'];
@@ -207,13 +207,13 @@ exports.updatePayment = async (req, res) => {
       const updatedTotal = totalAmount !== undefined ? totalAmount : payment.totalAmount;
       const updatedPaid = amountPaid !== undefined ? amountPaid : payment.amountPaid;
       const updatedDue = amountDue !== undefined ? amountDue : payment.amountDue || 0;
-      if (updatedTotal !== updatedPaid + updatedDue) {
-        return res.status(400).json({
-          success: false,
-          message: 'Total amount must equal amount paid plus amount due',
-        });
-      }
-    }
+    //   if (updatedTotal !== updatedPaid + updatedDue) {
+    //     return res.status(400).json({
+    //       success: false,
+    //       message: 'Total amount must equal amount paid plus amount due',
+    //     });
+    //   }
+    // }
 
     // Validate payment method if provided
     if (paymentMethod) {
