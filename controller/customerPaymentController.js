@@ -19,10 +19,10 @@ const generateInvoiceNo = async () => {
 // Create a new customer payment
 exports.createPayment = async (req, res) => {
   try {
-    const { customer_id, amountPaid, amountDue, payment_method, date, notes, totalAmount, status } = req.body;
+    const { customerId, amountPaid, amountDue, payment_method, date, notes, totalAmount, status } = req.body;
 
     // Validate input
-    if (!customer_id || !amountPaid || !payment_method || totalAmount === undefined) {
+    if (!customerId || !amountPaid || !payment_method || totalAmount === undefined) {
       return res.status(400).json({
         success: false,
         msg: 'Customer ID, amount paid, payment method, and total amount are required',
@@ -30,7 +30,7 @@ exports.createPayment = async (req, res) => {
     }
 
 
-    if(!customer_id){
+    if(!customerId){
        return res.status(400).json({
         success: false,
         msg: 'Customer ID is required',
@@ -40,7 +40,7 @@ exports.createPayment = async (req, res) => {
 
 
     // Check if customer exists and is a Customer
-    const customer = await User.findById(customer_id);
+    const customer = await User.findById(customerId);
     if (!customer) {
       return res.status(404).json({
         success: false,
@@ -111,7 +111,7 @@ exports.createPayment = async (req, res) => {
 
     // Create payment
     const payment = new CustomerPayment({
-      customer: customer_id,
+      customer: customerId,
       totalAmount,
       amountPaid,
       amountDue,
@@ -126,7 +126,7 @@ exports.createPayment = async (req, res) => {
 
     // Update customer's payment history
     await User.findByIdAndUpdate(
-      customer_id,
+      customerId,
       { $push: { paymentHistory: payment._id } },
       { new: true }
     );
@@ -149,7 +149,7 @@ exports.createPayment = async (req, res) => {
 exports.updatePayment = async (req, res) => {
   try {
     const { id } = req.params;
-    const { customer_id, amountPaid, amountDue, payment_method, invoice_no, date, notes, totalAmount, status } = req.body;
+    const { customerId, amountPaid, amountDue, payment_method, invoice_no, date, notes, totalAmount, status } = req.body;
 
     // Check if payment exists
     const payment = await CustomerPayment.findById(id);
@@ -161,8 +161,8 @@ exports.updatePayment = async (req, res) => {
     }
 
     // Validate customer if provided
-    if (customer_id) {
-      const customer = await User.findById(customer_id);
+    if (customerId) {
+      const customer = await User.findById(customerId);
       if (!customer) {
         return res.status(404).json({
           success: false,
@@ -256,7 +256,7 @@ exports.updatePayment = async (req, res) => {
 
     // Prepare update object
     const updateData = {
-      ...(customer_id && { customer: customer_id }),
+      ...(customerId && { customer: customerId }),
       ...(totalAmount !== undefined && { totalAmount }),
       ...(amountPaid && { amountPaid }),
       ...(amountDue !== undefined && { amountDue }),

@@ -19,11 +19,11 @@ const generateInvoiceNo = async () => {
 // Create a new payment
 exports.createPayment = async (req, res) => {
   try {
-    const { supplier, amountPaid, amountDue, payment_method, date, notes, totalAmount, status } = req.body;
+    const { supplierId, amountPaid, amountDue, payment_method, date, notes, totalAmount, status } = req.body;
 
   
 
-    if(!supplier){
+    if(!supplierId){
       return res.status(400).json({
         success: false,
         message: 'Supplier ID is required',
@@ -52,7 +52,7 @@ exports.createPayment = async (req, res) => {
     }
 
     // Check if supplier exists
-    const supplier = await Supplier.findById(supplier_id);
+    const supplier = await Supplier.findById(supplierId);
     if (!supplier) {
       return res.status(404).json({
         success: false,
@@ -117,7 +117,7 @@ exports.createPayment = async (req, res) => {
 
     // Create payment
     const payment = new Payment({
-      supplier: supplier_id,
+      supplier: supplierId,
       totalAmount,
       amountPaid,
       amountDue,
@@ -132,7 +132,7 @@ exports.createPayment = async (req, res) => {
 
     // Update supplier's payment history
     await Supplier.findByIdAndUpdate(
-      supplier_id,
+      supplierId,
       { $push: { paymentHistory: payment._id } },
       { new: true }
     );
@@ -156,7 +156,7 @@ exports.createPayment = async (req, res) => {
 exports.updatePayment = async (req, res) => {
   try {
     const { id } = req.params;
-    const { supplier_id, amountPaid, amountDue, payment_method, invoice_no, date, notes, totalAmount, status } = req.body;
+    const { supplierId, amountPaid, amountDue, payment_method, invoice_no, date, notes, totalAmount, status } = req.body;
 
     // Check if payment exists
     const payment = await Payment.findById(id);
@@ -168,8 +168,8 @@ exports.updatePayment = async (req, res) => {
     }
 
     // Validate supplier if provided
-    if (supplier_id) {
-      const supplier = await Supplier.findById(supplier_id);
+    if (supplierId) {
+      const supplier = await Supplier.findById(supplierId);
       if (!supplier) {
         return res.status(404).json({
           success: false,
@@ -257,7 +257,7 @@ exports.updatePayment = async (req, res) => {
 
     // Prepare update object
     const updateData = {
-      ...(supplier_id && { supplier: supplier_id }),
+      ...(supplierId && { supplier: supplierId }),
       ...(totalAmount !== undefined && { totalAmount }),
       ...(amountPaid && { amountPaid }),
       ...(amountDue !== undefined && { amountDue }),
