@@ -213,7 +213,7 @@ exports.updatePayment = async (req, res) => {
     //       message: 'Total amount must equal amount paid plus amount due',
     //     });
     //   }
-    // }
+    }
 
     // Validate payment method if provided
     if (paymentMethod) {
