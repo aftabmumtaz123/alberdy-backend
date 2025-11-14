@@ -21,11 +21,33 @@ exports.createPayment = async (req, res) => {
   try {
     const { supplier_id, amountPaid, amountDue, payment_method, date, notes, totalAmount, status } = req.body;
 
-    // Validate input
-    if (!supplier_id || !amountPaid || !payment_method || totalAmount === undefined) {
+  
+
+    if(!supplier_id){
       return res.status(400).json({
         success: false,
-        message: 'Supplier ID, amount paid, payment method, and total amount are required',
+        message: 'Supplier ID is required',
+      });
+    }
+
+    if(!amountPaid){
+      return res.status(400).json({
+        success: false,
+        message: 'Total Amount is required',
+      });
+    }
+
+    if(!payment_method){
+      return res.status(400).json({
+        success: false,
+        message: 'Payment Method is required',
+      });
+    }
+
+    if(!totalAmount){
+      return res.status(400).json({
+        success: false,
+        message: 'Total Amount is required',
       });
     }
 
