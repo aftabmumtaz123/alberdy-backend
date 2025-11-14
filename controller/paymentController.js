@@ -19,11 +19,11 @@ const generateInvoiceNo = async () => {
 // Create a new payment
 exports.createPayment = async (req, res) => {
   try {
-    const { supplier_id, amountPaid, amountDue, payment_method, date, notes, totalAmount, status } = req.body;
+    const { supplier, amountPaid, amountDue, payment_method, date, notes, totalAmount, status } = req.body;
 
   
 
-    if(!supplier_id){
+    if(!supplier){
       return res.status(400).json({
         success: false,
         message: 'Supplier ID is required',

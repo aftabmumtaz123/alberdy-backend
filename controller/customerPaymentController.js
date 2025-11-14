@@ -29,6 +29,16 @@ exports.createPayment = async (req, res) => {
       });
     }
 
+
+    if(!customer_id){
+       return res.status(400).json({
+        success: false,
+        msg: 'Customer ID is required',
+      });
+    }
+
+
+
     // Check if customer exists and is a Customer
     const customer = await User.findById(customer_id);
     if (!customer) {
