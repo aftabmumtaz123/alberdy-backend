@@ -6,9 +6,12 @@ const PaymentSchema = new mongoose.Schema({
     ref: 'Supplier',
     required: true,
   },
+  totalAmount: {
+    type: Number,
+    min: 0
+  },
   amountPaid: {
     type: Number,
-    required: true,
     min: 0,
   },
   amountDue: {
@@ -34,5 +37,6 @@ const PaymentSchema = new mongoose.Schema({
     trim: true,
   },
 }, { timestamps: true });
+
 
 module.exports = mongoose.model('Payment', PaymentSchema);
