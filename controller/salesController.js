@@ -98,6 +98,12 @@ exports.createSale = async (req, res) => {
       saleCode = `SALE-${String(num).padStart(6, '0')}`;
     }
 
+
+    let finalStatus = status;
+    if(!finalStatus){
+      finalStatus = amountPaid >= grandTotal ? 'Completed' : 'Pending';
+    }
+
     // Create sale
     const sale = new Sale({
       saleCode,
