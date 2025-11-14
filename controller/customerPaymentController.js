@@ -19,13 +19,13 @@ const generateInvoiceNo = async () => {
 // Create a new customer payment
 exports.createPayment = async (req, res) => {
   try {
-    const { customer_id, amountPaid, amountDue, payment_method, date, notes } = req.body;
+    const { customer_id, amountPaid, amountDue, payment_method, date, notes, totalAmount, status } = req.body;
 
     // Validate input
-    if (!customer_id || !amountPaid || !payment_method) {
+    if (!customer_id || !amountPaid || !payment_method || totalAmount === undefined) {
       return res.status(400).json({
         success: false,
-        msg: 'Customer ID, amount paid, and payment method are required',
+        msg: 'Customer ID, amount paid, payment method, and total amount are required',
       });
     }
 
@@ -41,6 +41,14 @@ exports.createPayment = async (req, res) => {
       return res.status(400).json({
         success: false,
         msg: 'User is not a customer',
+      });
+    }
+
+    // Validate totalAmount
+    if (totalAmount < 0) {
+      return res.status(400).json({
+        success: false,
+        msg: 'Total amount cannot be negative',
       });
     }
 
@@ -60,6 +68,15 @@ exports.createPayment = async (req, res) => {
       });
     }
 
+    // Validate consistency: totalAmount = amountPaid + amountDue
+    const calculatedTotal = amountPaid + (amountDue || 0);
+    if (totalAmount !== calculatedTotal) {
+      return res.status(400).json({
+        success: false,
+        msg: 'Total amount must equal amount paid plus amount due',
+      });
+    }
+
     // Validate payment method
     const allowedMethods = ['Bank Transfer', 'Credit Card', 'Cash', 'Check', 'Other'];
     if (!allowedMethods.includes(payment_method)) {
@@ -69,18 +86,30 @@ exports.createPayment = async (req, res) => {
       });
     }
 
+    // Validate status (if provided)
+    const allowedStatuses = ['Pending', 'Completed', 'Partial', 'Cancelled'];
+    let paymentStatus = status || (amountDue > 0 ? 'Partial' : 'Completed');
+    if (!allowedStatuses.includes(paymentStatus)) {
+      return res.status(400).json({
+        success: false,
+        msg: 'Invalid payment status',
+      });
+    }
+
     // Generate unique invoice number
     const invoiceNo = await generateInvoiceNo();
 
     // Create payment
     const payment = new CustomerPayment({
       customer: customer_id,
+      totalAmount,
       amountPaid,
       amountDue,
       paymentMethod: payment_method,
       invoiceNo,
       date: date || Date.now(),
       notes,
+      status: paymentStatus,
     });
 
     await payment.save();
@@ -110,7 +139,7 @@ exports.createPayment = async (req, res) => {
 exports.updatePayment = async (req, res) => {
   try {
     const { id } = req.params;
-    const { customer_id, amountPaid, amountDue, payment_method, invoice_no, date, notes } = req.body;
+    const { customer_id, amountPaid, amountDue, payment_method, invoice_no, date, notes, totalAmount, status } = req.body;
 
     // Check if payment exists
     const payment = await CustomerPayment.findById(id);
@@ -138,6 +167,14 @@ exports.updatePayment = async (req, res) => {
       }
     }
 
+    // Validate totalAmount if provided
+    if (totalAmount !== undefined && totalAmount < 0) {
+      return res.status(400).json({
+        success: false,
+        msg: 'Total amount cannot be negative',
+      });
+    }
+
     // Validate amountPaid if provided
     if (amountPaid && amountPaid <= 0) {
       return res.status(400).json({
@@ -152,6 +189,19 @@ exports.updatePayment = async (req, res) => {
         success: false,
         msg: 'Amount due cannot be negative',
       });
+    }
+
+    // Validate consistency: totalAmount = amountPaid + amountDue
+    if (totalAmount !== undefined || amountPaid !== undefined || amountDue !== undefined) {
+      const updatedTotal = totalAmount !== undefined ? totalAmount : payment.totalAmount;
+      const updatedPaid = amountPaid !== undefined ? amountPaid : payment.amountPaid;
+      const updatedDue = amountDue !== undefined ? amountDue : payment.amountDue || 0;
+      if (updatedTotal !== updatedPaid + updatedDue) {
+        return res.status(400).json({
+          success: false,
+          msg: 'Total amount must equal amount paid plus amount due',
+        });
+      }
     }
 
     // Validate payment method if provided
@@ -183,15 +233,28 @@ exports.updatePayment = async (req, res) => {
       }
     }
 
+    // Validate status if provided
+    if (status) {
+      const allowedStatuses = ['Pending', 'Completed', 'Partial', 'Cancelled'];
+      if (!allowedStatuses.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          msg: 'Invalid payment status',
+        });
+      }
+    }
+
     // Prepare update object
     const updateData = {
       ...(customer_id && { customer: customer_id }),
+      ...(totalAmount !== undefined && { totalAmount }),
       ...(amountPaid && { amountPaid }),
       ...(amountDue !== undefined && { amountDue }),
       ...(payment_method && { paymentMethod: payment_method }),
       ...(invoice_no && { invoiceNo: invoice_no }),
       ...(date && { date }),
       ...(notes !== undefined && { notes }),
+      ...(status && { status }),
     };
 
     // Update payment
@@ -228,6 +291,14 @@ exports.deletePayment = async (req, res) => {
       });
     }
 
+    // Optional: Restrict deletion of certain statuses
+    // if (payment.status === 'Completed') {
+    //   return res.status(400).json({
+    //     success: false,
+    //     msg: 'Cannot delete completed payments',
+    //   });
+    // }
+
     // Remove payment from customer's payment history
     await User.findByIdAndUpdate(
       payment.customer,
@@ -254,7 +325,7 @@ exports.deletePayment = async (req, res) => {
 // List all customer payments with filters
 exports.getAllPayments = async (req, res) => {
   try {
-    const { customer, startDate, endDate, paymentMethod, reference, page = 1, limit = 10 } = req.query;
+    const { customer, startDate, endDate, paymentMethod, reference, status, page = 1, limit = 10 } = req.query;
 
     // Build query
     const query = {};
@@ -275,6 +346,10 @@ exports.getAllPayments = async (req, res) => {
 
     if (reference) {
       query.invoiceNo = { $regex: reference, $options: 'i' };
+    }
+
+    if (status) {
+      query.status = status;
     }
 
     // Pagination
