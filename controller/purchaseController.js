@@ -219,6 +219,8 @@ exports.getPurchaseById = async (req, res) => {
   }
 };
 
+
+
 exports.updatePurchase = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -287,7 +289,6 @@ exports.updatePurchase = async (req, res) => {
           console.log(`Removed ${product.quantity} units from variant ${product.variantId} for purchase ${purchase.purchaseCode}`);
         }
       }
-      // Do NOT clear products; keep them for reference
       newProducts = purchase.products; // Preserve existing products
       // Reset financials
       purchase.payment.amountDue = 0;
@@ -335,29 +336,53 @@ exports.updatePurchase = async (req, res) => {
         });
       }
 
-      // Adjust stock
-      for (const oldProd of purchase.products) {
-        const newProd = newProducts.find(p => p.variantId.toString() === oldProd.variantId.toString());
-        const diff = newProd ? newProd.quantity - oldProd.quantity : -oldProd.quantity;
-        if (diff !== 0 && oldProd.variantId && mongoose.Types.ObjectId.isValid(oldProd.variantId)) {
-          const variant = await Variant.findById(oldProd.variantId).session(session);
+      // Adjust stock for all products in newProducts
+      for (const newProd of newProducts) {
+        const oldProd = purchase.products.find(p => p.variantId.toString() === newProd.variantId.toString());
+        const diff = oldProd ? newProd.quantity - oldProd.quantity : newProd.quantity; // New product: use full quantity
+        if (diff !== 0 && newProd.variantId && mongoose.Types.ObjectId.isValid(newProd.variantId)) {
+          const variant = await Variant.findById(newProd.variantId).session(session);
           if (!variant) {
             await session.abortTransaction();
-            return res.status(400).json({ success: false, message: `Invalid variant: ${oldProd.variantId}` });
+            return res.status(400).json({ success: false, message: `Invalid variant: ${newProd.variantId}` });
           }
           if (diff < 0 && variant.stockQuantity < -diff) {
             await session.abortTransaction();
-            return res.status(400).json({ success: false, message: `Insufficient stock to reduce for variant ${oldProd.variantId}` });
+            return res.status(400).json({ success: false, message: `Insufficient stock to reduce for variant ${newProd.variantId}` });
           }
           await Variant.findByIdAndUpdate(
-            oldProd.variantId,
+            newProd.variantId,
             {
               $inc: { stockQuantity: diff },
-              $set: newProd ? { purchasePrice: newProd.unitPrice } : {},
+              $set: { purchasePrice: newProd.unitPrice },
             },
             { runValidators: true, session }
           );
-          console.log(`Adjusted ${diff} units for variant ${oldProd.variantId} for purchase ${purchase.purchaseCode}`);
+          console.log(`Adjusted ${diff} units for variant ${newProd.variantId} for purchase ${purchase.purchaseCode}`);
+        }
+      }
+
+      // Handle removed products (those in purchase.products but not in newProducts)
+      for (const oldProd of purchase.products) {
+        if (!newProducts.find(p => p.variantId.toString() === oldProd.variantId.toString())) {
+          const diff = -oldProd.quantity; // Remove all stock for this product
+          if (diff !== 0 && oldProd.variantId && mongoose.Types.ObjectId.isValid(oldProd.variantId)) {
+            const variant = await Variant.findById(oldProd.variantId).session(session);
+            if (!variant) {
+              await session.abortTransaction();
+              return res.status(400).json({ success: false, message: `Invalid variant: ${oldProd.variantId}` });
+            }
+            if (variant.stockQuantity < -diff) {
+              await session.abortTransaction();
+              return res.status(400).json({ success: false, message: `Insufficient stock to reduce for variant ${oldProd.variantId}` });
+            }
+            await Variant.findByIdAndUpdate(
+              oldProd.variantId,
+              { $inc: { stockQuantity: diff } },
+              { runValidators: true, session }
+            );
+            console.log(`Removed ${-diff} units for variant ${oldProd.variantId} for purchase ${purchase.purchaseCode}`);
+          }
         }
       }
     }
@@ -432,6 +457,8 @@ exports.updatePurchase = async (req, res) => {
     session.endSession();
   }
 };
+
+
 
 exports.deletePurchase = async (req, res) => {
   try {
