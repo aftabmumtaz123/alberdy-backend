@@ -6,9 +6,13 @@ const CustomerPaymentSchema = new mongoose.Schema({
     ref: 'User',
     required: true,
   },
+  totalAmount: {
+    type: Number,
+    min: 0,
+
+  },
   amountPaid: {
     type: Number,
-    required: true,
     min: 0,
   },
   amountDue: {
@@ -34,6 +38,10 @@ const CustomerPaymentSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
+   status: {
+      type: String,
+      enum: ['Pending', 'Completed', 'Partial', 'Cancelled']
+    }
 }, { timestamps: true });
 
 module.exports = mongoose.model('CustomerPayment', CustomerPaymentSchema);
