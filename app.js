@@ -11,6 +11,9 @@ const PORT = process.env.PORT || 5000;
 // Middleware (parsers first!)
 const cookieParser = require('cookie-parser'); // Add require
 
+const checkExpiredVariants = require('./jobs/checkExpiredVarients');
+
+checkExpiredVariants();
 
 app.use(express.json());
 app.use(cookieParser()); 
