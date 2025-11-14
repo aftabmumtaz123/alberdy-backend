@@ -19,7 +19,7 @@ const generateInvoiceNo = async () => {
 // Create a new payment
 exports.createPayment = async (req, res) => {
   try {
-    const { supplierId, amountPaid, amountDue, payment_method, date, notes, totalAmount, status } = req.body;
+    const { supplierId, amountPaid, amountDue, paymentMethod, date, notes, totalAmount, status } = req.body;
 
   
 
@@ -37,7 +37,7 @@ exports.createPayment = async (req, res) => {
       });
     }
 
-    if(!payment_method){
+    if(!paymentMethod){
       return res.status(400).json({
         success: false,
         message: 'Payment Method is required',
@@ -95,7 +95,7 @@ exports.createPayment = async (req, res) => {
 
     // Validate payment method
     const allowedMethods = ['Bank Transfer', 'Credit Card', 'Cash', 'Check', 'Other'];
-    if (!allowedMethods.includes(payment_method)) {
+    if (!allowedMethods.includes(paymentMethod)) {
       return res.status(400).json({
         success: false,
         message: 'Invalid payment method',
@@ -121,7 +121,7 @@ exports.createPayment = async (req, res) => {
       totalAmount,
       amountPaid,
       amountDue,
-      paymentMethod: payment_method,
+      paymentMethod: paymentMethod,
       invoiceNo,
       date: date || Date.now(),
       notes,
@@ -156,7 +156,7 @@ exports.createPayment = async (req, res) => {
 exports.updatePayment = async (req, res) => {
   try {
     const { id } = req.params;
-    const { supplierId, amountPaid, amountDue, payment_method, invoice_no, date, notes, totalAmount, status } = req.body;
+    const { supplierId, amountPaid, amountDue, paymentMethod, invoice_no, date, notes, totalAmount, status } = req.body;
 
     // Check if payment exists
     const payment = await Payment.findById(id);
@@ -216,9 +216,9 @@ exports.updatePayment = async (req, res) => {
     }
 
     // Validate payment method if provided
-    if (payment_method) {
+    if (paymentMethod) {
       const allowedMethods = ['Bank Transfer', 'Credit Card', 'Cash', 'Check', 'Other'];
-      if (!allowedMethods.includes(payment_method)) {
+      if (!allowedMethods.includes(paymentMethod)) {
         return res.status(400).json({
           success: false,
           message: 'Invalid payment method',
@@ -261,7 +261,7 @@ exports.updatePayment = async (req, res) => {
       ...(totalAmount !== undefined && { totalAmount }),
       ...(amountPaid && { amountPaid }),
       ...(amountDue !== undefined && { amountDue }),
-      ...(payment_method && { paymentMethod: payment_method }),
+      ...(paymentMethod && { paymentMethod: paymentMethod }),
       ...(invoice_no && { invoiceNo: invoice_no }),
       ...(date && { date }),
       ...(notes !== undefined && { notes }),
@@ -304,12 +304,12 @@ exports.deletePayment = async (req, res) => {
     }
 
     // Optional: Restrict deletion of certain statuses
-    // if (payment.status === 'Completed') {
-    //   return res.status(400).json({
-    //     success: false,
-    //     message: 'Cannot delete completed payments',
-    //   });
-    // }
+    if (payment.status === 'Completed') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete completed payments',
+      });
+    }
 
     // Remove payment from supplier's payment history
     await Supplier.findByIdAndUpdate(
