@@ -265,7 +265,7 @@ router.get('/api/auth/users/:id', authMiddleware, async (req, res) => {
       .select('-password -__v')
       .populate({
         path: 'paymentHistory',
-        select: 'amountPaid amountDue paymentMethod invoiceNo date notes createdAt',
+        select: 'amountPaid amountDue paymentMethod invoiceNo status date notes createdAt',
         options: { sort: { date: -1 } },
       });
 
@@ -384,4 +384,5 @@ router.delete('/api/auth/users/:id', authMiddleware, async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error deleting user' });
   }
 });
+
 module.exports = router;
