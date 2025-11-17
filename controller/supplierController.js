@@ -1,5 +1,6 @@
 const Supplier = require('../model/Supplier');
-const upload = require('../config/multer'); // Path to your multer config
+const upload = require('../config/multer'); 
+const Order = require('../model/Order')
 
 exports.createSupplier = async (req, res) => {
   try {
