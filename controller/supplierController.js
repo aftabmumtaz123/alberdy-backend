@@ -153,38 +153,33 @@ exports.getAllSuppliers = async (req, res) => {
       error: error.message,
     });
   }
-};
-exports.getSupplierById = async (req, res) => {
+};router.get('/api/suppliers/:id', authMiddleware, async (req, res) => {
   try {
-    const { id } = req.params;
-
-    const supplier = await Supplier.findById(id).populate({
-      path: 'paymentHistory',
-      select: 'amountPaid amountDue paymentMethod date notes createdAt',
-      options: { sort: { date: -1 } },
-    });
+    const supplier = await Supplier.findById(req.params.id)
+      .select('-__v')
+      .populate({
+        path: 'paymentHistory',
+        select: 'totalAmount amountPaid amountDue paymentMethod invoiceNo status date notes createdAt',
+        options: { sort: { date: -1 } },
+      });
 
     if (!supplier) {
-      return res.status(404).json({
-        success: false,
-        message: 'Supplier not found',
-      });
+      return res.status(404).json({ success: false, msg: 'Supplier not found' });
     }
 
-    res.status(200).json({
-      success: true,
-      message: 'Supplier fetched successfully',
-      data: supplier,
-    });
-  } catch (error) {
-    console.error('Fetch Supplier Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error occurred while fetching supplier',
-      error: error.message,
-    });
+    const ordersCount = await Order.countDocuments({ supplier: supplier._id });
+
+    const response = {
+      ...supplier.toObject(),
+      ordersCount,
+    };
+
+    res.json({ success: true, data: response });
+  } catch (err) {
+    console.error('Get supplier error:', err);
+    res.status(500).json({ success: false, msg: 'Server error fetching supplier' });
   }
-};
+});
 
 
 exports.updateSupplier = async (req, res) => {

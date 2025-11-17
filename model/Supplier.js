@@ -41,7 +41,11 @@ const SupplierSchema = new mongoose.Schema({
         state: String,
         zip: String,
         country: String
-    }
+    },
+    paymentHistory: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Payment'  // This must match your Payment model name
+  }],
 }, { timestamps: true })
 
 module.exports = mongoose.model('Supplier', SupplierSchema);

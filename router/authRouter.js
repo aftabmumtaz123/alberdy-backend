@@ -258,23 +258,20 @@ router.get('/api/auth/users', authMiddleware, async (req, res) => {
   }
 });
 
-
 router.get('/api/auth/users/:id', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.params.id)
-      .select('-password -__v')                     // hide password & internal __v
+      .select('-password -__v')
       .populate({
         path: 'paymentHistory',
-        select:
-          'totalAmount amountPaid amountDue paymentMethod invoiceNo status date notes createdAt',
-        options: { sort: { date: -1 } },            // newest first
+        select: 'totalAmount amountPaid amountDue paymentMethod invoiceNo status date notes createdAt',
+        options: { sort: { date: -1 } },
       });
 
     if (!user) {
       return res.status(404).json({ success: false, msg: 'User not found' });
     }
 
-    // Restrict to Customer role only
     if (user.role !== 'Customer') {
       return res.status(403).json({
         success: false,
@@ -282,12 +279,17 @@ router.get('/api/auth/users/:id', authMiddleware, async (req, res) => {
       });
     }
 
-    // Count orders for this customer
     const ordersCount = await Order.countDocuments({ user: user._id });
 
-    // Final response
+    // Force amountDue to be included (even if 0)
+    const paymentHistory = (user.paymentHistory || []).map(payment => ({
+      ...payment.toObject(),
+      amountDue: payment.amountDue ?? (payment.totalAmount - payment.amountPaid), // fallback
+    }));
+
     const response = {
       ...user.toObject(),
+      paymentHistory,
       ordersCount,
     };
 

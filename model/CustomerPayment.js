@@ -42,8 +42,8 @@ const CustomerPaymentSchema = new mongoose.Schema({
       type: String,
       enum: ['Pending', 'Completed', 'Partial', 'Cancelled'],
       default: 'Pending'
-      
-    }
+    },
+    
 }, { timestamps: true });
 
 module.exports = mongoose.model('CustomerPayment', CustomerPaymentSchema);
