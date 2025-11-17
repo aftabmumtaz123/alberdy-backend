@@ -380,6 +380,7 @@ static async getExpiredProducts(req, res) {
 }
 
 
+
 static async getTopCustomersPnL(req, res) {
   try {
     const now = moment.tz('Asia/Karachi');
@@ -395,7 +396,7 @@ static async getTopCustomersPnL(req, res) {
       },
       { $unwind: '$items' },
 
-      // Lookup variant to get purchasePrice (cost)
+      // Get purchasePrice from Variant
       {
         $lookup: {
           from: 'variants',
@@ -409,19 +410,17 @@ static async getTopCustomersPnL(req, res) {
       {
         $group: {
           _id: '$user',
-          totalRevenue: { $sum: '$items.total' },  // price × qty (already correct)
+          totalRevenue: { $sum: '$items.total' },
           totalCost: {
             $sum: {
-              $multiply: [
-                '$items.quantity',
-                { $ifNull: ['$variantData.purchasePrice', 0] }
-              ]
+              $multiply: ['$items.quantity', { $ifNull: ['$variantData.purchasePrice', 0] }]
             }
           },
           orderIds: { $addToSet: '$_id' },
-          customerName: { $first: '$shippingAddress.fullName' }
+          customerNameFromOrder: { $first: '$shippingAddress.fullName' }
         }
       },
+
       {
         $addFields: {
           totalProfit: { $subtract: ['$totalRevenue', '$totalCost'] },
@@ -429,14 +428,14 @@ static async getTopCustomersPnL(req, res) {
           margin: {
             $cond: [
               { $gt: ['$totalRevenue', 0] },
-              { $round: [{ $multiply: [{ $divide: ['$totalProfit', '$totalRevenue'] }, 100] }, 1] },
+              { $round: [{ $multiply: [{ $divide: [{ $subtract: ['$totalRevenue', '$totalCost'] }, '$totalRevenue'] }, 100] }, 1] },
               0
             ]
           }
         }
       },
 
-      // Get user info
+      // Get user details
       {
         $lookup: {
           from: 'users',
@@ -447,13 +446,13 @@ static async getTopCustomersPnL(req, res) {
       },
       { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
 
-      // Final output
+      // Final projection
       {
         $project: {
           customer: {
-            $ifNull: ['$user.name', '$customerName', 'Walk-in Customer']
+            $ifNull: ['$user.name', '$customerNameFromOrder', 'Walk-in Customer']
           },
-          region: { $ifNull: ['$user.city', 'N/A'] },
+          region: { $ifNull: ['$user.address.city', 'N/A'] },
           revenue: { $round: ['$totalRevenue', 2] },
           cost: { $round: ['$totalCost', 2] },
           profit: { $round: ['$totalProfit', 2] },
@@ -461,19 +460,19 @@ static async getTopCustomersPnL(req, res) {
           orders: '$orderCount'
         }
       },
+
       { $sort: { revenue: -1 } },
       { $limit: 10 }
     ]);
 
-    const margin = revenue > 0 ? ((revenue - cost) / revenue) * 100 : 0;
-
+    // Format numbers with AED and proper decimals
     const formatted = topCustomers.map(c => ({
       customer: c.customer,
       region: c.region,
       revenue: `${c.revenue.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
       cost: `${c.cost.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
       profit: `${c.profit.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
-      margin: margin.toFixed(1) + '%',
+      margin: `${c.margin}%`,
       orders: c.orders
     }));
 
@@ -484,6 +483,8 @@ static async getTopCustomersPnL(req, res) {
     res.status(500).json({ success: false, error: error.message });
   }
 }
+
+
 
 
 static async getTopProductsPnL(req, res) {
@@ -501,7 +502,6 @@ static async getTopProductsPnL(req, res) {
       },
       { $unwind: '$items' },
 
-      // Get variant cost
       {
         $lookup: {
           from: 'variants',
@@ -512,7 +512,6 @@ static async getTopProductsPnL(req, res) {
       },
       { $unwind: { path: '$variant', preserveNullAndEmptyArrays: true } },
 
-      // Group by product
       {
         $group: {
           _id: '$items.product',
@@ -525,6 +524,7 @@ static async getTopProductsPnL(req, res) {
           }
         }
       },
+
       {
         $addFields: {
           profit: { $subtract: ['$revenue', '$cost'] },
@@ -538,7 +538,6 @@ static async getTopProductsPnL(req, res) {
         }
       },
 
-      // Get product name & category
       {
         $lookup: {
           from: 'products',
@@ -548,6 +547,7 @@ static async getTopProductsPnL(req, res) {
         }
       },
       { $unwind: '$product' },
+
       {
         $lookup: {
           from: 'categories',
@@ -569,6 +569,7 @@ static async getTopProductsPnL(req, res) {
           margin: '$margin'
         }
       },
+
       { $sort: { revenue: -1 } },
       { $limit: 10 }
     ]);
