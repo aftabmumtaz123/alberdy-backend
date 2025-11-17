@@ -390,7 +390,7 @@ class ReportController {
   }
 
   static async calculateSalesPeriod(period, now) {
-    const [start, end, prevStart, prevEnd] = ReportController.getDateRange(period, now);
+    const [start, end, prevStart, prevEnd] = ReportController.getDateRange(period, now.clone());
     const [currentRevenue, prevRevenue, totalOrders] = await Promise.all([
       Order.aggregate([
         { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
