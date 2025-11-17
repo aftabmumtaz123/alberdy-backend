@@ -153,7 +153,12 @@ exports.getAllSuppliers = async (req, res) => {
       error: error.message,
     });
   }
-};router.get('/api/suppliers/:id', authMiddleware, async (req, res) => {
+};
+
+
+
+
+exports.getSupplierById = async (req, res) => {
   try {
     const supplier = await Supplier.findById(req.params.id)
       .select('-__v')
@@ -180,6 +185,7 @@ exports.getAllSuppliers = async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error fetching supplier' });
   }
 });
+
 
 
 exports.updateSupplier = async (req, res) => {
