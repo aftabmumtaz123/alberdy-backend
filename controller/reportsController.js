@@ -245,51 +245,101 @@ static async calculateMostSoldPeriod(period, now) {
     }
   }
 
-  static async getRevenueByCategory(req, res) {
-    try {
-      const [start, end] = ReportController.getDateRange('monthly', moment.tz('Asia/Karachi').set({ hour: 13, minute: 0, second: 0, millisecond: 0 }));
+ static async getRevenueByCategory(req, res) {
+  try {
+    const now = moment.tz('Asia/Karachi').set({ hour: 13, minute: 0, second: 0, millisecond: 0 });
+    const [start, end, prevStart, prevEnd] = ReportController.getDateRange('monthly', now);
 
-      const revenueByCategory = await Order.aggregate([
-        { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
-        { $unwind: '$items' },
-        {
-          $lookup: {
-            from: 'products',
-            localField: 'items.product',
-            foreignField: '_id',
-            as: 'product'
-          }
-        },
-        { $unwind: '$product' },
-        {
-          $lookup: {
-            from: 'categories',
-            localField: 'product.category',
-            foreignField: '_id',
-            as: 'category'
-          }
-        },
-        { $unwind: '$category' },
-        {
-          $group: {
-            _id: '$category._id',
-            category: { $first: '$category.name' },
-            revenue: { $sum: { $multiply: ['$items.quantity', '$items.price'] } }
-          }
-        },
-        { $sort: { revenue: -1 } }
-      ]);
+    const pipeline = [
+      { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
+      { $unwind: '$items' },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'items.product',
+          foreignField: '_id',
+          as: 'product'
+        }
+      },
+      { $unwind: '$product' },
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'product.category',
+          foreignField: '_id',
+          as: 'category'
+        }
+      },
+      { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
+      {
+        $group: {
+          _id: '$product.category',
+          categoryName: { $first: { $ifNull: ['$category.name', 'Uncategorized'] } },
+          image: { $first: { $ifNull: ['$category.image', null] } },
+          totalRevenue: { $sum: { $multiply: ['$items.quantity', '$items.price'] } },
+          orders: { $addToSet: '$_id' } // unique orders
+        }
+      },
+      {
+        $addFields: {
+          totalOrders: { $size: '$orders' }
+        }
+      },
+      { $sort: { totalRevenue: -1 } }
+    ];
 
-      const data = revenueByCategory.map(item => ({
-        category: item.category,
-        revenue: parseFloat(item.revenue.toFixed(2))
-      }));
+    const currentPeriod = await Order.aggregate(pipeline);
 
-      res.json({ success: true, msg: 'Fetched Successfully', data });
-    } catch (error) {
-      res.status(500).json({ success: false, msg: 'Server error', details: error.message });
-    }
+    // Previous period for growth calculation
+    const prevPipeline = pipeline.map(stage => {
+      if (stage.$match) {
+        return { $match: { ...stage.$match, createdAt: { $gte: prevStart, $lte: prevEnd } } };
+      }
+      return stage;
+    });
+
+    const previousPeriod = await Order.aggregate(prevPipeline);
+
+    const prevMap = new Map(previousPeriod.map(p => [p._id?.toString(), p.totalRevenue || 0]));
+
+    const totalCurrentRevenue = currentPeriod.reduce((sum, c) => sum + c.totalRevenue, 0);
+
+    const data = currentPeriod.map(cat => {
+      const prevRevenue = prevMap.get(cat._id?.toString()) || 0;
+      const growth = prevRevenue > 0 
+        ? ((cat.totalRevenue - prevRevenue) / prevRevenue) * 100 
+        : cat.totalRevenue > 0 ? 100 : 0;
+
+      const percentageOfTotal = totalCurrentRevenue > 0 
+        ? (cat.totalRevenue / totalCurrentRevenue) * 100 
+        : 0;
+
+      return {
+        category: cat.categoryName,
+        image: cat.image || null,
+        totalOrders: cat.totalOrders,
+        revenue: parseFloat(cat.totalRevenue.toFixed(2)),
+        percentageOfTotal: `${percentageOfTotal.toFixed(1)}%`,
+        growth: `${growth > 0 ? '+' : ''}${growth.toFixed(1)}%`
+      };
+    });
+
+    res.json({
+      success: true,
+      msg: "Fetched Successfully",
+      data,
+      summary: {
+        totalRevenue: parseFloat(totalCurrentRevenue.toFixed(2)),
+        dateRange: `${moment.tz(start, 'Asia/Karachi').format('MMM DD, YYYY')} - ${moment.tz(end, 'Asia/Karachi').format('MMM DD, YYYY')}`,
+        period: "Monthly"
+      }
+    });
+
+  } catch (error) {
+    console.error('Revenue by Category Error:', error);
+    res.status(500).json({ success: false, msg: 'Server error', details: error.message });
   }
+}
 }
 
 
