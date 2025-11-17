@@ -265,7 +265,11 @@ router.get('/api/auth/users/:id', authMiddleware, async (req, res) => {
       .select('-password -__v')
       .populate({
         path: 'paymentHistory',
+
+        select: 'amountPaid amountDue totalAmount paymentMethod invoiceNo date notes createdAt',
+
         select: 'amountPaid amountDue totalAmount  paymentMethod invoiceNo status date notes createdAt',
+
         options: { sort: { date: -1 } },
       });
 
