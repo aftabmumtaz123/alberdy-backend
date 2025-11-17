@@ -281,6 +281,7 @@ static async getExpiredProducts(req, res) {
     res.status(500).json({ success: false, msg: 'Server error', details: error.message });
   }
 }
+//
 
  static async getRevenueByCategory(req, res) {
   try {
