@@ -239,13 +239,13 @@ static async getExpiredProducts(req, res) {
     })
       .populate({
         path: 'product',
-        select: 'name',
+        select: 'name image',
         populate: {
           path: 'category',
           select: 'name'
         }
       })
-      .select('sku image expiryDate product stockQuantity')
+      .select('sku expiryDate product stockQuantity')
       .sort({ expiryDate: 1 })
       .limit(10);
 
