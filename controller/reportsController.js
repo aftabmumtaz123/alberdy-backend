@@ -468,7 +468,6 @@ static async getTopCustomersPnL(req, res) {
     // Format numbers with AED and proper decimals
     const formatted = topCustomers.map(c => ({
       customer: c.customer,
-      region: c.region,
       revenue: `${c.revenue.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
       cost: `${c.cost.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
       profit: `${c.profit.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
