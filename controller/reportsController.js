@@ -224,26 +224,70 @@ static async calculateMostSoldPeriod(period, now) {
     }
   }
 
-  static async getExpiredProducts(req, res) {
-    try {
-      const now = moment.tz('Asia/Karachi').set({ hour: 13, minute: 0, second: 0, millisecond: 0 }).toDate();
+static async getExpiredProducts(req, res) {
+  try {
+    const now = moment.tz('Asia/Karachi');
+    const today = now.clone().startOf('day');
 
-      const expired = await Variant.find({ expiryDate: { $lt: now } })
-        .populate('product', 'name')
-        .select('sku stockQuantity expiryDate product');
+    // Fetch variants that are either already expired OR expiring in next 30 days
+    const variants = await Variant.find({
+      expiryDate: { $exists: true, $ne: null },
+      $or: [
+        { expiryDate: { $lt: today.toDate() } },                          // Already expired
+        { expiryDate: { $gte: today.toDate(), $lte: moment(today).add(30, 'days').toDate() } }  // Expiring soon
+      ]
+    })
+      .populate({
+        path: 'product',
+        select: 'name',
+        populate: {
+          path: 'category',
+          select: 'name'
+        }
+      })
+      .select('sku image expiryDate product stockQuantity')
+      .sort({ expiryDate: 1 })
+      .limit(10);
 
-      const data = expired.map(v => ({
-        name: v.product?.name || 'N/A',
-        sku: v.sku || `SKU-${String(v._id).slice(-4)}`,
-        expiryDate: moment.tz(v.expiryDate, 'Asia/Karachi').format('YYYY-MM-DD'),
-        stockQuantity: v.stockQuantity
-      }));
+    const data = variants.map(v => {
+      const expiry = moment.tz(v.expiryDate, 'Asia/Karachi').startOf('day');
+      const diffDays = expiry.diff(today, 'days');
 
-      res.json({ success: true, msg: 'Fetched Successfully', data });
-    } catch (error) {
-      res.status(500).json({ success: false, msg: 'Server error', details: error.message });
-    }
+      let status, statusType;
+
+      if (diffDays < 0) {
+        status = `Expired ${Math.abs(diffDays)} days ago`;
+        statusType = "expired";
+      } else if (diffDays === 0) {
+        status = "Expires today";
+        statusType = "expired";
+      } else {
+        status = `Expires in ${diffDays} days`;
+        statusType = "expiring";
+      }
+
+      return {
+        productName: v.product?.name || 'Unknown Product',
+        category: v.product?.category?.name || 'Uncategorized',
+        image: v.image || null,
+        expiryDate: expiry.format('YYYY-MM-DD'),
+        status,
+        statusType,  // "expired" → red badge, "expiring" → yellow badge
+        days: Math.abs(diffDays)
+      };
+    });
+
+    res.json({
+      success: true,
+      msg: "Fetched Successfully",
+      data
+    });
+
+  } catch (error) {
+    console.error('Expired Products Error:', error);
+    res.status(500).json({ success: false, msg: 'Server error', details: error.message });
   }
+}
 
  static async getRevenueByCategory(req, res) {
   try {
