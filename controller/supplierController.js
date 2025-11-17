@@ -184,7 +184,7 @@ exports.getSupplierById = async (req, res) => {
     console.error('Get supplier error:', err);
     res.status(500).json({ success: false, msg: 'Server error fetching supplier' });
   }
-});
+}
 
 
 
