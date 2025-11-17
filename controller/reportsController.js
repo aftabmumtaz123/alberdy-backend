@@ -239,7 +239,7 @@ static async getExpiredProducts(req, res) {
     })
       .populate({
         path: 'product',
-        select: 'name image',
+        select: 'name thumbnail',
         populate: {
           path: 'category',
           select: 'name image'
@@ -269,7 +269,7 @@ static async getExpiredProducts(req, res) {
       return {
         productName: v.product?.name || 'Unknown Product',
         category: v.product?.category?.name || 'Uncategorized',
-        image: v.product?.description || 'Image not found',
+        image: v.product?.image || 'Image not found',
         expiryDate: expiry.format('YYYY-MM-DD'),
         status,
         statusType,  
