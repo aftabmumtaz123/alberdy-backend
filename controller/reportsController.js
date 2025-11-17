@@ -223,23 +223,21 @@ static async calculateMostSoldPeriod(period, now) {
       res.status(500).json({ success: false, msg: 'Server error', details: error.message });
     }
   }
-
 static async getExpiredProducts(req, res) {
   try {
     const now = moment.tz('Asia/Karachi');
     const today = now.clone().startOf('day');
 
-    // Fetch variants that are either already expired OR expiring in next 30 days
     const variants = await Variant.find({
       expiryDate: { $exists: true, $ne: null },
       $or: [
-        { expiryDate: { $lt: today.toDate() } },                          // Already expired
-        { expiryDate: { $gte: today.toDate(), $lte: moment(today).add(30, 'days').toDate() } }  // Expiring soon
+        { expiryDate: { $lt: today.toDate() } },
+        { expiryDate: { $gte: today.toDate(), $lte: moment(today).add(30, 'days').toDate() } }
       ]
     })
       .populate({
         path: 'product',
-        select: 'name thumbnail',
+        select: 'name thumbnail',           // ← fixed: use thumbnail
         populate: {
           path: 'category',
           select: 'name image'
@@ -254,7 +252,6 @@ static async getExpiredProducts(req, res) {
       const diffDays = expiry.diff(today, 'days');
 
       let status, statusType;
-
       if (diffDays < 0) {
         status = `Expired ${Math.abs(diffDays)} days ago`;
         statusType = "expired";
@@ -269,19 +266,15 @@ static async getExpiredProducts(req, res) {
       return {
         productName: v.product?.name || 'Unknown Product',
         category: v.product?.category?.name || 'Uncategorized',
-        image: v.product?.thumbnail || null,
+        image: v.product?.thumbnail || null,   
         expiryDate: expiry.format('YYYY-MM-DD'),
         status,
-        statusType,  
+        statusType,
         days: Math.abs(diffDays)
       };
     });
 
-    res.json({
-      success: true,
-      msg: "Fetched Successfully",
-      data
-    });
+    res.json({ success: true, msg: "Fetched Successfully", data });
 
   } catch (error) {
     console.error('Expired Products Error:', error);
