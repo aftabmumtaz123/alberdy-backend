@@ -237,7 +237,7 @@ static async getExpiredProducts(req, res) {
     })
       .populate({
         path: 'product',
-        select: 'name thumbnail',           // ← fixed: use thumbnail
+        select: 'name thumbnail',           
         populate: {
           path: 'category',
           select: 'name image'
@@ -452,7 +452,13 @@ static async getTopCustomersPnL(req, res) {
           customer: {
             $ifNull: ['$user.name', '$customerNameFromOrder', 'Walk-in Customer']
           },
-          region: { $ifNull: ['$user.address.city', 'N/A'] },
+          region: {
+              $ifNull: [
+                  '$user.address.city',       // Profile (if filled)
+                  '$customerCity',            // From order (always correct)
+                  'N/A'
+                ]
+              }
           revenue: { $round: ['$totalRevenue', 2] },
           cost: { $round: ['$totalCost', 2] },
           profit: { $round: ['$totalProfit', 2] },
