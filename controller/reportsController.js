@@ -269,7 +269,7 @@ static async getExpiredProducts(req, res) {
       return {
         productName: v.product?.name || 'Unknown Product',
         category: v.product?.category?.name || 'Uncategorized',
-        image: v.product?.thumbnail || null,
+        image: v.product?.images || null,
         expiryDate: expiry.format('YYYY-MM-DD'),
         status,
         statusType,  // "expired" → red badge, "expiring" → yellow badge
