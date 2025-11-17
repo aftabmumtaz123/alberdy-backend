@@ -89,7 +89,7 @@ exports.createPayment = async (req, res) => {
 
     // Validate payment method
     const allowedMethods = ['Bank Transfer', 'Credit Card', 'Cash', 'Check', 'Other'];
-    if (!allowedMethods.includes(payment_method)) {
+    if (!allowedMethods.includes(paymentMethod)) {
       return res.status(400).json({
         success: false,
         msg: 'Invalid payment method',
@@ -115,7 +115,7 @@ exports.createPayment = async (req, res) => {
       totalAmount,
       amountPaid,
       amountDue,
-      paymentMethod: payment_method,
+      paymentMethod: paymentMethod,
       invoiceNo,
       date: date || Date.now(),
       notes,
@@ -149,7 +149,7 @@ exports.createPayment = async (req, res) => {
 exports.updatePayment = async (req, res) => {
   try {
     const { id } = req.params;
-    const { customerId, amountPaid, amountDue, payment_method, invoice_no, date, notes, totalAmount, status } = req.body;
+    const { customerId, amountPaid, amountDue, paymentMethod, invoice_no, date, notes, totalAmount, status } = req.body;
 
     // Check if payment exists
     const payment = await CustomerPayment.findById(id);
@@ -215,9 +215,9 @@ exports.updatePayment = async (req, res) => {
     }
 
     // Validate payment method if provided
-    if (payment_method) {
+    if (paymentMethod) {
       const allowedMethods = ['Bank Transfer', 'Credit Card', 'Cash', 'Check', 'Other'];
-      if (!allowedMethods.includes(payment_method)) {
+      if (!allowedMethods.includes(paymentMethod)) {
         return res.status(400).json({
           success: false,
           msg: 'Invalid payment method',
@@ -260,7 +260,7 @@ exports.updatePayment = async (req, res) => {
       ...(totalAmount !== undefined && { totalAmount }),
       ...(amountPaid && { amountPaid }),
       ...(amountDue !== undefined && { amountDue }),
-      ...(payment_method && { paymentMethod: payment_method }),
+      ...(paymentMethod && { paymentMethod: paymentMethod }),
       ...(invoice_no && { invoiceNo: invoice_no }),
       ...(date && { date }),
       ...(notes !== undefined && { notes }),
