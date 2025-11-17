@@ -262,26 +262,30 @@ router.get('/api/auth/users', authMiddleware, async (req, res) => {
 router.get('/api/auth/users/:id', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.params.id)
-      .select('-password -__v')
+      .select('-password -__v')                     // hide password & internal __v
       .populate({
         path: 'paymentHistory',
-        select: 'amountPaid amountDue totalAmount paymentMethod invoiceNo status date notes createdAt',
-        options: { sort: { date: -1 } },
+        select:
+          'totalAmount amountPaid amountDue paymentMethod invoiceNo status date notes createdAt',
+        options: { sort: { date: -1 } },            // newest first
       });
 
     if (!user) {
       return res.status(404).json({ success: false, msg: 'User not found' });
     }
 
-    // Optional: Restrict to only 'Customer' role
+    // Restrict to Customer role only
     if (user.role !== 'Customer') {
-      return res.status(403).json({ success: false, msg: 'Access denied. Only customers can be viewed with payment details.' });
+      return res.status(403).json({
+        success: false,
+        msg: 'Access denied. Only customers can be viewed with payment details.',
+      });
     }
 
     // Count orders for this customer
     const ordersCount = await Order.countDocuments({ user: user._id });
 
-    // Build response with ordersCount
+    // Final response
     const response = {
       ...user.toObject(),
       ordersCount,
