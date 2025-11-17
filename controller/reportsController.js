@@ -380,8 +380,6 @@ static async getExpiredProducts(req, res) {
 }
 
 
-
-
 static async getTopCustomersPnL(req, res) {
   try {
     const now = moment.tz('Asia/Karachi');
@@ -397,81 +395,93 @@ static async getTopCustomersPnL(req, res) {
       },
       { $unwind: '$items' },
 
+      // Lookup variant to get purchasePrice (cost)
+      {
+        $lookup: {
+          from: 'variants',
+          localField: 'items.variant',
+          foreignField: '_id',
+          as: 'variantData'
+        }
+      },
+      { $unwind: { path: '$variantData', preserveNullAndEmptyArrays: true } },
+
       {
         $group: {
           _id: '$user',
-          totalRevenue: { $sum: '$items.total' },
+          totalRevenue: { $sum: '$items.total' },  // price × qty (already correct)
+          totalCost: {
+            $sum: {
+              $multiply: [
+                '$items.quantity',
+                { $ifNull: ['$variantData.purchasePrice', 0] }
+              ]
+            }
+          },
           orderIds: { $addToSet: '$_id' },
-          customerNameFromOrder: { $first: '$shippingAddress.fullName' }
+          customerName: { $first: '$shippingAddress.fullName' }
         }
       },
       {
         $addFields: {
-          orderCount: { $size: '$orderIds' }
+          totalProfit: { $subtract: ['$totalRevenue', '$totalCost'] },
+          orderCount: { $size: '$orderIds' },
+          margin: {
+            $cond: [
+              { $gt: ['$totalRevenue', 0] },
+              { $round: [{ $multiply: [{ $divide: ['$totalProfit', '$totalRevenue'] }, 100] }, 1] },
+              0
+            ]
+          }
         }
       },
 
-      // Populate user data
+      // Get user info
       {
         $lookup: {
           from: 'users',
           localField: '_id',
           foreignField: '_id',
-          as: 'userData'
+          as: 'user'
         }
       },
-      { $unwind: { path: '$userData', preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
 
-      // FINAL $project — ONLY INCLUSION, NO EXCLUSION!
+      // Final output
       {
         $project: {
           customer: {
-            $ifNull: [
-              '$userData.name',
-              '$customerNameFromOrder',
-              'Walk-in Customer'
-            ]
+            $ifNull: ['$user.name', '$customerName', 'Walk-in Customer']
           },
-          region: { $ifNull: ['$userData.region', 'N/A'] },
+          region: { $ifNull: ['$user.region', 'N/A'] },
           revenue: { $round: ['$totalRevenue', 2] },
-          profit: { $round: ['$totalRevenue', 2] },   // temporary until costPrice added
-          margin: 'N/A',
+          cost: { $round: ['$totalCost', 2] },
+          profit: { $round: ['$totalProfit', 2] },
+          margin: '$margin',
           orders: '$orderCount'
-          // cost field completely removed → no exclusion error
         }
       },
-
       { $sort: { revenue: -1 } },
       { $limit: 10 }
     ]);
 
-    // Format for frontend
     const formatted = topCustomers.map(c => ({
       customer: c.customer,
-      region: c.country,
-      revenue: `${Number(c.revenue).toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
-      profit: `${Number(c.profit).toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
-      margin: c.margin,
+      region: c.region,
+      revenue: `${c.revenue.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
+      cost: `${c.cost.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
+      profit: `${c.profit.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
+      margin: `${c.margin}%`,
       orders: c.orders
     }));
 
-    res.json({
-      success: true,
-      msg: "Top customers fetched successfully",
-      data: formatted
-    });
+    res.json({ success: true, data: formatted });
 
   } catch (error) {
     console.error('getTopCustomersPnL Error:', error);
-    res.status(500).json({
-      success: false,
-      msg: 'Server error',
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 }
-
-
 
 
 static async getTopProductsPnL(req, res) {
@@ -488,14 +498,45 @@ static async getTopProductsPnL(req, res) {
         }
       },
       { $unwind: '$items' },
+
+      // Get variant cost
+      {
+        $lookup: {
+          from: 'variants',
+          localField: 'items.variant',
+          foreignField: '_id',
+          as: 'variant'
+        }
+      },
+      { $unwind: { path: '$variant', preserveNullAndEmptyArrays: true } },
+
+      // Group by product
       {
         $group: {
           _id: '$items.product',
-          totalUnits: { $sum: '$items.quantity' },
-          totalRevenue: { $sum: '$items.total' },
-          productName: { $first: '$items.product' } // will populate later
+          unitsSold: { $sum: '$items.quantity' },
+          revenue: { $sum: '$items.total' },
+          cost: {
+            $sum: {
+              $multiply: ['$items.quantity', { $ifNull: ['$variant.purchasePrice', 0] }]
+            }
+          }
         }
       },
+      {
+        $addFields: {
+          profit: { $subtract: ['$revenue', '$cost'] },
+          margin: {
+            $cond: [
+              { $gt: ['$revenue', 0] },
+              { $round: [{ $multiply: [{ $divide: [{ $subtract: ['$revenue', '$cost'] }, '$revenue'] }, 100] }, 1] },
+              0
+            ]
+          }
+        }
+      },
+
+      // Get product name & category
       {
         $lookup: {
           from: 'products',
@@ -514,14 +555,16 @@ static async getTopProductsPnL(req, res) {
         }
       },
       { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
+
       {
         $project: {
           product: '$product.name',
           category: { $ifNull: ['$category.name', 'Uncategorized'] },
-          units: '$totalUnits',
-          revenue: { $round: ['$totalRevenue', 2] },
-          profit: { $round: ['$totalRevenue', 2] },
-          margin: 'N/A'
+          units: '$unitsSold',
+          revenue: { $round: ['$revenue', 2] },
+          cost: { $round: ['$cost', 2] },
+          profit: { $round: ['$profit', 2] },
+          margin: '$margin'
         }
       },
       { $sort: { revenue: -1 } },
@@ -532,21 +575,17 @@ static async getTopProductsPnL(req, res) {
       product: p.product,
       category: p.category,
       units: p.units,
-      revenue: `${p.revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-      cost: `${p.cost.toFixed(2)}`,
-      profit: `${p.profit.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-      margin: p.margin
+      revenue: `${p.revenue.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
+      cost: `${p.cost.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
+      profit: `${p.profit.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
+      margin: `${p.margin}%`
     }));
 
-    res.json({
-      success: true,
-      msg: "Top products fetched successfully",
-      data: formatted
-    });
+    res.json({ success: true, data: formatted });
 
   } catch (error) {
     console.error('getTopProductsPnL Error:', error);
-    res.status(500).json({ success: false, msg: error.message });
+    res.status(500).json({ success: false, error: error.message });
   }
 }
 
