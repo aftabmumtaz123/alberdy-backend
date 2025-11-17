@@ -430,7 +430,8 @@ class ReportController {
   }
 
   static async calculateMostSoldPeriod(period, now) {
-    const [start, end] = ReportController.getDateRange(period, now);
+const [start, end] = ReportController.getDateRange(period, now.clone());
+
     const mostSold = await Order.aggregate([
       { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
       { $unwind: '$items' },
