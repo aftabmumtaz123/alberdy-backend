@@ -380,6 +380,8 @@ static async getExpiredProducts(req, res) {
 }
 
 
+
+
 static async getTopCustomersPnL(req, res) {
   try {
     const now = moment.tz('Asia/Karachi');
@@ -395,7 +397,6 @@ static async getTopCustomersPnL(req, res) {
       },
       { $unwind: '$items' },
 
-      // Group by customer
       {
         $group: {
           _id: '$user',
@@ -410,7 +411,7 @@ static async getTopCustomersPnL(req, res) {
         }
       },
 
-      // Populate user details
+      // Populate user data
       {
         $lookup: {
           from: 'users',
@@ -421,7 +422,7 @@ static async getTopCustomersPnL(req, res) {
       },
       { $unwind: { path: '$userData', preserveNullAndEmptyArrays: true } },
 
-      // FINAL PROJECT — NO MIXED INCLUSION/EXCLUSION!
+      // FINAL $project — ONLY INCLUSION, NO EXCLUSION!
       {
         $project: {
           customer: {
@@ -433,24 +434,10 @@ static async getTopCustomersPnL(req, res) {
           },
           region: { $ifNull: ['$userData.region', 'N/A'] },
           revenue: { $round: ['$totalRevenue', 2] },
-          cost: 0,                    // Will be removed in next stage
-          profit: { $round: ['$totalRevenue', 2] },  // placeholder until costPrice added
+          profit: { $round: ['$totalRevenue', 2] },   // temporary until costPrice added
           margin: 'N/A',
           orders: '$orderCount'
-        }
-      },
-
-      // SECOND PROJECT: Remove 'cost' cleanly (this is allowed)
-      {
-        $project: {
-          cost: 0,                    // Now safe: we're only excluding
-          _id: 0,
-          customer: 1,
-          region: 1,
-          revenue: 1,
-          profit: 1,
-          margin: 1,
-          orders: 1
+          // cost field completely removed → no exclusion error
         }
       },
 
@@ -458,12 +445,12 @@ static async getTopCustomersPnL(req, res) {
       { $limit: 10 }
     ]);
 
-    // Format currency
+    // Format for frontend
     const formatted = topCustomers.map(c => ({
       customer: c.customer,
       region: c.region,
-      revenue: `${c.revenue.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
-      profit: `${c.profit.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
+      revenue: `${Number(c.revenue).toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
+      profit: `${Number(c.profit).toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
       margin: c.margin,
       orders: c.orders
     }));
@@ -483,6 +470,8 @@ static async getTopCustomersPnL(req, res) {
     });
   }
 }
+
+
 
 
 static async getTopProductsPnL(req, res) {
