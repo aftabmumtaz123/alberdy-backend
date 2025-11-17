@@ -458,7 +458,7 @@ static async getTopCustomersPnL(req, res) {
                   '$customerCity',            // From order (always correct)
                   'N/A'
                 ]
-              }
+              },
           revenue: { $round: ['$totalRevenue', 2] },
           cost: { $round: ['$totalCost', 2] },
           profit: { $round: ['$totalProfit', 2] },
