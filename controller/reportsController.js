@@ -448,7 +448,7 @@ static async getTopCustomersPnL(req, res) {
     // Format for frontend
     const formatted = topCustomers.map(c => ({
       customer: c.customer,
-      region: c.region,
+      region: c.country,
       revenue: `${Number(c.revenue).toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
       profit: `${Number(c.profit).toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
       margin: c.margin,
