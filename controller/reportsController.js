@@ -443,9 +443,8 @@ static async getTopCustomersPnL(req, res) {
 
     const formatted = topCustomers.map(c => ({
       customer: c.customer,
-      region: c.region || 'N/A',
+      region: c.country || 'N/A',
       revenue: `${c.revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-      cost: `${c.cost.toLocaleString()}`,
       profit: `${c.profit.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
       margin: c.margin,
       orders: c.orders
@@ -511,7 +510,6 @@ static async getTopProductsPnL(req, res) {
           category: { $ifNull: ['$category.name', 'Uncategorized'] },
           units: '$totalUnits',
           revenue: { $round: ['$totalRevenue', 2] },
-          cost: 0,        // not tracked in Order → set later if needed
           profit: { $round: ['$totalRevenue', 2] },
           margin: 'N/A'
         }
