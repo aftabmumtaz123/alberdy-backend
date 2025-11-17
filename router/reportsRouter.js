@@ -12,5 +12,11 @@ router.get('/low-stock', ReportController.getLowStockProducts);
 router.get('/expired', ReportController.getExpiredProducts);
 router.get('/revenue-by-category', ReportController.getRevenueByCategory);
 
+
+// routes/reports.js
+router.get('/top-customers', ReportController.getTopCustomersPnL);
+router.get('/top-products', ReportController.getTopProductsPnL);
+
+
 module.exports = router;
 

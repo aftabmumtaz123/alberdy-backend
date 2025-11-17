@@ -283,8 +283,6 @@ static async getExpiredProducts(req, res) {
 }
 
 
-//I am running it again
-
  static async getRevenueByCategory(req, res) {
   try {
     const now = moment.tz('Asia/Karachi').set({ hour: 13, minute: 0, second: 0, millisecond: 0 });
@@ -380,6 +378,173 @@ static async getExpiredProducts(req, res) {
     res.status(500).json({ success: false, msg: 'Server error', details: error.message });
   }
 }
+
+
+static async getTopCustomersPnL(req, res) {
+  try {
+    const now = moment.tz('Asia/Karachi');
+    const [start] = ReportController.getDateRange('monthly', now); // Current month
+
+    const topCustomers = await Order.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: start },
+          status: 'delivered',
+          paymentStatus: 'paid'
+        }
+      },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$user',
+          totalRevenue: { $sum: '$items.total' },        // total = quantity × price (already calculated)
+          totalOrders: { $addToSet: '$_id' },            // unique orders
+          customerName: { $first: '$shippingAddress.fullName' }
+        }
+      },
+      {
+        $addFields: {
+          orderCount: { $size: '$totalOrders' }
+        }
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'userData'
+        }
+      },
+      { $unwind: { path: '$userData', preserveNullAndEmptyArrays: true } },
+
+      // Optional: Get cost price from Variant (if you have costPrice there)
+      // For now, assuming no cost → profit = 0, or use average margin later
+      {
+        $project: {
+          customer: {
+            $ifNull: [
+              '$userData.name',
+              '$customerName',
+              'Walk-in Customer'
+            ]
+          },
+          region: '$userData.region',
+          revenue: { $round: ['$totalRevenue', 2] },
+          // cost & profit will be 0 if not tracked
+          cost: 0,
+          profit: { $round: ['$totalRevenue', 2] }, // placeholder
+          margin: 'N/A',
+          orders: '$orderCount'
+        }
+      },
+      { $sort: { revenue: -1 } },
+      { $limit: 10 }
+    ]);
+
+    const formatted = topCustomers.map(c => ({
+      customer: c.customer,
+      region: c.region || 'N/A',
+      revenue: `${c.revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+      cost: `${c.cost.toLocaleString()}`,
+      profit: `${c.profit.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+      margin: c.margin,
+      orders: c.orders
+    }));
+
+    res.json({
+      success: true,
+      msg: "Top customers fetched successfully",
+      data: formatted
+    });
+
+  } catch (error) {
+    console.error('getTopCustomersPnL Error:', error);
+    res.status(500).json({ success: false, msg: error.message });
+  }
+}
+
+
+
+static async getTopProductsPnL(req, res) {
+  try {
+    const now = moment.tz('Asia/Karachi');
+    const [start] = ReportController.getDateRange('monthly', now);
+
+    const topProducts = await Order.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: start },
+          status: 'delivered',
+          paymentStatus: 'paid'
+        }
+      },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$items.product',
+          totalUnits: { $sum: '$items.quantity' },
+          totalRevenue: { $sum: '$items.total' },
+          productName: { $first: '$items.product' } // will populate later
+        }
+      },
+      {
+        $lookup: {
+          from: 'products',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'product'
+        }
+      },
+      { $unwind: '$product' },
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'product.category',
+          foreignField: '_id',
+          as: 'category'
+        }
+      },
+      { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          product: '$product.name',
+          category: { $ifNull: ['$category.name', 'Uncategorized'] },
+          units: '$totalUnits',
+          revenue: { $round: ['$totalRevenue', 2] },
+          cost: 0,        // not tracked in Order → set later if needed
+          profit: { $round: ['$totalRevenue', 2] },
+          margin: 'N/A'
+        }
+      },
+      { $sort: { revenue: -1 } },
+      { $limit: 10 }
+    ]);
+
+    const formatted = topProducts.map(p => ({
+      product: p.product,
+      category: p.category,
+      units: p.units,
+      revenue: `${p.revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+      cost: `${p.cost.toFixed(2)}`,
+      profit: `${p.profit.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+      margin: p.margin
+    }));
+
+    res.json({
+      success: true,
+      msg: "Top products fetched successfully",
+      data: formatted
+    });
+
+  } catch (error) {
+    console.error('getTopProductsPnL Error:', error);
+    res.status(500).json({ success: false, msg: error.message });
+  }
+}
+
+
+
+
 }
 
 
