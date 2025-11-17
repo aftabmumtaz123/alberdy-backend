@@ -206,7 +206,7 @@ static async calculateMostSoldPeriod(period, now) {
   static async getLowStockProducts(req, res) {
     try {
       const lowStock = await Variant.find({ stockQuantity: { $lt: 10, $gt: -1 } })
-        .populate('product', 'name')
+        .populate('product', 'name thumbnail')
         .select('sku stockQuantity image product')
         .sort({ stockQuantity: 1 })
         .limit(4);
@@ -215,7 +215,7 @@ static async calculateMostSoldPeriod(period, now) {
         name: `${v.product?.name || 'N/A'}`,
         sku: v.sku || `SKU-${String(v._id).slice(-4)}`,
         unitsLeft: v.stockQuantity,
-        image: v.image || null
+        image: v.product?.thumbnail || null,
       }));
 
       res.json({ success: true, msg: 'Fetched Successfully', data });
@@ -383,7 +383,7 @@ static async getExpiredProducts(req, res) {
 static async getTopCustomersPnL(req, res) {
   try {
     const now = moment.tz('Asia/Karachi');
-    const [start] = ReportController.getDateRange('monthly', now); // Current month
+    const [start] = ReportController.getDateRange('monthly', now);
 
     const topCustomers = await Order.aggregate([
       {
@@ -394,19 +394,23 @@ static async getTopCustomersPnL(req, res) {
         }
       },
       { $unwind: '$items' },
+
+      // Group by customer
       {
         $group: {
           _id: '$user',
-          totalRevenue: { $sum: '$items.total' },        // total = quantity × price (already calculated)
-          totalOrders: { $addToSet: '$_id' },            // unique orders
-          customerName: { $first: '$shippingAddress.fullName' }
+          totalRevenue: { $sum: '$items.total' },
+          orderIds: { $addToSet: '$_id' },
+          customerNameFromOrder: { $first: '$shippingAddress.fullName' }
         }
       },
       {
         $addFields: {
-          orderCount: { $size: '$totalOrders' }
+          orderCount: { $size: '$orderIds' }
         }
       },
+
+      // Populate user details
       {
         $lookup: {
           from: 'users',
@@ -417,35 +421,49 @@ static async getTopCustomersPnL(req, res) {
       },
       { $unwind: { path: '$userData', preserveNullAndEmptyArrays: true } },
 
-      // Optional: Get cost price from Variant (if you have costPrice there)
-      // For now, assuming no cost → profit = 0, or use average margin later
+      // FINAL PROJECT — NO MIXED INCLUSION/EXCLUSION!
       {
         $project: {
           customer: {
             $ifNull: [
               '$userData.name',
-              '$customerName',
+              '$customerNameFromOrder',
               'Walk-in Customer'
             ]
           },
-          region: '$userData.region',
+          region: { $ifNull: ['$userData.region', 'N/A'] },
           revenue: { $round: ['$totalRevenue', 2] },
-          // cost & profit will be 0 if not tracked
-          cost: 0,
-          profit: { $round: ['$totalRevenue', 2] }, // placeholder
+          cost: 0,                    // Will be removed in next stage
+          profit: { $round: ['$totalRevenue', 2] },  // placeholder until costPrice added
           margin: 'N/A',
           orders: '$orderCount'
         }
       },
+
+      // SECOND PROJECT: Remove 'cost' cleanly (this is allowed)
+      {
+        $project: {
+          cost: 0,                    // Now safe: we're only excluding
+          _id: 0,
+          customer: 1,
+          region: 1,
+          revenue: 1,
+          profit: 1,
+          margin: 1,
+          orders: 1
+        }
+      },
+
       { $sort: { revenue: -1 } },
       { $limit: 10 }
     ]);
 
+    // Format currency
     const formatted = topCustomers.map(c => ({
       customer: c.customer,
-      region: c.country || 'N/A',
-      revenue: `${c.revenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-      profit: `${c.profit.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+      region: c.region,
+      revenue: `${c.revenue.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
+      profit: `${c.profit.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
       margin: c.margin,
       orders: c.orders
     }));
@@ -458,10 +476,13 @@ static async getTopCustomersPnL(req, res) {
 
   } catch (error) {
     console.error('getTopCustomersPnL Error:', error);
-    res.status(500).json({ success: false, msg: error.message });
+    res.status(500).json({
+      success: false,
+      msg: 'Server error',
+      error: error.message
+    });
   }
 }
-
 
 
 static async getTopProductsPnL(req, res) {
