@@ -282,6 +282,9 @@ static async getExpiredProducts(req, res) {
   }
 }
 
+
+//I am running it again
+
  static async getRevenueByCategory(req, res) {
   try {
     const now = moment.tz('Asia/Karachi').set({ hour: 13, minute: 0, second: 0, millisecond: 0 });
