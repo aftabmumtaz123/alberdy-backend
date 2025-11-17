@@ -150,7 +150,7 @@ static async calculateMostSoldPeriod(period, now) {
       $project: {
         productName: '$product.name',
         category: { $ifNull: ['$category.name', 'Uncategorized'] },
-        image: { $ifNull: ['$variant.image', '$product.images.0'] },
+        image: { $ifNull: ['$product.thumbnail', '$product.images.0'] },
         sku: '$variant.sku',
         totalSold: 1,
         totalOrders: { $size: '$totalOrders' },
