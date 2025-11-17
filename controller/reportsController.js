@@ -380,7 +380,6 @@ static async getExpiredProducts(req, res) {
 }
 
 
-
 static async getTopCustomersPnL(req, res) {
   try {
     const now = moment.tz('Asia/Karachi');
@@ -396,7 +395,7 @@ static async getTopCustomersPnL(req, res) {
       },
       { $unwind: '$items' },
 
-      // Get purchasePrice from Variant
+      // Get cost price from Variant
       {
         $lookup: {
           from: 'variants',
@@ -407,6 +406,7 @@ static async getTopCustomersPnL(req, res) {
       },
       { $unwind: { path: '$variantData', preserveNullAndEmptyArrays: true } },
 
+      // GROUP BY CUSTOMER
       {
         $group: {
           _id: '$user',
@@ -417,10 +417,12 @@ static async getTopCustomersPnL(req, res) {
             }
           },
           orderIds: { $addToSet: '$_id' },
-          customerNameFromOrder: { $first: '$shippingAddress.fullName' }
+          customerNameFromOrder: { $first: '$shippingAddress.fullName' },
+          customerCity: { $first: '$shippingAddress.city' }   // ← THIS WAS MISSING!
         }
       },
 
+      // Calculate profit & margin
       {
         $addFields: {
           totalProfit: { $subtract: ['$totalRevenue', '$totalCost'] },
@@ -435,7 +437,7 @@ static async getTopCustomersPnL(req, res) {
         }
       },
 
-      // Get user details
+      // Get user profile data
       {
         $lookup: {
           from: 'users',
@@ -446,19 +448,19 @@ static async getTopCustomersPnL(req, res) {
       },
       { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
 
-      // Final projection
+      // FINAL OUTPUT
       {
         $project: {
           customer: {
             $ifNull: ['$user.name', '$customerNameFromOrder', 'Walk-in Customer']
           },
           region: {
-              $ifNull: [
-                  '$user.address.city',       // Profile (if filled)
-                  '$customerCity',            // From order (always correct)
-                  'N/A'
-                ]
-              },
+            $ifNull: [
+              '$user.address.city',     // From user profile (if set)
+              '$customerCity',          // ← Now exists! From order shipping address
+              'N/A'
+            ]
+          },
           revenue: { $round: ['$totalRevenue', 2] },
           cost: { $round: ['$totalCost', 2] },
           profit: { $round: ['$totalProfit', 2] },
@@ -471,9 +473,9 @@ static async getTopCustomersPnL(req, res) {
       { $limit: 10 }
     ]);
 
-    // Format numbers with AED and proper decimals
     const formatted = topCustomers.map(c => ({
       customer: c.customer,
+      region: c.region,
       revenue: `${c.revenue.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
       cost: `${c.cost.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
       profit: `${c.profit.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
@@ -488,7 +490,6 @@ static async getTopCustomersPnL(req, res) {
     res.status(500).json({ success: false, error: error.message });
   }
 }
-
 
 
 
