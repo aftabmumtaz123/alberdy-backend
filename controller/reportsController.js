@@ -269,7 +269,7 @@ static async getExpiredProducts(req, res) {
       return {
         productName: v.product?.name || 'Unknown Product',
         category: v.product?.category?.name || 'Uncategorized',
-        image: v.product?.name || 'Image not found',
+        image: v.product?.thumbnail || 'Image not found',
         expiryDate: expiry.format('YYYY-MM-DD'),
         status,
         statusType,  
