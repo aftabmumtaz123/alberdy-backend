@@ -453,7 +453,7 @@ static async getTopCustomersPnL(req, res) {
           customer: {
             $ifNull: ['$user.name', '$customerName', 'Walk-in Customer']
           },
-          region: { $ifNull: ['$user.region', 'N/A'] },
+          region: { $ifNull: ['$user.city', 'N/A'] },
           revenue: { $round: ['$totalRevenue', 2] },
           cost: { $round: ['$totalCost', 2] },
           profit: { $round: ['$totalProfit', 2] },
@@ -465,13 +465,15 @@ static async getTopCustomersPnL(req, res) {
       { $limit: 10 }
     ]);
 
+    const margin = revenue > 0 ? ((revenue - cost) / revenue) * 100 : 0;
+
     const formatted = topCustomers.map(c => ({
       customer: c.customer,
       region: c.region,
       revenue: `${c.revenue.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
       cost: `${c.cost.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
       profit: `${c.profit.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
-      margin: `${c.margin}%`,
+      margin: margin.toFixed(1) + '%',
       orders: c.orders
     }));
 
