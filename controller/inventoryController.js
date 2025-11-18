@@ -6,7 +6,7 @@ const mongoose = require('mongoose');
 // Helper: Create movement log (read-only)
 const createStockMovementLog = async (variant, change, type, reason, referenceId = null, user) => {
   const log = new StockMovement({
-    variant: variant._id,
+    variant: Variant._id,
     sku: variant.sku,
     previousQuantity: variant.stockQuantity - change,
     newQuantity: variant.stockQuantity,
