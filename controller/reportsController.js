@@ -395,27 +395,16 @@ static async getExpiredProducts(req, res) {
   }
 }
 
+
+
+
+// GET /api/reports/profit-loss   → Returns ALL-TIME Profit & Loss
 static async getProfitLossReport(req, res) {
   try {
-    let { startDate, endDate, period = 'custom' } = req.query;
-    const now = moment.tz('Asia/Karachi');
-
-    if (!startDate || !endDate) {
-      const range = ReportController.getDateRange(period === 'daily' ? 'daily' : 'monthly');
-      startDate = moment(range.start).format('YYYY-MM-DD');
-      endDate = moment(range.end).format('YYYY-MM-DD');
-    }
-
-    const start = moment.tz(startDate, 'Asia/Karachi').startOf('day').toDate();
-    const end = moment.tz(endDate, 'Asia/Karachi').endOf('day').toDate();
-
-    if (!moment(start).isValid() || !moment(end).isValid() || start > end) {
-      return res.status(400).json({ success: false, msg: 'Invalid date range' });
-    }
-
+    // No date filtering — all delivered orders ever
     const [salesResult, expensesResult] = await Promise.all([
       Order.aggregate([
-        { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
+        { $match: { status: 'delivered' } }, // ALL delivered orders (lifetime)
         { $unwind: '$items' },
         {
           $lookup: {
@@ -443,17 +432,10 @@ static async getProfitLossReport(req, res) {
       ]),
 
       Expense.aggregate([
-        { $match: { expenseDate: { $gte: start, $lte: end } } },
-        {
-          $group: {
-            _id: '$category',
-            amount: { $sum: '$amount' }
-          }
-        }
+        { $group: { _id: '$category', amount: { $sum: '$amount' } } }
       ])
     ]);
 
-    
     const sales = salesResult[0] || { totalSales: 0, totalDiscounts: 0, totalRefunds: 0, totalCOGS: 0, orderCount: 0 };
     const expenses = expensesResult || [];
 
@@ -467,23 +449,22 @@ static async getProfitLossReport(req, res) {
     const cogsPercentage = netRevenue > 0 ? (sales.totalCOGS / netRevenue) * 100 : 0;
     const expensePercentage = netRevenue > 0 ? (totalOperatingExpenses / netRevenue) * 100 : 0;
 
-    // Format expenses breakdown like your dashboard
     const expenseBreakdown = {
-      rent: expenses.find(e => e._id === 'Rent')?.amount || 0,
-      salaries: expenses.find(e => e._id === 'Salaries')?.amount || 0,
-      marketing: expenses.find(e => e._id === 'Marketing')?.amount || 0,
-      utilities: expenses.find(e => e._id === 'Utilities')?.amount || 0,
-      insurance: expenses.find(e => e._id === 'Insurance')?.amount || 0,
-      other: expenses.filter(e => !['Rent','Salaries','Marketing','Utilities','Insurance'].includes(e._id))
+      rent: expenses.find(e => e._id === 'rent')?.amount || 0,
+      salaries: expenses.find(e => e._id === 'salaries')?.amount || 0,
+      marketing: expenses.find(e => e._id === 'marketing')?.amount || 0,
+      utilities: expenses.find(e => e._id === 'utilities')?.amount || 0,
+      insurance: expenses.find(e => e._id === 'insurance')?.amount || 0,
+      other: expenses.filter(e => !['rent','salaries','marketing','utilities','insurance'].includes(e._id))
                      .reduce((s, e) => s + e.amount, 0)
     };
 
     res.json({
       success: true,
       period: {
-        startDate: moment(start).format('YYYY-MM-DD'),
-        endDate: moment(end).format('YYYY-MM-DD'),
-        label: 'Monthly'
+        label: "All Time (Lifetime)",
+        startDate: null,
+        endDate: null
       },
       cards: {
         totalSales: Number(sales.totalSales.toFixed(2)),
@@ -519,14 +500,23 @@ static async getProfitLossReport(req, res) {
         operatingExpenses: Number(totalOperatingExpenses.toFixed(2)),
         operatingExpenseRatio: `${expensePercentage.toFixed(2)}%`,
         profitabilityRatio: `${netMargin.toFixed(2)}%`
+      },
+      summary: {
+        totalOrders: sales.orderCount,
+        averageOrderValue: sales.orderCount > 0 ? Number((sales.totalSales / sales.orderCount).toFixed(2)) : 0
       }
     });
 
   } catch (error) {
-    console.error('Profit & Loss Error:', error);
+    console.error('All-Time Profit & Loss Error:', error);
     res.status(500).json({ success: false, msg: 'Server error', error: error.message });
   }
 }
+
+
+
+
+
   // ─────────────────────── TOP CUSTOMERS P&L ───────────────────────
   static async getTopCustomersPnL(req, res) {
     try {
