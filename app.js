@@ -78,6 +78,9 @@ app.use('/api/suppliers', require('./router/supplierRouter'));
 app.use('/api/sales', require('./router/saleRouter'));
 app.use('/api/supllier/payments', require('./router/paymentRoutes'))
 app.use('/api/customer-payments', require('./router/customerPaymentRoutes'));
+app.use('/api/inventory', require('./router/inventoryRoutes'));
+
+
 
 app.get("/",(req,res)=>{
   res.json({Message: "API's are running well bro!!"})
