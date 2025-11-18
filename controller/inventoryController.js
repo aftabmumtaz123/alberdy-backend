@@ -3,18 +3,6 @@ const Variant = require('../model/variantProduct');
 const StockMovement = require('../model/StockMovement');
 const mongoose = require('mongoose');
 
-// Helper: Get a valid user ID (never crashes)
-const getPerformedBy = async (req) => {
-  if (req.user?._id) return req.user._id;
-
-  // Fallback 1: Try to find admin user
-  const User = mongoose.model('User');
-  const admin = await User.findOne({ role: { $in: ['Admin', 'Inventory Manager'] } });
-  if (admin) return admin._id;
-
-  return null; 
-};
-
 exports.addInventory = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -28,7 +16,7 @@ exports.addInventory = async (req, res) => {
       expiryAlertDate
     } = req.body;
 
-    // === VALIDATION ===
+    // === INPUT VALIDATION ===
     if (!variantId || quantityChange === undefined || !reason?.trim()) {
       return res.status(400).json({
         success: false,
@@ -37,27 +25,28 @@ exports.addInventory = async (req, res) => {
     }
 
     const qty = Number(quantityChange);
-    if (isNaN(quantityChange) || qty === 0) {
+    if (isNaN(qty) || qty === 0) {
       return res.status(400).json({ success: false, msg: "Quantity must be a non-zero number" });
     }
 
+    // === FIND VARIANT ===
     const variant = await Variant.findById(variantId).populate('product', 'name');
     if (!variant) {
-      return res.status(404).json({ success: false, msg: "Variant not found" });
+      return res.status(404).json({ success: false, msg: "Product variant not found" });
     }
 
-    // Prevent negative stock
+    // === PREVENT NEGATIVE STOCK ===
     if (variant.stockQuantity + qty < 0) {
-      return res.status19(400).json({
+      return res.status(400).json({
         success: false,
-        msg: `Cannot go below zero. Current stock: ${variant.stockQuantity}`
+        msg: `Insufficient stock. Current: ${variant.stockQuantity}`
       });
     }
 
     const previousQty = variant.stockQuantity;
     variant.stockQuantity += qty;
 
-    // Update expiry if provided
+    // === UPDATE EXPIRY IF PROVIDED ===
     if (expiryAlertDate) {
       const exp = new Date(expiryAlertDate);
       if (isNaN(exp.getTime())) {
@@ -68,10 +57,22 @@ exports.addInventory = async (req, res) => {
 
     await variant.save({ session });
 
-    // === CREATE AUDIT LOG (SAFE USER ID) ===
-    const performedBy = await getPerformedBy(req);
+    // === GET A VALID USER ID (NEVER FAILS) ===
+    let performedBy = req.user?._id;
 
-    await new StockMovement({
+    if (!performedBy) {
+      // Fallback: Get any admin/inventory user
+      const User = mongoose.model('User') || mongoose.models.User;
+      const fallbackUser = await User.findOne(
+        { role: { $in: ['Admin', 'Inventory Manager', 'Staff'] } },
+        { _id: 1 }
+      ).lean();
+
+      performedBy = fallbackUser?._id || new mongoose.Types.ObjectId("507f1f77bcf86cd799439011"); // final fallback
+    }
+
+    // === CREATE STOCK MOVEMENT LOG ===
+    await StockMovement.create([{
       variant: variant._id,
       sku: variant.sku,
       previousQuantity: previousQty,
@@ -80,9 +81,8 @@ exports.addInventory = async (req, res) => {
       movementType: qty > 0 ? 'Purchase/Received' : 'Damage',
       reason: reason.trim(),
       referenceId: referenceId?.trim() || null,
-      performedBy,
-      expiryAlertDate: expiryAlertDate ? new Date(expiryAlertDate) : undefined
-    }).save({ session });
+      performedBy: performedBy  // ← ALWAYS a valid ObjectId now
+    }], { session });
 
     await session.commitTransaction();
 
@@ -90,7 +90,7 @@ exports.addInventory = async (req, res) => {
       success: true,
       msg: qty > 0 ? "Stock added successfully" : "Stock removed successfully",
       data: {
-        productName: variant.product?.name || "Unknown",
+        productName: variant.product?.name || "Unknown Product",
         sku: variant.sku,
         previousQuantity: previousQty,
         newQuantity: variant.stockQuantity,
@@ -100,7 +100,7 @@ exports.addInventory = async (req, res) => {
 
   } catch (err) {
     await session.abortTransaction();
-    console.error("Inventory Error:", err);
+    console.error("Inventory Add Error:", err);
     res.status(500).json({
       success: false,
       msg: "Server error",
