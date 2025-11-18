@@ -391,100 +391,137 @@ static async getExpiredProducts(req, res) {
   }
 }
 
+static async getProfitLossReport(req, res) {
+  try {
+    let { startDate, endDate, period = 'custom' } = req.query;
+    const now = moment.tz('Asia/Karachi');
 
-// ─────────────────────── PROFIT & LOSS ───────────────────────
-  static async getProfitLossReport(req, res) {
-    try {
-      let { startDate, endDate, period = 'custom' } = req.query;
-
-      // Default range
-      if (!startDate || !endDate) {
-        const range = ReportController.getDateRange(
-          period === 'daily' ? 'daily' : period === 'yearly' ? 'monthly' : 'monthly'
-        );
-        startDate = moment(range.start).format('YYYY-MM-DD');
-        endDate   = moment(range.end).format('YYYY-MM-DD');
-      }
-
-      const start = moment.tz(startDate, 'Asia/Karachi').startOf('day').toDate();
-      const end   = moment.tz(endDate,   'Asia/Karachi').endOf('day').toDate();
-
-      if (!moment(start).isValid() || !moment(end).isValid() || start > end) {
-        return res.status(400).json({ success: false, msg: 'Invalid date range' });
-      }
-
-      const [salesResult, expenseResult] = await Promise.all([
-        Order.aggregate([
-          { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
-          { $unwind: '$items' },
-          {
-            $lookup: {
-              from: 'variantproducts',
-              localField: 'items.variant',
-              foreignField: '_id',
-              as: 'variant'
-            }
-          },
-          { $unwind: { path: '$variant', preserveNullAndEmptyArrays: true } },
-          {
-            $group: {
-              _id: null,
-              totalSales:     { $sum: '$total' },
-              totalDiscounts: { $sum: { $ifNull: ['$discount', 0] } },
-              totalRefunds:   { $sum: { $cond: [{ $eq: ['$paymentStatus', 'refunded'] }, '$total', 0] } },
-              totalCOGS: {
-                $sum: {
-                  $multiply: ['$items.quantity', { $ifNull: ['$variant.purchasePrice', 0] }]
-                }
-              },
-              orderCount: { $sum: 1 }
-            }
-          }
-        ]),
-
-        Expense.aggregate([
-          { $match: { expenseDate: { $gte: start, $lte: end } } },
-          { $group: { _id: null, totalExpenses: { $sum: '$amount' } } }
-        ])
-      ]);
-
-      const sales    = salesResult[0] || { totalSales:0, totalDiscounts:0, totalRefunds:0, totalCOGS:0, orderCount:0 };
-      const expenses = expenseResult[0]?.totalExpenses || 0;
-
-      const netRevenue   = sales.totalSales - sales.totalDiscounts - sales.totalRefunds;
-      const grossProfit  = netRevenue - sales.totalCOGS;
-      const netProfit    = grossProfit - expenses;
-
-      res.json({
-        success: true,
-        period: {
-          startDate: moment(start).format('YYYY-MM-DD'),
-          endDate:   moment(end).format('YYYY-MM-DD'),
-          label: period === 'custom' ? 'Custom Range' : period.charAt(0).toUpperCase() + period.slice(1)
-        },
-        summary: {
-          totalSales:        Number(sales.totalSales.toFixed(2)),
-          discounts:         Number(sales.totalDiscounts.toFixed(2)),
-          refunds:           Number(sales.totalRefunds.toFixed(2)),
-          netRevenue:        Number(netRevenue.toFixed(2)),
-          cogs:              Number(sales.totalCOGS.toFixed(2)),
-          grossProfit:       Number(grossProfit.toFixed(2)),
-          operatingExpenses: Number(expenses.toFixed(2)),
-          netProfit:         Number(netProfit.toFixed(2)),
-          profitMargin: sales.totalSales > 0 ? Number((netProfit / sales.totalSales * 100).toFixed(2)) : 0
-        },
-        breakdown: {
-          totalOrders: sales.orderCount,
-          averageOrderValue: sales.orderCount > 0 ? Number((sales.totalSales / sales.orderCount).toFixed(2)) : 0
-        }
-      });
-
-    } catch (error) {
-      console.error('Profit & Loss Error:', error);
-      res.status(500).json({ success: false, msg: 'Server error', error: error.message });
+    if (!startDate || !endDate) {
+      const range = ReportController.getDateRange(period === 'daily' ? 'daily' : 'monthly');
+      startDate = moment(range.start).format('YYYY-MM-DD');
+      endDate = moment(range.end).format('YYYY-MM-DD');
     }
-  }
 
+    const start = moment.tz(startDate, 'Asia/Karachi').startOf('day').toDate();
+    const end = moment.tz(endDate, 'Asia/Karachi').endOf('day').toDate();
+
+    if (!moment(start).isValid() || !moment(end).isValid() || start > end) {
+      return res.status(400).json({ success: false, msg: 'Invalid date range' });
+    }
+
+    const [salesResult, expensesResult] = await Promise.all([
+      Order.aggregate([
+        { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
+        { $unwind: '$items' },
+        {
+          $lookup: {
+            from: 'variantproducts',
+            localField: 'items.variant',
+            foreignField: '_id',
+            as: 'variant'
+          }
+        },
+        { $unwind: { path: '$variant', preserveNullAndEmptyArrays: true } },
+        {
+          $group: {
+            _id: null,
+            totalSales: { $sum: '$total' },
+            totalDiscounts: { $sum: { $ifNull: ['$discount', 0] } },
+            totalRefunds: { $sum: { $cond: [{ $eq: ['$paymentStatus', 'refunded'] }, '$total', 0] } },
+            totalCOGS: {
+              $sum: {
+                $multiply: ['$items.quantity', { $ifNull: ['$variant.purchasePrice', 0] }]
+              }
+            },
+            orderCount: { $sum: 1 }
+          }
+        }
+      ]),
+
+      Expense.aggregate([
+        { $match: { expenseDate: { $gte: start, $lte: end } } },
+        {
+          $group: {
+            _id: '$category',
+            amount: { $sum: '$amount' }
+          }
+        }
+      ])
+    ]);
+
+    const sales = salesResult[0] || { totalSales: 0, totalDiscounts: 0, totalRefunds: 0, totalCOGS: 0, orderCount: 0 };
+    const expenses = expensesResult || [];
+
+    const netRevenue = sales.totalSales - sales.totalDiscounts - sales.totalRefunds;
+    const grossProfit = netRevenue - sales.totalCOGS;
+    const totalOperatingExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+    const netProfit = grossProfit - totalOperatingExpenses;
+
+    const grossMargin = sales.totalSales > 0 ? (grossProfit / sales.totalSales) * 100 : 0;
+    const netMargin = sales.totalSales > 0 ? (netProfit / sales.totalSales) * 100 : 0;
+    const cogsPercentage = netRevenue > 0 ? (sales.totalCOGS / netRevenue) * 100 : 0;
+    const expensePercentage = netRevenue > 0 ? (totalOperatingExpenses / netRevenue) * 100 : 0;
+
+    // Format expenses breakdown like your dashboard
+    const expenseBreakdown = {
+      rent: expenses.find(e => e._id === 'Rent')?.amount || 0,
+      salaries: expenses.find(e => e._id === 'Salaries')?.amount || 0,
+      marketing: expenses.find(e => e._id === 'Marketing')?.amount || 0,
+      utilities: expenses.find(e => e._id === 'Utilities')?.amount || 0,
+      insurance: expenses.find(e => e._id === 'Insurance')?.amount || 0,
+      other: expenses.filter(e => !['Rent','Salaries','Marketing','Utilities','Insurance'].includes(e._id))
+                     .reduce((s, e) => s + e.amount, 0)
+    };
+
+    res.json({
+      success: true,
+      period: {
+        startDate: moment(start).format('YYYY-MM-DD'),
+        endDate: moment(end).format('YYYY-MM-DD'),
+        label: 'Monthly'
+      },
+      cards: {
+        totalSales: Number(sales.totalSales.toFixed(2)),
+        netRevenue: Number(netRevenue.toFixed(2)),
+        grossProfit: Number(grossProfit.toFixed(2)),
+        netProfit: Number(netProfit.toFixed(2)),
+        grossProfitMargin: Number(grossMargin.toFixed(2)),
+        netProfitMargin: Number(netMargin.toFixed(2))
+      },
+      incomeStatement: {
+        revenue: Number(sales.totalSales.toFixed(2)),
+        lessDiscounts: Number(sales.totalDiscounts.toFixed(2)),
+        lessRefunds: Number(sales.totalRefunds.toFixed(2)),
+        netRevenue: Number(netRevenue.toFixed(2)),
+        cogs: Number(sales.totalCOGS.toFixed(2)),
+        grossProfit: Number(grossProfit.toFixed(2)),
+        grossProfitMargin: `${grossMargin.toFixed(2)}%`,
+        operatingExpenses: {
+          rent: Number(expenseBreakdown.rent.toFixed(2)),
+          salaries: Number(expenseBreakdown.salaries.toFixed(2)),
+          marketing: Number(expenseBreakdown.marketing.toFixed(2)),
+          utilities: Number(expenseBreakdown.utilities.toFixed(2)),
+          insurance: Number(expenseBreakdown.insurance.toFixed(2)),
+          other: Number(expenseBreakdown.other.toFixed(2)),
+          total: Number(totalOperatingExpenses.toFixed(2))
+        },
+        netProfit: Number(netProfit.toFixed(2)),
+        netProfitMargin: `${netMargin.toFixed(2)}%`
+      },
+      ratios: {
+        costOfGoodsSold: Number(sales.totalCOGS.toFixed(2)),
+        cogsPercentage: `${cogsPercentage.toFixed(2)}%`,
+        operatingExpenses: Number(totalOperatingExpenses.toFixed(2)),
+        operatingExpenseRatio: `${expensePercentage.toFixed(2)}%`,
+        profitabilityRatio: `${netMargin.toFixed(2)}%`
+      }
+    });
+
+  } catch (error) {
+    console.error('Profit & Loss Error:', error);
+    res.status(500).json({ success: false, msg: 'Server error', error: error.message });
+  }
+}
   // ─────────────────────── TOP CUSTOMERS P&L ───────────────────────
   static async getTopCustomersPnL(req, res) {
     try {
