@@ -1,43 +1,32 @@
-
-require('moment-timezone');
-const moment = require('moment');
-moment.tz.setDefault('Asia/Karachi');  
-
-const Order   = require('../model/Order');
-const Variant = require('../model/variantProduct');
-const Expense = require('../model/Expense');
+const moment = require('moment-timezone');
+const Order = require('../model/Order');
 const Product = require('../model/Product');
+const Variant = require('../model/variantProduct');
 const Category = require('../model/Category');
 const mongoose = require('mongoose');
 
-
-
 class ReportController {
-  static getDateRange(period, now = moment()) {
-  const current = now.clone().set({ hour: 13, minute: 0, second: 0, millisecond: 0 });
+  static getDateRange(period, now) {
+    let start, end, prevStart, prevEnd;
 
-  let start, end, prevStart, prevEnd;
-
-  if (period === 'daily') {
-    start     = current.clone().startOf('day').toDate();
-    end       = current.clone().endOf('day').toDate();
-    prevStart = current.clone().subtract(1, 'day').startOf('day').toDate();
-    prevEnd   = current.clone().subtract(1, 'day').endOf('day').toDate();
-  } else if (period === 'weekly') {
-    start     = current.clone().startOf('week').toDate();
-    end       = current.clone().endOf('week').toDate();
-    prevStart = current.clone().subtract(1, 'week').startOf('week').toDate();
-    prevEnd   = current.clone().subtract(1, 'week').endOf('week').toDate();
-  } else {
-    start     = current.clone().startOf('month').toDate();
-    end       = current.clone().endOf('month').toDate();
-    prevStart = current.clone().subtract(1, 'month').startOf('month').toDate();
-    prevEnd   = current.clone().subtract(1, 'month').endOf('month').toDate();
+    if (period === 'daily') {
+      start = now.startOf('day').toDate();
+      end = now.endOf('day').toDate();
+      prevStart = moment(start).subtract(1, 'day').startOf('day').toDate();
+      prevEnd = moment(start).subtract(1, 'day').endOf('day').toDate();
+    } else if (period === 'weekly') {
+      start = now.startOf('week').toDate();
+      end = now.endOf('week').toDate();
+      prevStart = moment(start).subtract(1, 'week').startOf('week').toDate();
+      prevEnd = moment(start).subtract(1, 'week').endOf('week').toDate();
+    } else {
+      start = now.startOf('month').toDate();
+      end = now.endOf('month').toDate();
+      prevStart = moment(start).subtract(1, 'month').startOf('month').toDate();
+      prevEnd = moment(start).subtract(1, 'month').endOf('month').toDate();
+    }
+    return [start, end, prevStart, prevEnd];
   }
-
-  return [start, end, prevStart, prevEnd];
-}
-
 
   static async getSalesByPeriods(req, res) {
     try {
@@ -62,17 +51,16 @@ class ReportController {
   }
 
   static async calculateSalesPeriod(period, now) {
-    const [start, end, prevStart, prevEnd] = ReportController.getDateRange(period, moment(now));
-
+const [start, end, prevStart, prevEnd] = ReportController.getDateRange(period, now.clone());
 
 
     const [currentRevenue, prevRevenue, totalOrders] = await Promise.all([
       Order.aggregate([
-        { $match: { createdAt: { $gte: start, $lte: end }, status: 'Delivered' } },
+        { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
         { $group: { _id: null, total: { $sum: '$total' } } }
       ]).then(r => r[0]?.total || 0),
       Order.aggregate([
-        { $match: { createdAt: { $gte: prevStart, $lte: prevEnd }, status: 'Delivered' } },
+        { $match: { createdAt: { $gte: prevStart, $lte: prevEnd }, status: 'delivered' } },
         { $group: { _id: null, total: { $sum: '$total' } } }
       ]).then(r => r[0]?.total || 0),
       Order.countDocuments({ createdAt: { $gte: start, $lte: end } })
@@ -116,12 +104,10 @@ class ReportController {
   }
 
 static async calculateMostSoldPeriod(period, now) {
-  const [start, end] = ReportController.getDateRange(period, moment(now));
-
-
+  const [start, end] = ReportController.getDateRange(period, now.clone());
 
   const mostSold = await Order.aggregate([
-    { $match: { createdAt: { $gte: start, $lte: end }, status: 'Delivered' } },
+    { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
     { $unwind: '$items' },
     {
       $group: {
@@ -195,8 +181,7 @@ static async calculateMostSoldPeriod(period, now) {
     try {
       const now = moment.tz('Asia/Karachi').set({ hour: 13, minute: 0, second: 0, millisecond: 0 });
 
-      const [start, end] = ReportController.getDateRange('monthly', moment(now));
-
+      const [start, end] = ReportController.getDateRange('monthly', now);
 
       const ordersAgg = await Order.aggregate([
         { $match: { createdAt: { $gte: start, $lte: end } } },
@@ -301,11 +286,10 @@ static async getExpiredProducts(req, res) {
  static async getRevenueByCategory(req, res) {
   try {
     const now = moment.tz('Asia/Karachi').set({ hour: 13, minute: 0, second: 0, millisecond: 0 });
-    const [start, end, prevStart, prevEnd] = ReportController.getDateRange('monthly', moment(now));
-
+    const [start, end, prevStart, prevEnd] = ReportController.getDateRange('monthly', now);
 
     const pipeline = [
-      { $match: { createdAt: { $gte: start, $lte: end }, status: 'Delivered' } },
+      { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
       { $unwind: '$items' },
       {
         $lookup: {
@@ -395,247 +379,227 @@ static async getExpiredProducts(req, res) {
   }
 }
 
-// ALL-TIME PROFIT & LOSS — FIXED & WORKING
-  static async getProfitLossReport(req, res) {
-    try {
-      const [salesResult, expensesResult] = await Promise.all([
-        Order.aggregate([
-          { $match: { status: 'delivered' } },
-          { $unwind: '$items' },
-          {
-            $lookup: {
-              from: 'variantproducts',
-              localField: 'items.variant',
-              foreignField: '_id',
-              as: 'variant'
-            }
-          },
-          { $unwind: { path: '$variant', preserveNullAndEmptyArrays: true } },
-          {
-            $group: {
-              _id: null,
-              totalSales: { $sum: '$total' },
-              totalDiscounts: { $sum: { $ifNull: ['$discount', 0] } },
-              totalRefunds: { $sum: { $cond: [{ $eq: ['$paymentStatus', 'refunded'] }, '$total', 0] } },
-              totalCOGS: {
-                $sum: { $multiply: ['$items.quantity', { $ifNull: ['$variant.purchasePrice', 0] }] }
-              },
-              orderCount: { $sum: 1 }
-            }
-          }
-        ]),
-        Expense.aggregate([
-          { $group: { _id: '$category', amount: { $sum: '$amount' } } }
-        ])
-      ]);
 
-      const sales = salesResult[0] || { totalSales: 0, totalDiscounts: 0, totalRefunds: 0, totalCOGS: 0, orderCount: 0 };
-      const expenses = expensesResult || [];
+static async getTopCustomersPnL(req, res) {
+  try {
+    const now = moment.tz('Asia/Karachi');
+    const [start] = ReportController.getDateRange('monthly', now);
 
-      const netRevenue = sales.totalSales - sales.totalDiscounts - sales.totalRefunds;
-      const grossProfit = netRevenue - sales.totalCOGS;
-      const totalOperatingExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
-      const netProfit = grossProfit - totalOperatingExpenses;
-
-      const grossMargin = sales.totalSales > 0 ? (grossProfit / sales.totalSales) * 100 : 0;
-      const netMargin = sales.totalSales > 0 ? (netProfit / sales.totalSales) * 100 : 0;
-      const cogsPercentage = netRevenue > 0 ? (sales.totalCOGS / netRevenue) * 100 : 0;
-      const expensePercentage = netRevenue > 0 ? (totalOperatingExpenses / netRevenue) * 100 : 0;
-
-      const expenseBreakdown = {
-        rent: expenses.find(e => e._id === 'Rent')?.amount || 0,
-        salaries: expenses.find(e => e._id === 'Salaries')?.amount || 0,
-        marketing: expenses.find(e => e._id === 'Marketing')?.amount || 0,
-        utilities: expenses.find(e => e._id === 'Utilities')?.amount || 0,
-        insurance: expenses.find(e => e._id === 'Insurance')?.amount || 0,
-        other: expenses.filter(e => !['Rent','Salaries','Marketing','Utilities','Insurance'].includes(e._id))
-                       .reduce((s, e) => s + e.amount, 0)
-      };
-
-      res.json({
-        success: true,
-        period: { label: "All Time (Lifetime)", startDate: null, endDate: null },
-        cards: {
-          totalSales: Number(sales.totalSales.toFixed(2)),
-          netRevenue: Number(netRevenue.toFixed(2)),
-          grossProfit: Number(grossProfit.toFixed(2)),
-          netProfit: Number(netProfit.toFixed(2)),
-          grossProfitMargin: Number(grossMargin.toFixed(2)),
-          netProfitMargin: Number(netMargin.toFixed(2))
-        },
-        incomeStatement: {
-          revenue: Number(sales.totalSales.toFixed(2)),
-          lessDiscounts: Number(sales.totalDiscounts.toFixed(2)),
-          lessRefunds: Number(sales.totalRefunds.toFixed(2)),
-          netRevenue: Number(netRevenue.toFixed(2)),
-          cogs: Number(sales.totalCOGS.toFixed(2)),
-          grossProfit: Number(grossProfit.toFixed(2)),
-          grossProfitMargin: `${grossMargin.toFixed(2)}%`,
-          operatingExpenses: {
-            rent: Number(expenseBreakdown.rent.toFixed(2)),
-            salaries: Number(expenseBreakdown.salaries.toFixed(2)),
-            marketing: Number(expenseBreakdown.marketing.toFixed(2)),
-            utilities: Number(expenseBreakdown.utilities.toFixed(2)),
-            insurance: Number(expenseBreakdown.insurance.toFixed(2)),
-            other: Number(expenseBreakdown.other.toFixed(2)),
-            total: Number(totalOperatingExpenses.toFixed(2))
-          },
-          netProfit: Number(netProfit.toFixed(2)),
-          netProfitMargin: `${netMargin.toFixed(2)}%`
-        },
-        ratios: {
-          costOfGoodsSold: Number(sales.totalCOGS.toFixed(2)),
-          cogsPercentage: `${cogsPercentage.toFixed(2)}%`,
-          operatingExpenses: Number(totalOperatingExpenses.toFixed(2)),
-          operatingExpenseRatio: `${expensePercentage.toFixed(2)}%`,
-          profitabilityRatio: `${netMargin.toFixed(2)}%`
-        },
-        summary: {
-          totalOrders: sales.orderCount,
-          averageOrderValue: sales.orderCount > 0 ? Number((sales.totalSales / sales.orderCount).toFixed(2)) : 0
+    const topCustomers = await Order.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: start },
+          status: 'delivered',
+          paymentStatus: 'paid'
         }
-      });
-    } catch (error) {
-      console.error('All-Time Profit & Loss Error:', error);
-      res.status(500).json({ success: false, msg: 'Server error', error: error.message });
-    }
+      },
+      { $unwind: '$items' },
+
+      // Get cost price from Variant
+      {
+        $lookup: {
+          from: 'variants',
+          localField: 'items.variant',
+          foreignField: '_id',
+          as: 'variantData'
+        }
+      },
+      { $unwind: { path: '$variantData', preserveNullAndEmptyArrays: true } },
+
+      // GROUP BY CUSTOMER
+      {
+        $group: {
+          _id: '$user',
+          totalRevenue: { $sum: '$items.total' },
+          totalCost: {
+            $sum: {
+              $multiply: ['$items.quantity', { $ifNull: ['$variantData.purchasePrice', 0] }]
+            }
+          },
+          orderIds: { $addToSet: '$_id' },
+          customerNameFromOrder: { $first: '$shippingAddress.fullName' },
+          customerCity: { $first: '$shippingAddress.city' }   // ← THIS WAS MISSING!
+        }
+      },
+
+      // Calculate profit & margin
+      {
+        $addFields: {
+          totalProfit: { $subtract: ['$totalRevenue', '$totalCost'] },
+          orderCount: { $size: '$orderIds' },
+          margin: {
+            $cond: [
+              { $gt: ['$totalRevenue', 0] },
+              { $round: [{ $multiply: [{ $divide: [{ $subtract: ['$totalRevenue', '$totalCost'] }, '$totalRevenue'] }, 100] }, 1] },
+              0
+            ]
+          }
+        }
+      },
+
+      // Get user profile data
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+
+      // FINAL OUTPUT
+      {
+        $project: {
+          customer: {
+            $ifNull: ['$user.name', '$customerNameFromOrder', 'Walk-in Customer']
+          },
+          region: {
+            $ifNull: [
+              '$user.address.city',     // From user profile (if set)
+              '$customerCity',          // ← Now exists! From order shipping address
+              'N/A'
+            ]
+          },
+          revenue: { $round: ['$totalRevenue', 2] },
+          cost: { $round: ['$totalCost', 2] },
+          profit: { $round: ['$totalProfit', 2] },
+          margin: '$margin',
+          orders: '$orderCount'
+        }
+      },
+
+      { $sort: { revenue: -1 } },
+      { $limit: 10 }
+    ]);
+
+    const formatted = topCustomers.map(c => ({
+      customer: c.customer,
+      region: c.region,
+      revenue: `${c.revenue.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
+      cost: `${c.cost.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
+      profit: `${c.profit.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
+      margin: `${c.margin}%`,
+      orders: c.orders
+    }));
+
+    res.json({ success: true, data: formatted });
+
+  } catch (error) {
+    console.error('getTopCustomersPnL Error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
+}
 
-  static async getTopCustomersPnL(req, res) {
-    try {
-      const result = await Order.aggregate([
-        { $match: { status: 'delivered' } }, // All-time
-        { $unwind: '$items' },
-        {
-          $lookup: {
-            from: 'Variant',
-            localField: 'items.variant',
-            foreignField: '_id',
-            as: 'variant'
-          }
-        },
-        { $unwind: { path: '$variant', preserveNullAndEmptyArrays: true } },
-        {
-          $group: {
-            _id: '$user',
-            revenue: { $sum: '$items.total' },
-            cost: { $sum: { $multiply: ['$items.quantity', { $ifNull: ['$variant.purchasePrice', 0] }] } },
-            orders: { $addToSet: '$_id' },
-            name: { $first: '$shippingAddress.fullName' },
-            city: { $first: '$shippingAddress.city' }
-          }
-        },
-        { $addFields: { profit: { $subtract: ['$revenue', '$cost'] }, orderCount: { $size: '$orders' } } },
-        { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
-        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
-        {
-          $project: {
-            customer: { $ifNull: ['$user.name', '$name', 'Walk-in Customer'] },
-            region: { $ifNull: ['$user.address.city', '$city', 'N/A'] },
-            revenue: { $round: ['$revenue', 2] },
-            cost: { $round: ['$cost', 2] },
-            profit: { $round: ['$profit', 2] },
-            margin: {
-              $cond: [
-                { $gt: ['$revenue', 0] },
-                { $round: [{ $multiply: [{ $divide: ['$profit', '$revenue'] }, 100] }, 1] },
-                0
-              ]
-            },
-            orders: '$orderCount'
-          }
-        },
-        { $sort: { revenue: -1 } },
-        { $limit: 10 }
-      ]);
 
-      const formatted = result.map(c => ({
-        customer: c.customer,
-        region: c.region,
-        revenue: c.revenue.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-        cost: c.cost.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-        profit: c.profit.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-        margin: `${c.margin}%`,
-        orders: c.orders
-      }));
 
-      res.json({ success: true, data: formatted });
-    } catch (error) {
-      console.error('Top Customers Error:', error);
-      res.status(500).json({ success: false, error: error.message });
-    }
-  }
+static async getTopProductsPnL(req, res) {
+  try {
+    const now = moment.tz('Asia/Karachi');
+    const [start] = ReportController.getDateRange('monthly', now);
 
-  // TOP PRODUCTS — NOW ALL-TIME (LIFETIME) — FIXED & WORKING
-  static async getTopProductsPnL(req, res) {
-    try {
-      const result = await Order.aggregate([
-        { $match: { status: 'delivered' } }, // All-time
-        { $unwind: '$items' },
-        {
-          $lookup: {
-            from: 'variantproducts',
-            localField: 'items.variant',
-            foreignField: '_id',
-            as: 'variant'
-          }
-        },
-        { $unwind: { path: '$variant', preserveNullAndEmptyArrays: true } },
-        {
-          $group: {
-            _id: '$items.product',
-            units: { $sum: '$items.quantity' },
-            revenue: { $sum: '$items.total' },
-            cost: { $sum: { $multiply: ['$items.quantity', { $ifNull: ['$variant.purchasePrice', 0] }] } }
-          }
-        },
-        {
-          $addFields: {
-            profit: { $subtract: ['$revenue', '$cost'] },
-            margin: {
-              $cond: [
-                { $gt: ['$revenue', 0] },
-                { $round: [{ $multiply: [{ $divide: [{ $subtract: ['$revenue', '$cost'] }, '$revenue'] }, 100] }, 1] },
-                0
-              ]
+    const topProducts = await Order.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: start },
+          status: 'delivered',
+          paymentStatus: 'paid'
+        }
+      },
+      { $unwind: '$items' },
+
+      {
+        $lookup: {
+          from: 'variants',
+          localField: 'items.variant',
+          foreignField: '_id',
+          as: 'variant'
+        }
+      },
+      { $unwind: { path: '$variant', preserveNullAndEmptyArrays: true } },
+
+      {
+        $group: {
+          _id: '$items.product',
+          unitsSold: { $sum: '$items.quantity' },
+          revenue: { $sum: '$items.total' },
+          cost: {
+            $sum: {
+              $multiply: ['$items.quantity', { $ifNull: ['$variant.purchasePrice', 0] }]
             }
           }
-        },
-        { $lookup: { from: 'products', localField: '_id', foreignField: '_id', as: 'product' } },
-        { $unwind: '$product' },
-        { $lookup: { from: 'categories', localField: 'product.category', foreignField: '_id', as: 'category' } },
-        { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
-        {
-          $project: {
-            product: '$product.name',
-            category: { $ifNull: ['$category.name', 'Uncategorized'] },
-            units: 1,
-            revenue: { $round: ['$revenue', 2] },
-            cost: { $round: ['$cost', 2] },
-            profit: { $round: ['$profit', 2] },
-            margin: '$margin'
+        }
+      },
+
+      {
+        $addFields: {
+          profit: { $subtract: ['$revenue', '$cost'] },
+          margin: {
+            $cond: [
+              { $gt: ['$revenue', 0] },
+              { $round: [{ $multiply: [{ $divide: [{ $subtract: ['$revenue', '$cost'] }, '$revenue'] }, 100] }, 1] },
+              0
+            ]
           }
-        },
-        { $sort: { revenue: -1 } },
-        { $limit: 10 }
-      ]);
+        }
+      },
 
-      const formatted = result.map(p => ({
-        product: p.product,
-        category: p.category,
-        units: p.units,
-        revenue: p.revenue.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-        cost: p.cost.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-        profit: p.profit.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-        margin: `${p.margin}%`
-      }));
+      {
+        $lookup: {
+          from: 'products',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'product'
+        }
+      },
+      { $unwind: '$product' },
 
-      res.json({ success: true, data: formatted });
-    } catch (error) {
-      console.error('Top Products Error:', error);
-      res.status(500).json({ success: false, error: error.message });
-    }
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'product.category',
+          foreignField: '_id',
+          as: 'category'
+        }
+      },
+      { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
+
+      {
+        $project: {
+          product: '$product.name',
+          category: { $ifNull: ['$category.name', 'Uncategorized'] },
+          units: '$unitsSold',
+          revenue: { $round: ['$revenue', 2] },
+          cost: { $round: ['$cost', 2] },
+          profit: { $round: ['$profit', 2] },
+          margin: '$margin'
+        }
+      },
+
+      { $sort: { revenue: -1 } },
+      { $limit: 10 }
+    ]);
+
+    const formatted = topProducts.map(p => ({
+      product: p.product,
+      category: p.category,
+      units: p.units,
+      revenue: `${p.revenue.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
+      cost: `${p.cost.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
+      profit: `${p.profit.toLocaleString('en-AE', { minimumFractionDigits: 2 })}`,
+      margin: `${p.margin}%`
+    }));
+
+    res.json({ success: true, data: formatted });
+
+  } catch (error) {
+    console.error('getTopProductsPnL Error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
+}
+
+
+
 
 }
 
