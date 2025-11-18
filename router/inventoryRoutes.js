@@ -13,7 +13,7 @@ const { protect, authorize } = require('../middleware/auth'); // your auth middl
 
 router.post('/receive', receiveStock);
 router.post('/reduce', reduceStock);
-router.post('/adjust', authorize('Inventory Manager' || 'Super Admin'), adjustStock);
+router.post('/adjust', adjustStock);
 router.get('/history', getStockMovementHistory);
 router.get('/level/:sku', getStockLevel);
 
