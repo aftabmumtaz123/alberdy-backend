@@ -298,7 +298,8 @@ static async getExpiredProducts(req, res) {
  static async getRevenueByCategory(req, res) {
   try {
     const now = moment.tz('Asia/Karachi').set({ hour: 13, minute: 0, second: 0, millisecond: 0 });
-    const [start, end, prevStart, prevEnd] = ReportController.getDateRange('monthly', now);
+    const [start, end, prevStart, prevEnd] = ReportController.getDateRange('monthly', moment(now));
+
 
     const pipeline = [
       { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
