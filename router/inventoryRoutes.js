@@ -9,7 +9,7 @@ const {
 } = require('../controller/inventoryController');
 const { protect, authorize } = require('../middleware/auth'); // your auth middleware
 
-router.use(protect); // all routes require login
+// router.use(protect); // all routes require login
 
 router.post('/receive', receiveStock);
 router.post('/reduce', reduceStock);
