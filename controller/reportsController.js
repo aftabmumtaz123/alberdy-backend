@@ -1,7 +1,7 @@
 
 require('moment-timezone');
 const moment = require('moment');
-moment.tz.setDefault('Asia/Karachi');   // ← This line fixes the "startOf is undefined" error
+moment.tz.setDefault('Asia/Karachi');  
 
 const Order   = require('../model/Order');
 const Variant = require('../model/variantProduct');
@@ -68,11 +68,11 @@ class ReportController {
 
     const [currentRevenue, prevRevenue, totalOrders] = await Promise.all([
       Order.aggregate([
-        { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
+        { $match: { createdAt: { $gte: start, $lte: end }, status: 'Delivered' } },
         { $group: { _id: null, total: { $sum: '$total' } } }
       ]).then(r => r[0]?.total || 0),
       Order.aggregate([
-        { $match: { createdAt: { $gte: prevStart, $lte: prevEnd }, status: 'delivered' } },
+        { $match: { createdAt: { $gte: prevStart, $lte: prevEnd }, status: 'Delivered' } },
         { $group: { _id: null, total: { $sum: '$total' } } }
       ]).then(r => r[0]?.total || 0),
       Order.countDocuments({ createdAt: { $gte: start, $lte: end } })
@@ -121,7 +121,7 @@ static async calculateMostSoldPeriod(period, now) {
 
 
   const mostSold = await Order.aggregate([
-    { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
+    { $match: { createdAt: { $gte: start, $lte: end }, status: 'Delivered' } },
     { $unwind: '$items' },
     {
       $group: {
@@ -305,7 +305,7 @@ static async getExpiredProducts(req, res) {
 
 
     const pipeline = [
-      { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
+      { $match: { createdAt: { $gte: start, $lte: end }, status: 'Delivered' } },
       { $unwind: '$items' },
       {
         $lookup: {
@@ -404,7 +404,7 @@ static async getProfitLossReport(req, res) {
     // No date filtering — all delivered orders ever
     const [salesResult, expensesResult] = await Promise.all([
       Order.aggregate([
-        { $match: { status: 'delivered' } }, // ALL delivered orders (lifetime)
+        { $match: { status: 'Delivered' } }, // ALL delivered orders (lifetime)
         { $unwind: '$items' },
         {
           $lookup: {
@@ -420,7 +420,7 @@ static async getProfitLossReport(req, res) {
             _id: null,
             totalSales: { $sum: '$total' },
             totalDiscounts: { $sum: { $ifNull: ['$discount', 0] } },
-            totalRefunds: { $sum: { $cond: [{ $eq: ['$paymentStatus', 'refunded'] }, '$total', 0] } },
+            totalRefunds: { $sum: { $cond: [{ $eq: ['$paymentStatus', 'Refunded'] }, '$total', 0] } },
             totalCOGS: {
               $sum: {
                 $multiply: ['$items.quantity', { $ifNull: ['$variant.purchasePrice', 0] }]
@@ -520,10 +520,13 @@ static async getProfitLossReport(req, res) {
   // ─────────────────────── TOP CUSTOMERS P&L ───────────────────────
   static async getTopCustomersPnL(req, res) {
     try {
-      const { start } = ReportController.getDateRange('monthly');
+      
+      const [start] = ReportController.getDateRange('monthly');
+
+
 
       const result = await Order.aggregate([
-        { $match: { createdAt: { $gte: start }, status: 'delivered' } },
+        { $match: { createdAt: { $gte: start }, status: 'Delivered' } },
         { $unwind: '$items' },
         {
           $lookup: {
@@ -590,10 +593,11 @@ static async getProfitLossReport(req, res) {
   // ─────────────────────── TOP PRODUCTS P&L ───────────────────────
   static async getTopProductsPnL(req, res) {
     try {
-      const { start } = ReportController.getDateRange('monthly');
+      const [start] = ReportController.getDateRange('monthly');
+
 
       const result = await Order.aggregate([
-        { $match: { createdAt: { $gte: start }, status: 'delivered' } },
+        { $match: { createdAt: { $gte: start }, status: 'Delivered' } },
         { $unwind: '$items' },
         {
           $lookup: {
