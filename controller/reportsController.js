@@ -740,7 +740,7 @@ static async getProfitLossReport(req, res) {
       },
       ratios: {
         costOfGoodsSold: Number(sales.totalCOGS.toFixed(2)),
-        cogsPercentage: netRevenue > 0 ? `${((sales.totalCOGS / netRevenue) * 100).toFixed(1)}%` : '12%',
+        cogsPercentage: netRevenue > 0 ? `${((sales.totalSales / netRevenue) * 100).toFixed(1)}%` : '12%',
         operatingExpenseRatio: netRevenue > 0 ? `${((totalOperatingExpenses / netRevenue) * 100).toFixed(1)}%` : '0%',
         profitabilityRatio: `${netMargin.toFixed(2)}%`
       },
