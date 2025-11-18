@@ -9,6 +9,6 @@ const {
 
 router.post('/add', addInventory);
 
-router.get('/dashboard', getInventoryDashboard);
+router.get('/summary', getInventoryDashboard);
 module.exports = router;
 
