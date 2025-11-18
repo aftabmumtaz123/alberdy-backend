@@ -330,9 +330,6 @@ exports.getInventoryList = async (req, res) => {
           }
         }
       },
-      // Include all products (no exclusion; show out-of-stock too)
-      // Removed restrictive $match; all pass through
-      // Compute status, lowStock, final expiryDate
       {
         $addFields: {
           expired: { $and: [{ $gt: ['$historicalEntries', 0] }, { $eq: ['$validCount', 0] }] },

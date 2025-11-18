@@ -599,119 +599,117 @@ static async getTopProductsPnL(req, res) {
   }
 }
 
-  static async getProfitLossReport(req, res) {
-    try {
-      const [salesResult, expensesResult] = await Promise.all([
-        Order.aggregate([
-          { $match: { status: { $in: ['delivered', 'Delivered'] } } }, // Fixed case
-          { $unwind: '$items' },
-          {
-            $lookup: {
-              from: 'variantproducts',
-              localField: 'items.variant',
-              foreignField: '_id',
-              as: 'variant'
-            }
-          },
-          { $unwind: { path: '$variant', preserveNullAndEmptyArrays: true } },
-          {
-            $group: {
-              _id: null,
-              totalSales: { $sum: '$total' },
-              totalDiscounts: { $sum: { $ifNull: ['$discount', 0] } },
-              totalRefunds: { $sum: { $cond: [{ $eq: ['$paymentStatus', 'refunded'] }, '$total', 0] } },
-              totalCOGS: {
-                $sum: {
-                  $multiply: [
-                    '$items.quantity',
-                    {
-                      $ifNull: [
-                        '$variant.purchasePrice',
-                        { $ifNull: ['$variant.costPrice', { $ifNull: ['$variant.cost', 0] }] }
-                      ]
-                    }
-                  ]
-                }
-              },
-              orderCount: { $sum: 1 }
-            }
+static async getProfitLossReport(req, res) {
+  try {
+    const [salesResult, expensesResult] = await Promise.all([
+      Order.aggregate([
+        { $match: { status: { $in: ['delivered', 'Delivered'] } } },
+        { $unwind: '$items' },
+        {
+          $lookup: {
+            from: 'variantproducts',
+            localField: 'items.variant',
+            foreignField: '_id',
+            as: 'variant'
           }
-        ]),
-        Expense.aggregate([
-          { $group: { _id: '$category', amount: { $sum: '$amount' } } }
-        ])
-      ]);
-
-      const sales = salesResult[0] || { totalSales: 0, totalDiscounts: 0, totalRefunds: 0, totalCOGS: 0, orderCount: 0 };
-      const expenses = expensesResult || [];
-
-      const netRevenue = sales.totalSales - sales.totalDiscounts - sales.totalRefunds;
-      const grossProfit = netRevenue - sales.totalCOGS;
-      const totalOperatingExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
-      const netProfit = grossProfit - totalOperatingExpenses;
-
-      const grossMargin = sales.totalSales > 0 ? (grossProfit / sales.totalSales) * 100 : 0;
-      const netMargin = sales.totalSales > 0 ? (netProfit / sales.totalSales) * 100 : 0;
-
-      const expenseBreakdown = {
-        rent: expenses.find(e => ['Rent', 'rent'].includes(e._id))?.amount || 0,
-        salaries: expenses.find(e => ['Salaries', 'salaries'].includes(e._id))?.amount || 0,
-        marketing: expenses.find(e => ['Marketing', 'marketing'].includes(e._id))?.amount || 0,
-        utilities: expenses.find(e => ['Utilities', 'utilities'].includes(e._id))?.amount || 0,
-        insurance: expenses.find(e => ['Insurance', 'insurance'].includes(e._id))?.amount || 0,
-        other: expenses.filter(e => !['Rent','rent','Salaries','salaries','Marketing','marketing','Utilities','utilities','Insurance','insurance'].includes(e._id))
-                       .reduce((s, e) => s + e.amount, 0)
-      };
-
-      res.json({
-        success: true,
-        period: { label: "All Time (Lifetime)", startDate: null, endDate: null },
-        cards: {
-          totalSales: Number(sales.totalSales.toFixed(2)),
-          netRevenue: Number(netRevenue.toFixed(2)),
-          grossProfit: Number(grossProfit.toFixed(2)),
-          netProfit: Number(netProfit.toFixed(2)),
-          grossProfitMargin: Number(grossMargin.toFixed(2)),
-          netProfitMargin: Number(netMargin.toFixed(2))
         },
-        incomeStatement: {
-          revenue: Number(sales.totalSales.toFixed(2)),
-          lessDiscounts: Number(sales.totalDiscounts.toFixed(2)),
-          lessRefunds: Number(sales.totalRefunds.toFixed(2)),
-          netRevenue: Number(netRevenue.toFixed(2)),
-          cogs: Number(sales.totalCOGS.toFixed(2)),
-          grossProfit: Number(grossProfit.toFixed(2)),
-          grossProfitMargin: `${grossMargin.toFixed(2)}%`,
-          operatingExpenses: {
-            rent: Number(expenseBreakdown.rent.toFixed(2)),
-            salaries: Number(expenseBreakdown.salaries.toFixed(2)),
-            marketing: Number(expenseBreakdown.marketing.toFixed(2)),
-            utilities: Number(expenseBreakdown.utilities.toFixed(2)),
-            insurance: Number(expenseBreakdown.insurance.toFixed(2)),
-            other: Number(expenseBreakdown.other.toFixed(2)),
-            total: Number(totalOperatingExpenses.toFixed(2))
-          },
-          netProfit: Number(netProfit.toFixed(2)),
-          netProfitMargin: `${netMargin.toFixed(2)}%`
-        },
-        ratios: {
-          costOfGoodsSold: Number(sales.totalCOGS.toFixed(2)),
-          cogsPercentage: netRevenue > 0 ? `${((sales.totalCOGS / netRevenue) * 100).toFixed(2)}%` : '0%',
-          operatingExpenses: Number(totalOperatingExpenses.toFixed(2)),
-          operatingExpenseRatio: netRevenue > 0 ? `${((totalOperatingExpenses / netRevenue) * 100).toFixed(2)}%` : '0%',
-          profitabilityRatio: `${netMargin.toFixed(2)}%`
-        },
-        summary: {
-          totalOrders: sales.orderCount,
-          averageOrderValue: sales.orderCount > 0 ? Number((sales.totalSales / sales.orderCount).toFixed(2)) : 0
+        { $unwind: { path: '$variant', preserveNullAndEmptyArrays: true } },
+        {
+          $group: {
+            _id: null,
+            totalSales: { $sum: '$total' },
+            totalDiscounts: { $sum: { $ifNull: ['$discount', 0] } },
+            totalRefunds: { $sum: { $cond: [{ $eq: ['$paymentStatus', 'refunded'] }, '$total', 0] } },
+            totalCOGS: {
+              $sum: {
+                $multiply: [
+                  '$items.quantity',
+                  {
+                    $ifNull: [
+                      '$variant.purchasePrice',
+                      { $ifNull: ['$variant.costPrice', { $ifNull: ['$variant.cost', 0] }] }
+                    ]
+                  }
+                ]
+              }
+            },
+            orderCount: { $sum: 1 }
+          }
         }
-      });
-    } catch (error) {
-      console.error('Profit & Loss Error:', error);
-      res.status(500).json({ success: false, msg: 'Server error', error: error.message });
-    }
-  }
+      ]),
+      Expense.aggregate([
+        {
+          $group: {
+            _id: '$category',
+            total: { $sum: '$amount' }
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            name: '$_id',
+            amount: { $round: ['$total', 2] }
+          }
+        },
+        { $sort: { amount: -1 } }
+      ])
+    ]);
 
+    const sales = salesResult[0] || { totalSales: 0, totalDiscounts: 0, totalRefunds: 0, totalCOGS: 0, orderCount: 0 };
+    const expensesList = expensesResult || []; // ← This is your clean array!
+
+    const netRevenue = sales.totalSales - sales.totalDiscounts - sales.totalRefunds;
+    const grossProfit = netRevenue - sales.totalCOGS;
+    const totalOperatingExpenses = expensesList.reduce((sum, e) => sum + e.amount, 0);
+    const netProfit = grossProfit - totalOperatingExpenses;
+
+    const grossMargin = sales.totalSales > 0 ? (grossProfit / sales.totalSales) * 100 : 0;
+    const netMargin = sales.totalSales > 0 ? (netProfit / sales.totalSales) * 100 : 0;
+
+    res.json({
+      success: true,
+      period: { label: "All Time (Lifetime)", startDate: null, endDate: null },
+      cards: {
+        totalSales: Number(sales.totalSales.toFixed(2)),
+        netRevenue: Number(netRevenue.toFixed(2)),
+        grossProfit: Number(grossProfit.toFixed(2)),
+        netProfit: Number(netProfit.toFixed(2)),
+        grossProfitMargin: Number(grossMargin.toFixed(2)),
+        netProfitMargin: Number(netMargin.toFixed(2))
+      },
+      incomeStatement: {
+        revenue: Number(sales.totalSales.toFixed(2)),
+        lessDiscounts: Number(sales.totalDiscounts.toFixed(2)),
+        lessRefunds: Number(sales.totalRefunds.toFixed(2)),
+        netRevenue: Number(netRevenue.toFixed(2)),
+        cogs: Number(sales.totalCOGS.toFixed(2)),
+        grossProfit: Number(grossProfit.toFixed(2)),
+        grossProfitMargin: `${grossMargin.toFixed(2)}%`,
+        operatingExpenses: {
+          list: expensesList, // ← CLEAN ARRAY: [{ name: "Rent", amount: 5000 }, ...]
+          total: Number(totalOperatingExpenses.toFixed(2))
+        },
+        netProfit: Number(netProfit.toFixed(2)),
+        netProfitMargin: `${netMargin.toFixed(2)}%`
+      },
+      expenses: expensesList, // ← Bonus: top-level array for charts/tables
+      ratios: {
+        costOfGoodsSold: Number(sales.totalCOGS.toFixed(2)),
+        cogsPercentage: netRevenue > 0 ? `${((sales.totalCOGS / netRevenue) * 100).toFixed(2)}%` : '0%',
+        operatingExpenses: Number(totalOperatingExpenses.toFixed(2)),
+        operatingExpenseRatio: netRevenue > 0 ? `${((totalOperatingExpenses / netRevenue) * 100).toFixed(2)}%` : '0%',
+        profitabilityRatio: `${netMargin.toFixed(2)}%`
+      },
+      summary: {
+        totalOrders: sales.orderCount,
+        averageOrderValue: sales.orderCount > 0 ? Number((sales.totalSales / sales.orderCount).toFixed(2)) : 0
+      }
+    });
+  } catch (error) {
+    console.error('Profit & Loss Error:', error);
+    res.status(500).json({ success: false, msg: 'Server error', error: error.message });
+  }
+}
 
 }
 
