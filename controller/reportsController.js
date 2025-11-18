@@ -694,7 +694,7 @@ static async getProfitLossReport(req, res) {
         lessDiscounts: Number(sales.totalDiscounts.toFixed(2)),
         lessRefunds: Number(sales.totalRefunds.toFixed(2)),
         netRevenue: Number(netRevenue.toFixed(2)),
-        cogs: Number(sales.totalCOGS.toFixed(2)),
+        cogs: Number(sales.totalSales.toFixed(2)) ,
         grossProfit: Number(grossProfit.toFixed(2)),
         grossProfitMargin: `${grossMargin.toFixed(2)}%`,
         operatingExpenses: {
@@ -707,8 +707,8 @@ static async getProfitLossReport(req, res) {
       // expenses: expensesList,
       ratios: {
         costOfGoodsSold: Number(sales.totalCOGS.toFixed(2)),
-        cogsPercentage: netRevenue > 0 ? `${((sales.totalCOGS / netRevenue) * 100).toFixed(2)}%` : '0%',
-        operatingExpenseRatio: netRevenue > 0 ? `${((totalOperatingExpenses / netRevenue) * 100).toFixed(2)}%` : '0%',
+        cogsPercentage: netRevenue > 0 ? `${((sales.totalCOGS / netRevenue) * 100).toFixed(2)}%` : '12%',
+        operatingExpenseRatio: netRevenue > 0 ? `${((totalOperatingExpenses / netRevenue) * 100).toFixed(2)}%` : '12%',
         profitabilityRatio: `${netMargin.toFixed(2)}%`
       },
       summary: {
