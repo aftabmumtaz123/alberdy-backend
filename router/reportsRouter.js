@@ -1,7 +1,7 @@
 // routes/reports.js
 const express = require('express');
 const router = express.Router();
-const ReportController = require('../controllers/ReportController');
+const ReportController = require('../controller/reportsController');
 const authMiddleware = require('../middleware/auth');
 const requireRole = roles => (req, res, next) => {
   if (!req.user || !roles.includes(req.user.role)) {
