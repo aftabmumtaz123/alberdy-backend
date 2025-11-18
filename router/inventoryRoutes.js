@@ -7,7 +7,7 @@ const {
   getStockMovementHistory,
   getStockLevel,
 } = require('../controller/inventoryController');
-const { protect, authorize } = require('../middleware/auth'); // your auth middleware
+// const { protect, authorize } = require('../middleware/auth'); // your auth middleware
 
 // router.use(protect); // all routes require login
 
