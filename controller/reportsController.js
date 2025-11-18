@@ -449,6 +449,7 @@ static async getProfitLossReport(req, res) {
       ])
     ]);
 
+    
     const sales = salesResult[0] || { totalSales: 0, totalDiscounts: 0, totalRefunds: 0, totalCOGS: 0, orderCount: 0 };
     const expenses = expensesResult || [];
 

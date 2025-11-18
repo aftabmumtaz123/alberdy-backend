@@ -15,7 +15,7 @@ router.use(authMiddleware, requireRole(['Super Admin', 'Manager']));
 router.get('/profit-loss', ReportController.getProfitLossReport);
 router.get('/top-customers', ReportController.getTopCustomersPnL);
 router.get('/top-products', ReportController.getTopProductsPnL);
-router.get('/sales-by-periods', ReportController.getSalesByPeriods);
+router.get('/sales', ReportController.getSalesByPeriods);
 router.get('/most-sold', ReportController.getMostSoldProducts);
 router.get('/orders-by-status', ReportController.getOrdersByStatus);
 router.get('/low-stock', ReportController.getLowStockProducts);
