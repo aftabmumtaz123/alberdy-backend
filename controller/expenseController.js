@@ -3,9 +3,6 @@ const ExpenseCategory = require('../model/ExpenseCategory');
 const moment = require('moment-timezone'); // For date handling
 
 
-
-
-
 const generateExpenseId = async () => {
   try {
     const count = await Expense.countDocuments();
@@ -126,9 +123,6 @@ exports.updateExpense = async (req, res) => {
 
 
 
-
-
-
 exports.getExpenses = async (req, res) => {
   try {
     const { id, category, startDate, endDate, page = 1, limit  } = req.query;
@@ -196,7 +190,6 @@ exports.deleteExpense = async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
-
 };
 
 
