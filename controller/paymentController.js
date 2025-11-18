@@ -338,7 +338,7 @@ exports.deletePayment = async (req, res) => {
 // List all payments with filters
 exports.getAllPayments = async (req, res) => {
   try {
-    const { supplier, startDate, endDate, paymentMethod, reference, status, page = 1, limit = 10 } = req.query;
+    const { supplier, startDate, endDate, paymentMethod, reference, status, page = 1, limit } = req.query;
 
     // Build query
     const query = {};
