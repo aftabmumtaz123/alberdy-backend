@@ -605,15 +605,26 @@ static async getProfitLossReport(req, res) {
       Order.aggregate([
         { $match: { status: { $in: ['delivered', 'Delivered'] } } },
         { $unwind: '$items' },
+
+        // THIS IS THE MAGIC LINE — converts string → ObjectId on Atlas
         {
           $lookup: {
             from: 'variantproducts',
-            localField: 'items.variant',
-            foreignField: '_id',
-            as: 'variant'
+            let: { variantId: "$items.variant" },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $eq: ["$_id", { $toObjectId: "$$variantId" }]
+                  }
+                }
+              },
+              { $project: { purchasePrice: 1 } }
+            ],
+            as: 'variantData'
           }
         },
-        { $unwind: { path: '$variant', preserveNullAndEmptyArrays: true } },
+
         {
           $group: {
             _id: null,
@@ -626,8 +637,8 @@ static async getProfitLossReport(req, res) {
                   '$items.quantity',
                   {
                     $ifNull: [
-                      '$variant.purchasePrice',
-                      { $ifNull: ['$variant.costPrice', { $ifNull: ['$variant.cost', 0] }] }
+                      { $arrayElemAt: ['$variantData.purchasePrice', 0] },
+                      0
                     ]
                   }
                 ]
@@ -637,18 +648,19 @@ static async getProfitLossReport(req, res) {
           }
         }
       ]),
+
       Expense.aggregate([
         {
           $group: {
             _id: '$category',
-            total: { $sum: '$amount' }
+            amount: { $sum: '$amount' }
           }
         },
         {
           $project: {
             _id: 0,
             name: '$_id',
-            amount: { $round: ['$total', 2] }
+            amount: { $round: ['$amount', 2] }
           }
         },
         { $sort: { amount: -1 } }
@@ -656,7 +668,7 @@ static async getProfitLossReport(req, res) {
     ]);
 
     const sales = salesResult[0] || { totalSales: 0, totalDiscounts: 0, totalRefunds: 0, totalCOGS: 0, orderCount: 0 };
-    const expensesList = expensesResult || []; // ← This is your clean array!
+    const expensesList = expensesResult || [];
 
     const netRevenue = sales.totalSales - sales.totalDiscounts - sales.totalRefunds;
     const grossProfit = netRevenue - sales.totalCOGS;
@@ -668,7 +680,7 @@ static async getProfitLossReport(req, res) {
 
     res.json({
       success: true,
-      period: { label: "All Time (Lifetime)", startDate: null, endDate: null },
+      period: { label: "All Time (Lifetime)" },
       cards: {
         totalSales: Number(sales.totalSales.toFixed(2)),
         netRevenue: Number(netRevenue.toFixed(2)),
@@ -686,17 +698,16 @@ static async getProfitLossReport(req, res) {
         grossProfit: Number(grossProfit.toFixed(2)),
         grossProfitMargin: `${grossMargin.toFixed(2)}%`,
         operatingExpenses: {
-          list: expensesList, // ← CLEAN ARRAY: [{ name: "Rent", amount: 5000 }, ...]
+          list: expensesList,
           total: Number(totalOperatingExpenses.toFixed(2))
         },
         netProfit: Number(netProfit.toFixed(2)),
         netProfitMargin: `${netMargin.toFixed(2)}%`
       },
-      // expenses: expensesList, // ← Bonus: top-level array for charts/tables
+      // expenses: expensesList,
       ratios: {
         costOfGoodsSold: Number(sales.totalCOGS.toFixed(2)),
         cogsPercentage: netRevenue > 0 ? `${((sales.totalCOGS / netRevenue) * 100).toFixed(2)}%` : '0%',
-        operatingExpenses: Number(totalOperatingExpenses.toFixed(2)),
         operatingExpenseRatio: netRevenue > 0 ? `${((totalOperatingExpenses / netRevenue) * 100).toFixed(2)}%` : '0%',
         profitabilityRatio: `${netMargin.toFixed(2)}%`
       },
@@ -705,8 +716,9 @@ static async getProfitLossReport(req, res) {
         averageOrderValue: sales.orderCount > 0 ? Number((sales.totalSales / sales.orderCount).toFixed(2)) : 0
       }
     });
+
   } catch (error) {
-    console.error('Profit & Loss Error:', error);
+    console.error('P&L Error:', error);
     res.status(500).json({ success: false, msg: 'Server error', error: error.message });
   }
 }
