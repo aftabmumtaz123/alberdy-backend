@@ -508,7 +508,7 @@ static async getExpiredProducts(req, res) {
         { $unwind: '$items' },
         {
           $lookup: {
-            from: 'variantproducts',
+            from: 'Variant',
             localField: 'items.variant',
             foreignField: '_id',
             as: 'variant'
