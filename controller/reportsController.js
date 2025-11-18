@@ -1,16 +1,4 @@
 
-const moment = require('../utils/moment')
-const Order = require('../model/Order');
-// const Product = require('../model/Product');
-const Expense = require('../model/Expense')
-const Variant = require('../model/variantProduct');
-// const Category = require('../model/Category');
-// const mongoose = require('mongoose');
-
-
-
-
-
 require('moment-timezone');
 const moment = require('moment');
 moment.tz.setDefault('Asia/Karachi');   // ← This line fixes the "startOf is undefined" error
@@ -21,22 +9,6 @@ const Expense = require('../model/Expense');
 const Product = require('../model/Product');
 const Category = require('../model/Category');
 const mongoose = require('mongoose');
-
-// ──────────────────────────────────────────────────────────────
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
