@@ -2,6 +2,7 @@ const moment = require('moment-timezone');
 const Order = require('../model/Order');
 const Product = require('../model/Product');
 const Variant = require('../model/variantProduct');
+const Expense = require('../model/Expense')
 const Category = require('../model/Category');
 const mongoose = require('mongoose');
 
