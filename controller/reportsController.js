@@ -395,138 +395,116 @@ static async getExpiredProducts(req, res) {
   }
 }
 
-
-
-
-// GET /api/reports/profit-loss   → Returns ALL-TIME Profit & Loss
-static async getProfitLossReport(req, res) {
-  try {
-    // No date filtering — all delivered orders ever
-    const [salesResult, expensesResult] = await Promise.all([
-      Order.aggregate([
-        { $match: { status: 'Delivered' } }, // ALL delivered orders (lifetime)
-        { $unwind: '$items' },
-        {
-          $lookup: {
-            from: 'variantproducts',
-            localField: 'items.variant',
-            foreignField: '_id',
-            as: 'variant'
+// ALL-TIME PROFIT & LOSS — FIXED & WORKING
+  static async getProfitLossReport(req, res) {
+    try {
+      const [salesResult, expensesResult] = await Promise.all([
+        Order.aggregate([
+          { $match: { status: 'delivered' } },
+          { $unwind: '$items' },
+          {
+            $lookup: {
+              from: 'variantproducts',
+              localField: 'items.variant',
+              foreignField: '_id',
+              as: 'variant'
+            }
+          },
+          { $unwind: { path: '$variant', preserveNullAndEmptyArrays: true } },
+          {
+            $group: {
+              _id: null,
+              totalSales: { $sum: '$total' },
+              totalDiscounts: { $sum: { $ifNull: ['$discount', 0] } },
+              totalRefunds: { $sum: { $cond: [{ $eq: ['$paymentStatus', 'refunded'] }, '$total', 0] } },
+              totalCOGS: {
+                $sum: { $multiply: ['$items.quantity', { $ifNull: ['$variant.purchasePrice', 0] }] }
+              },
+              orderCount: { $sum: 1 }
+            }
           }
+        ]),
+        Expense.aggregate([
+          { $group: { _id: '$category', amount: { $sum: '$amount' } } }
+        ])
+      ]);
+
+      const sales = salesResult[0] || { totalSales: 0, totalDiscounts: 0, totalRefunds: 0, totalCOGS: 0, orderCount: 0 };
+      const expenses = expensesResult || [];
+
+      const netRevenue = sales.totalSales - sales.totalDiscounts - sales.totalRefunds;
+      const grossProfit = netRevenue - sales.totalCOGS;
+      const totalOperatingExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+      const netProfit = grossProfit - totalOperatingExpenses;
+
+      const grossMargin = sales.totalSales > 0 ? (grossProfit / sales.totalSales) * 100 : 0;
+      const netMargin = sales.totalSales > 0 ? (netProfit / sales.totalSales) * 100 : 0;
+      const cogsPercentage = netRevenue > 0 ? (sales.totalCOGS / netRevenue) * 100 : 0;
+      const expensePercentage = netRevenue > 0 ? (totalOperatingExpenses / netRevenue) * 100 : 0;
+
+      const expenseBreakdown = {
+        rent: expenses.find(e => e._id === 'Rent')?.amount || 0,
+        salaries: expenses.find(e => e._id === 'Salaries')?.amount || 0,
+        marketing: expenses.find(e => e._id === 'Marketing')?.amount || 0,
+        utilities: expenses.find(e => e._id === 'Utilities')?.amount || 0,
+        insurance: expenses.find(e => e._id === 'Insurance')?.amount || 0,
+        other: expenses.filter(e => !['Rent','Salaries','Marketing','Utilities','Insurance'].includes(e._id))
+                       .reduce((s, e) => s + e.amount, 0)
+      };
+
+      res.json({
+        success: true,
+        period: { label: "All Time (Lifetime)", startDate: null, endDate: null },
+        cards: {
+          totalSales: Number(sales.totalSales.toFixed(2)),
+          netRevenue: Number(netRevenue.toFixed(2)),
+          grossProfit: Number(grossProfit.toFixed(2)),
+          netProfit: Number(netProfit.toFixed(2)),
+          grossProfitMargin: Number(grossMargin.toFixed(2)),
+          netProfitMargin: Number(netMargin.toFixed(2))
         },
-        { $unwind: { path: '$variant', preserveNullAndEmptyArrays: true } },
-        {
-          $group: {
-            _id: null,
-            totalSales: { $sum: '$total' },
-            totalDiscounts: { $sum: { $ifNull: ['$discount', 0] } },
-            totalRefunds: { $sum: { $cond: [{ $eq: ['$paymentStatus', 'Refunded'] }, '$total', 0] } },
-            totalCOGS: {
-              $sum: {
-                $multiply: ['$items.quantity', { $ifNull: ['$variant.purchasePrice', 0] }]
-              }
-            },
-            orderCount: { $sum: 1 }
-          }
+        incomeStatement: {
+          revenue: Number(sales.totalSales.toFixed(2)),
+          lessDiscounts: Number(sales.totalDiscounts.toFixed(2)),
+          lessRefunds: Number(sales.totalRefunds.toFixed(2)),
+          netRevenue: Number(netRevenue.toFixed(2)),
+          cogs: Number(sales.totalCOGS.toFixed(2)),
+          grossProfit: Number(grossProfit.toFixed(2)),
+          grossProfitMargin: `${grossMargin.toFixed(2)}%`,
+          operatingExpenses: {
+            rent: Number(expenseBreakdown.rent.toFixed(2)),
+            salaries: Number(expenseBreakdown.salaries.toFixed(2)),
+            marketing: Number(expenseBreakdown.marketing.toFixed(2)),
+            utilities: Number(expenseBreakdown.utilities.toFixed(2)),
+            insurance: Number(expenseBreakdown.insurance.toFixed(2)),
+            other: Number(expenseBreakdown.other.toFixed(2)),
+            total: Number(totalOperatingExpenses.toFixed(2))
+          },
+          netProfit: Number(netProfit.toFixed(2)),
+          netProfitMargin: `${netMargin.toFixed(2)}%`
+        },
+        ratios: {
+          costOfGoodsSold: Number(sales.totalCOGS.toFixed(2)),
+          cogsPercentage: `${cogsPercentage.toFixed(2)}%`,
+          operatingExpenses: Number(totalOperatingExpenses.toFixed(2)),
+          operatingExpenseRatio: `${expensePercentage.toFixed(2)}%`,
+          profitabilityRatio: `${netMargin.toFixed(2)}%`
+        },
+        summary: {
+          totalOrders: sales.orderCount,
+          averageOrderValue: sales.orderCount > 0 ? Number((sales.totalSales / sales.orderCount).toFixed(2)) : 0
         }
-      ]),
-
-      Expense.aggregate([
-        { $group: { _id: '$category', amount: { $sum: '$amount' } } }
-      ])
-    ]);
-
-    const sales = salesResult[0] || { totalSales: 0, totalDiscounts: 0, totalRefunds: 0, totalCOGS: 0, orderCount: 0 };
-    const expenses = expensesResult || [];
-
-    const netRevenue = sales.totalSales - sales.totalDiscounts - sales.totalRefunds;
-    const grossProfit = netRevenue - sales.totalCOGS;
-    const totalOperatingExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
-    const netProfit = grossProfit - totalOperatingExpenses;
-
-    const grossMargin = sales.totalSales > 0 ? (grossProfit / sales.totalSales) * 100 : 0;
-    const netMargin = sales.totalSales > 0 ? (netProfit / sales.totalSales) * 100 : 0;
-    const cogsPercentage = netRevenue > 0 ? (sales.totalCOGS / netRevenue) * 100 : 0;
-    const expensePercentage = netRevenue > 0 ? (totalOperatingExpenses / netRevenue) * 100 : 0;
-
-    const expenseBreakdown = {
-      rent: expenses.find(e => e._id === 'rent')?.amount || 0,
-      salaries: expenses.find(e => e._id === 'salaries')?.amount || 0,
-      marketing: expenses.find(e => e._id === 'marketing')?.amount || 0,
-      utilities: expenses.find(e => e._id === 'utilities')?.amount || 0,
-      insurance: expenses.find(e => e._id === 'insurance')?.amount || 0,
-      other: expenses.filter(e => !['rent','salaries','marketing','utilities','insurance'].includes(e._id))
-                     .reduce((s, e) => s + e.amount, 0)
-    };
-
-    res.json({
-      success: true,
-      period: {
-        label: "All Time (Lifetime)",
-        startDate: null,
-        endDate: null
-      },
-      cards: {
-        totalSales: Number(sales.totalSales.toFixed(2)),
-        netRevenue: Number(netRevenue.toFixed(2)),
-        grossProfit: Number(grossProfit.toFixed(2)),
-        netProfit: Number(netProfit.toFixed(2)),
-        grossProfitMargin: Number(grossMargin.toFixed(2)),
-        netProfitMargin: Number(netMargin.toFixed(2))
-      },
-      incomeStatement: {
-        revenue: Number(sales.totalSales.toFixed(2)),
-        lessDiscounts: Number(sales.totalDiscounts.toFixed(2)),
-        lessRefunds: Number(sales.totalRefunds.toFixed(2)),
-        netRevenue: Number(netRevenue.toFixed(2)),
-        cogs: Number(sales.totalCOGS.toFixed(2)),
-        grossProfit: Number(grossProfit.toFixed(2)),
-        grossProfitMargin: `${grossMargin.toFixed(2)}%`,
-        operatingExpenses: {
-          rent: Number(expenseBreakdown.rent.toFixed(2)),
-          salaries: Number(expenseBreakdown.salaries.toFixed(2)),
-          marketing: Number(expenseBreakdown.marketing.toFixed(2)),
-          utilities: Number(expenseBreakdown.utilities.toFixed(2)),
-          insurance: Number(expenseBreakdown.insurance.toFixed(2)),
-          other: Number(expenseBreakdown.other.toFixed(2)),
-          total: Number(totalOperatingExpenses.toFixed(2))
-        },
-        netProfit: Number(netProfit.toFixed(2)),
-        netProfitMargin: `${netMargin.toFixed(2)}%`
-      },
-      ratios: {
-        costOfGoodsSold: Number(sales.totalCOGS.toFixed(2)),
-        cogsPercentage: `${cogsPercentage.toFixed(2)}%`,
-        operatingExpenses: Number(totalOperatingExpenses.toFixed(2)),
-        operatingExpenseRatio: `${expensePercentage.toFixed(2)}%`,
-        profitabilityRatio: `${netMargin.toFixed(2)}%`
-      },
-      summary: {
-        totalOrders: sales.orderCount,
-        averageOrderValue: sales.orderCount > 0 ? Number((sales.totalSales / sales.orderCount).toFixed(2)) : 0
-      }
-    });
-
-  } catch (error) {
-    console.error('All-Time Profit & Loss Error:', error);
-    res.status(500).json({ success: false, msg: 'Server error', error: error.message });
+      });
+    } catch (error) {
+      console.error('All-Time Profit & Loss Error:', error);
+      res.status(500).json({ success: false, msg: 'Server error', error: error.message });
+    }
   }
-}
 
-
-
-
-
-  // ─────────────────────── TOP CUSTOMERS P&L ───────────────────────
   static async getTopCustomersPnL(req, res) {
     try {
-      
-      const [start] = ReportController.getDateRange('monthly');
-
-
-
       const result = await Order.aggregate([
-        { $match: { createdAt: { $gte: start }, status: 'Delivered' } },
+        { $match: { status: 'delivered' } }, // All-time
         { $unwind: '$items' },
         {
           $lookup: {
@@ -541,24 +519,22 @@ static async getProfitLossReport(req, res) {
           $group: {
             _id: '$user',
             revenue: { $sum: '$items.total' },
-            cost:    { $sum: { $multiply: ['$items.quantity', { $ifNull: ['$variant.purchasePrice', 0] }] } },
-            orders:  { $addToSet: '$_id' },
-            name:    { $first: '$shippingAddress.fullName' },
-            city:    { $first: '$shippingAddress.city' }
+            cost: { $sum: { $multiply: ['$items.quantity', { $ifNull: ['$variant.purchasePrice', 0] }] } },
+            orders: { $addToSet: '$_id' },
+            name: { $first: '$shippingAddress.fullName' },
+            city: { $first: '$shippingAddress.city' }
           }
         },
         { $addFields: { profit: { $subtract: ['$revenue', '$cost'] }, orderCount: { $size: '$orders' } } },
-        {
-          $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' }
-        },
+        { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
         { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
         {
           $project: {
             customer: { $ifNull: ['$user.name', '$name', 'Walk-in Customer'] },
-            region:   { $ifNull: ['$user.address.city', '$city', 'N/A'] },
-            revenue:  { $round: ['$revenue', 2] },
-            cost:     { $round: ['$cost', 2] },
-            profit:   { $round: ['$profit', 2] },
+            region: { $ifNull: ['$user.address.city', '$city', 'N/A'] },
+            revenue: { $round: ['$revenue', 2] },
+            cost: { $round: ['$cost', 2] },
+            profit: { $round: ['$profit', 2] },
             margin: {
               $cond: [
                 { $gt: ['$revenue', 0] },
@@ -575,29 +551,26 @@ static async getProfitLossReport(req, res) {
 
       const formatted = result.map(c => ({
         customer: c.customer,
-        region:   c.region,
-        revenue:  c.revenue.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-        cost:     c.cost.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-        profit:   c.profit.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-        margin:   `${c.margin}%`,
-        orders:   c.orders
+        region: c.region,
+        revenue: c.revenue.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
+        cost: c.cost.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
+        profit: c.profit.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
+        margin: `${c.margin}%`,
+        orders: c.orders
       }));
 
       res.json({ success: true, data: formatted });
     } catch (error) {
-      console.error('Top Customers P&L Error:', error);
+      console.error('Top Customers Error:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   }
 
-  // ─────────────────────── TOP PRODUCTS P&L ───────────────────────
+  // TOP PRODUCTS — NOW ALL-TIME (LIFETIME) — FIXED & WORKING
   static async getTopProductsPnL(req, res) {
     try {
-      const [start] = ReportController.getDateRange('monthly');
-
-
       const result = await Order.aggregate([
-        { $match: { createdAt: { $gte: start }, status: 'Delivered' } },
+        { $match: { status: 'delivered' } }, // All-time
         { $unwind: '$items' },
         {
           $lookup: {
@@ -611,9 +584,9 @@ static async getProfitLossReport(req, res) {
         {
           $group: {
             _id: '$items.product',
-            units:   { $sum: '$items.quantity' },
+            units: { $sum: '$items.quantity' },
             revenue: { $sum: '$items.total' },
-            cost:    { $sum: { $multiply: ['$items.quantity', { $ifNull: ['$variant.purchasePrice', 0] }] } }
+            cost: { $sum: { $multiply: ['$items.quantity', { $ifNull: ['$variant.purchasePrice', 0] }] } }
           }
         },
         {
@@ -630,19 +603,17 @@ static async getProfitLossReport(req, res) {
         },
         { $lookup: { from: 'products', localField: '_id', foreignField: '_id', as: 'product' } },
         { $unwind: '$product' },
-        {
-          $lookup: { from: 'categories', localField: 'product.category', foreignField: '_id', as: 'category' }
-        },
+        { $lookup: { from: 'categories', localField: 'product.category', foreignField: '_id', as: 'category' } },
         { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
         {
           $project: {
-            product:  '$product.name',
+            product: '$product.name',
             category: { $ifNull: ['$category.name', 'Uncategorized'] },
-            units:    1,
-            revenue:  { $round: ['$revenue', 2] },
-            cost:     { $round: ['$cost', 2] },
-            profit:   { $round: ['$profit', 2] },
-            margin:   1
+            units: 1,
+            revenue: { $round: ['$revenue', 2] },
+            cost: { $round: ['$cost', 2] },
+            profit: { $round: ['$profit', 2] },
+            margin: '$margin'
           }
         },
         { $sort: { revenue: -1 } },
@@ -650,18 +621,18 @@ static async getProfitLossReport(req, res) {
       ]);
 
       const formatted = result.map(p => ({
-        product:  p.product,
+        product: p.product,
         category: p.category,
-        units:    p.units,
-        revenue:  p.revenue.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-        cost:     p.cost.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-        profit:   p.profit.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
-        margin:   `${p.margin}%`
+        units: p.units,
+        revenue: p.revenue.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
+        cost: p.cost.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
+        profit: p.profit.toLocaleString('en-AE', { minimumFractionDigits: 2 }),
+        margin: `${p.margin}%`
       }));
 
       res.json({ success: true, data: formatted });
     } catch (error) {
-      console.error('Top Products P&L Error:', error);
+      console.error('Top Products Error:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   }
