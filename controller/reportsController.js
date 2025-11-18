@@ -30,7 +30,6 @@ class ReportController {
       prevStart = current.clone().subtract(1, 'week').startOf('week').toDate();
       prevEnd   = current.clone().subtract(1, 'week').endOf('week').toDate();
     } else {
-      // monthly (default)
       start     = current.clone().startOf('month').toDate();
       end       = current.clone().endOf('month').toDate();
       prevStart = current.clone().subtract(1, 'month').startOf('month').toDate();

@@ -1,25 +1,23 @@
-// routes/reports.js
-const express = require('express');
-const router = express.Router();
 const ReportController = require('../controller/reportsController');
-const authMiddleware = require('../middleware/auth');
-const requireRole = roles => (req, res, next) => {
-  if (!req.user || !roles.includes(req.user.role)) {
-    return res.status(403).json({ success: false, msg: 'Access denied' });
-  }
-  next();
-};
+const router = require('express').Router();
 
-router.use(authMiddleware, requireRole(['Super Admin', 'Manager']));
+// Consolidated endpoint for all reports and analytics
+// router.get('/', ReportController.getReportsAndAnalytics);
 
-router.get('/profit-loss', ReportController.getProfitLossReport);
-router.get('/top-customers', ReportController.getTopCustomersPnL);
-router.get('/top-products', ReportController.getTopProductsPnL);
+// Individual endpoints (optional, for specific use cases)
 router.get('/sales', ReportController.getSalesByPeriods);
 router.get('/most-sold', ReportController.getMostSoldProducts);
 router.get('/orders-by-status', ReportController.getOrdersByStatus);
 router.get('/low-stock', ReportController.getLowStockProducts);
-router.get('/expired-products', ReportController.getExpiredProducts);
+router.get('/expired', ReportController.getExpiredProducts);
 router.get('/revenue-by-category', ReportController.getRevenueByCategory);
+router.get('/profit-loss', ReportController.getProfitLossReport);
+
+
+// routes/reports.js
+router.get('/top-customers', ReportController.getTopCustomersPnL);
+router.get('/top-products', ReportController.getTopProductsPnL);
+
 
 module.exports = router;
+
