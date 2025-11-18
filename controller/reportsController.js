@@ -13,31 +13,31 @@ const mongoose = require('mongoose');
 
 
 class ReportController {
-  // Helper – now works 100% because moment.tz is properly loaded
   static getDateRange(period, now = moment()) {
-    const current = now.clone().set({ hour: 13, minute: 0, second: 0, millisecond: 0 });
+  const current = now.clone().set({ hour: 13, minute: 0, second: 0, millisecond: 0 });
 
-    let start, end, prevStart, prevEnd;
+  let start, end, prevStart, prevEnd;
 
-    if (period === 'daily') {
-      start     = current.clone().startOf('day').toDate();
-      end       = current.clone().endOf('day').toDate();
-      prevStart = current.clone().subtract(1, 'day').startOf('day').toDate();
-      prevEnd   = current.clone().subtract(1, 'day').endOf('day').toDate();
-    } else if (period === 'weekly') {
-      start     = current.clone().startOf('week').toDate();
-      end       = current.clone().endOf('week').toDate();
-      prevStart = current.clone().subtract(1, 'week').startOf('week').toDate();
-      prevEnd   = current.clone().subtract(1, 'week').endOf('week').toDate();
-    } else {
-      start     = current.clone().startOf('month').toDate();
-      end       = current.clone().endOf('month').toDate();
-      prevStart = current.clone().subtract(1, 'month').startOf('month').toDate();
-      prevEnd   = current.clone().subtract(1, 'month').endOf('month').toDate();
-    }
-
-    return { start, end, prevStart, prevEnd };
+  if (period === 'daily') {
+    start     = current.clone().startOf('day').toDate();
+    end       = current.clone().endOf('day').toDate();
+    prevStart = current.clone().subtract(1, 'day').startOf('day').toDate();
+    prevEnd   = current.clone().subtract(1, 'day').endOf('day').toDate();
+  } else if (period === 'weekly') {
+    start     = current.clone().startOf('week').toDate();
+    end       = current.clone().endOf('week').toDate();
+    prevStart = current.clone().subtract(1, 'week').startOf('week').toDate();
+    prevEnd   = current.clone().subtract(1, 'week').endOf('week').toDate();
+  } else {
+    start     = current.clone().startOf('month').toDate();
+    end       = current.clone().endOf('month').toDate();
+    prevStart = current.clone().subtract(1, 'month').startOf('month').toDate();
+    prevEnd   = current.clone().subtract(1, 'month').endOf('month').toDate();
   }
+
+  return [start, end, prevStart, prevEnd];
+}
+
 
   static async getSalesByPeriods(req, res) {
     try {
@@ -62,7 +62,8 @@ class ReportController {
   }
 
   static async calculateSalesPeriod(period, now) {
-const [start, end, prevStart, prevEnd] = ReportController.getDateRange(period, now.clone());
+    const [start, end, prevStart, prevEnd] = ReportController.getDateRange(period, moment(now));
+
 
 
     const [currentRevenue, prevRevenue, totalOrders] = await Promise.all([
@@ -115,7 +116,9 @@ const [start, end, prevStart, prevEnd] = ReportController.getDateRange(period, n
   }
 
 static async calculateMostSoldPeriod(period, now) {
-  const [start, end] = ReportController.getDateRange(period, now.clone());
+  const [start, end] = ReportController.getDateRange(period, moment(now));
+
+
 
   const mostSold = await Order.aggregate([
     { $match: { createdAt: { $gte: start, $lte: end }, status: 'delivered' } },
@@ -192,7 +195,8 @@ static async calculateMostSoldPeriod(period, now) {
     try {
       const now = moment.tz('Asia/Karachi').set({ hour: 13, minute: 0, second: 0, millisecond: 0 });
 
-      const [start, end] = ReportController.getDateRange('monthly', now);
+      const [start, end] = ReportController.getDateRange('monthly', moment(now));
+
 
       const ordersAgg = await Order.aggregate([
         { $match: { createdAt: { $gte: start, $lte: end } } },
