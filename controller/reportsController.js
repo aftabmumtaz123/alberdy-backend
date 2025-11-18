@@ -707,25 +707,20 @@ static async getProfitLossReport(req, res) {
         totalSales: {
           value: Number(sales.totalSales.toFixed(2)),
           growth: Number(salesGrowth.toFixed(1)),
-          isPositive: salesGrowth >= 0
         },
         netRevenue: {
           value: Number(netRevenue.toFixed(2)),
           growth: Number(netRevGrowth.toFixed(1)),
-          isPositive: netRevGrowth >= 0,
           subtitle: `After ${(sales.totalDiscounts + sales.totalRefunds).toFixed(2)} deductions`
         },
         grossProfit: {
           value: Number(grossProfit.toFixed(2)),
           growth: Number(grossProfitGrowth.toFixed(1)),
-          isPositive: grossProfitGrowth >= 0,
           margin: Number(grossMargin.toFixed(1))
         },
         netProfit: {
           value: Number(netProfit.toFixed(2)),
           growth: Number(netProfitGrowth.toFixed(1)),
-          isPositive: netProfitGrowth >= 0,
-          subtitle: "After all expenses"
         }
       },
       incomeStatement: {
