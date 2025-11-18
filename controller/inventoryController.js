@@ -97,3 +97,143 @@ exports.addInventory = async (req, res) => {
     });
   }
 };
+
+
+
+
+
+// controllers/inventoryController.js  ← Add this function
+exports.getInventoryDashboard = async (req, res) => {
+  try {
+    const { search = "", sort = "name", page = 1, limit = 20 } = req.query;
+    const skip = (page - 1) * limit;
+
+    // Build search filter
+    const searchFilter = search
+      ? {
+          $or: [
+            { "product.name": { $regex: search, $options: "i" } },
+            { sku: { $regex: search, $options: "i" } },
+            { "product.brand.name": { $regex: search, $options: "i" } },
+          ],
+        }
+      : {};
+
+    // Main aggregation pipeline
+    const variants = await Variant.aggregate([
+      {
+        $match: {
+          isDeleted: { $ne: true },
+          status: { $ne: "Discontinued" },
+          ...searchFilter,
+        },
+      },
+      {
+        $lookup: {
+          from: "products",
+          localField: "product",
+          foreignField: "_id",
+          as: "product",
+        },
+      },
+      { $unwind: "$product" },
+      {
+        $lookup: {
+          from: "brands",
+          localField: "product.brand",
+          foreignField: "_id",
+          as: "product.brand",
+        },
+      },
+      { $unwind: { path: "$product.brand", preserveNullAndEmptyArrays: true } },
+      {
+        $addFields: {
+          productName: "$product.name",
+          brandName: "$product.brand.name",
+          thumbnail: {
+            $ifNull: ["$image", "$product.thumbnail", "/placeholder.jpg"],
+          },
+          lowStockWarning: {
+            $cond: [{ $lte: ["$stockQuantity", 10] }, true, false],
+          },
+          statusLabel: {
+            $cond: {
+              if: { $and: ["$expiryDate", { $lt: ["$expiryDate", new Date()] }] },
+              then: "Expired",
+              else: {
+                $cond: [
+                  { $lte: ["$stockQuantity", 10] },
+                  "Low Stock",
+                  "Good",
+                ],
+              },
+            },
+          },
+          statusColor: {
+            $cond: {
+              if: { $and: ["$expiryDate", { $lt: ["$expiryDate", new Date()] }] },
+              then: "expired",
+              else: {
+                $cond: [
+                  { $lte: ["$stockQuantity", 10] },
+                  "low",
+                  "good",
+                ],
+              },
+            },
+          },
+        },
+      },
+      {
+        $sort: {
+          ...(sort === "name" && { productName: 1 }),
+          ...(sort === "stock" && { stockQuantity: 1 }),
+          ...(sort === "expiry" && { expiryDate: 1 }),
+          updatedAt: -1,
+        },
+      },
+      { $skip: skip },
+      { $limit: Number(limit) },
+      {
+        $project: {
+          _id: 1,
+          productName: 1,
+          brandName: 1,
+          thumbnail: 1,
+          sku: 1,
+          stockQuantity: 1,
+          expiryDate: 1,
+          statusLabel: 1,
+          statusColor: 1,
+          lowStockWarning: 1,
+          updatedAt: 1,
+        },
+      },
+    ]);
+
+    const total = await Variant.countDocuments({
+      isDeleted: { $ne: true },
+      status: { $ne: "Discontinued" },
+      ...searchFilter,
+    });
+
+    res.json({
+      success: true,
+      data: variants,
+      pagination: {
+        total,
+        page: Number(page),
+        pages: Math.ceil(total / limit),
+        hasNext: page * limit < total,
+        hasPrev: page > 1,
+      },
+    });
+  } catch (err) {
+    console.error("Dashboard Error:", err);
+    res.status(500).json({
+      success: false,
+      msg: "Failed to load inventory",
+      error: err.message,
+    });
+  }
+};
