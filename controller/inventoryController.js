@@ -221,64 +221,77 @@ exports.getInventoryDashboard = async (req, res) => {
     res.status(500).json({ success: false, msg: "Failed to load inventory" });
   }
 };
-// Get single variant - FIXED & BULLETPROOF
+
+
+
+
+// Get single variant → returns basic info + LATEST STOCK MOVEMENT
 exports.getSingleVariant = async (req, res) => {
   try {
-    let { variantId } = req.params;
+    let id = req.params.variantId || req.params.id;
 
-    // 1. Log for debugging (remove later if you want)
-    console.log("Raw variantId from params:", variantId);
-
-    // 2. Clean the ID (this fixes 90% of cases!)
-    if (!variantId) {
-      return res.status(400).json({ success: false, msg: "variantId is missing in URL" });
-    }
-
-    variantId = variantId.toString().trim();
-
-    // 3. Extra safety: remove any whitespace, newlines, etc.
-    if (variantId.includes('\n') || variantId.includes(' ')) {
-      variantId = variantId.replace(/[\s\n\r]+/g, '');
-    }
-
-    // 4. Final validation
-    if (!mongoose.Types.ObjectId.isValid(variantId)) {
+    if (!id || !mongoose.Types.ObjectId.isValid(id.toString().trim())) {
       return res.status(400).json({ 
         success: false, 
-        msg: "Invalid variant ID format",
-        received: variantId 
+        msg: "Valid variantId is required" 
       });
     }
 
-    const variant = await Variant.findById(variantId)
+    id = id.toString().trim();
+
+    // 1. Get basic variant info (lean for speed)
+    const variant = await Variant.findById(id)
+      .select('sku stockQuantity image product')
       .populate('product', 'name thumbnail')
-      .populate('unit');
+      .lean();
 
     if (!variant) {
       return res.status(404).json({ success: false, msg: "Variant not found" });
     }
 
+    // 2. Get the LATEST stock movement
+    const latestMovement = await StockMovement.findOne({ variant: id })
+      .populate('performedBy', 'name')
+      .sort({ createdAt: -1 })
+      .lean();
+
     res.json({
       success: true,
+      msg: latestMovement ? "Latest stock movement fetched" : "Variant found (no movements yet)",
       data: {
-        variantId: variant._id,
+        variantId: variant._id.toString(),
         productName: variant.product?.name || "Unknown Product",
-        sku: variant.sku,
+        sku: variant.sku || "N/A",
         currentStock: variant.stockQuantity,
-        expiryDate: variant.expiryDate,
         thumbnail: variant.image || variant.product?.thumbnail || "/placeholder.jpg",
-        unit: variant.unit,
-        price: variant.price,
-        discountPrice: variant.discountPrice,
-        availableStock: variant.stockQuantity - variant.reservedQuantity
+
+        // ONLY the movement — clean and clear
+        movement: latestMovement ? {
+          previousQuantity: latestMovement.previousQuantity,
+          newQuantity: latestMovement.newQuantity,
+          changeQuantity: latestMovement.changeQuantity,
+          isStockIncreasing: latestMovement.isStockIncreasing,
+          movementType: latestMovement.movementType,
+          reason: latestMovement.reason,
+          referenceId: latestMovement.referenceId || null,
+          performedBy: latestMovement.performedBy?.name || "System",
+          performedAt: latestMovement.createdAt
+        } : null
       }
     });
 
   } catch (err) {
     console.error("getSingleVariant Error:", err);
-    res.status(500).json({ success: false, msg: "Server error", error: err.message });
+    res.status(500).json({ 
+      success: false, 
+      msg: "Server error", 
+      error: err.message 
+    });
   }
 };
+
+
+
 
 // Stock movement history
 exports.getStockMovements = async (req, res) => {
