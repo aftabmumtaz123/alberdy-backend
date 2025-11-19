@@ -101,7 +101,7 @@ exports.addInventory = async (req, res) => {
 
 exports.getInventoryDashboard = async (req, res) => {
   try {
-    const { search = "", sort = "name", page = 1, limit } = req.query;
+    const { search = "", sort = "name", page = 1, limit=100 } = req.query;
     const skip = (page - 1) * limit;
 
     // Build search filter
