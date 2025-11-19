@@ -70,10 +70,10 @@ if (amountPaid === undefined || amountPaid === null) {
     }
 
     // Validate amountPaid
-    if (amountPaid <= 0) {
+    if (amountPaid < 0) {
       return res.status(400).json({
         success: false,
-        message: 'Amount paid must be greater than zero',
+        message: 'Amount paid must be cannot be less than zero',
       });
     }
 
