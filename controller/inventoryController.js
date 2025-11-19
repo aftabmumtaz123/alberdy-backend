@@ -6,7 +6,7 @@ const mongoose = require('mongoose');
 const getPerformedBy = async (req) => {
   if (req.user?._id) return req.user._id;
   const User = mongoose.model('User');
-  const admin = await User.findOne({ role: { $in: ['Admin', 'Inventory Manager', 'Staff'] } }).lean();
+  const admin = await User.findOne({ role: { $in: ['Super Admin', 'Inventory Manager', 'Staff'] } }).lean();
   return admin?._id || new mongoose.Types.ObjectId("507f1f77bcf86cd799439011");
 };
 
