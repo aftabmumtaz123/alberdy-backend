@@ -19,7 +19,7 @@ const CustomerPaymentSchema = new mongoose.Schema({
     type: Number,
     min: 0,
   },
-  paymentMethod: {
+  payment_method: {
     type: String,
     required: true,
     enum: ['Bank Transfer', 'Credit Card', 'Cash', 'Check', 'Other'],
