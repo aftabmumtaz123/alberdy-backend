@@ -267,11 +267,18 @@ exports.getSingleVariant = async (req, res) => {
 
     id = id.toString().trim();
 
-    // 1. Get basic variant info (lean for speed)
-    const variant = await Variant.findById(id)
-      .select('sku stockQuantity image product')
-      .populate('product', 'name thumbnail')
-      .lean();
+  const variant = await Variant.findById(id)
+  .select('sku stockQuantity image product')
+  .populate({
+    path: 'product',
+    select: 'name thumbnail brand category',
+    populate: [
+      { path: 'brand', select: 'brandName' },
+      { path: 'category', select: 'name' }
+    ]
+  })
+  .lean();
+
 
     if (!variant) {
       return res.status(404).json({ success: false, msg: "Variant not found" });
