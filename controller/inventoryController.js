@@ -186,7 +186,6 @@ exports.getInventoryDashboard = async (req, res) => {
           stockQuantity: 1,
           expiryDate: 1,
           statusLabel: 1,
-          statusColor: 1,
           lowStockWarning: 1,
           updatedAt: 1,
         },
