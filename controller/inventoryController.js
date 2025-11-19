@@ -28,7 +28,8 @@ const adjustStock = async (req, res, variantIdFromParam = null) => {
       movementType = "Manual Adjustment",
       reason,
       referenceId,
-      expiryAlertDate
+      expiryAlertDate,
+      createdAt,
     } = req.body;
 
     const variantId = variantIdFromParam || bodyVariantId;
@@ -84,6 +85,7 @@ const adjustStock = async (req, res, variantIdFromParam = null) => {
       reason: reason.trim(),
       referenceId: referenceId?.trim() || generateReferenceId(),
       performedBy: await getPerformedBy(req),
+      createdAt
     }], { session });  // ← MUST include session!
 
     // COMMIT ONLY AFTER BOTH SAVE
@@ -103,7 +105,7 @@ const adjustStock = async (req, res, variantIdFromParam = null) => {
         referenceId: movement[0].referenceId,
         isStockIncreasing: isStockIncreasing === true,
         performedBy: req.user?.name || "System",
-        performedAt: new Date().toISOString(),
+        performedAt: createdAt,
         reason: reason.trim()
       }
     });
