@@ -124,12 +124,14 @@ const adjustStock = async (req, res, variantIdFromParam = null) => {
 exports.addInventory    = (req, res) => adjustStock(req, res);
 exports.updateInventory = (req, res) => adjustStock(req, res, req.params.variantId);
 
-// Dashboard (unchanged – perfect as is)
+
+
+
 exports.getInventoryDashboard = async (req, res) => {
   try {
     const { search = "", sort = "name", page = 1, limit = 200 } = req.query;
     const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
+    const limitNum = Math.max(1, Math.min(200, parseInt(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
 
     const searchFilter = search ? {
@@ -143,13 +145,20 @@ exports.getInventoryDashboard = async (req, res) => {
 
     const variants = await Variant.aggregate([
       { $match: { isDeleted: { $ne: true }, status: { $ne: "Discontinued" }, ...searchFilter } },
+
+      // 1. Get Product
       { $lookup: { from: "products", localField: "product", foreignField: "_id", as: "product" } },
-      { $unwind: "$product" },
-      { $lookup: { from: "brands", localField: "product.brand.brandName", foreignField: "_id", as: "product.brand" } },
+      { $unwind: { path: "$product", preserveNullAndEmptyArrays: true } },
+
+      // 2. Get Brand (correct: product.brand → Brand._id)
+      { $lookup: { from: "brands", localField: "product.brand", foreignField: "_id", as: "product.brand" } },
       { $unwind: { path: "$product.brand", preserveNullAndEmptyArrays: true } },
-      { $lookup: { from: "categories", localField: "product.category.name", foreignField: "_id", as: "product.category" } },
+
+      // 3. Get Category (correct: product.category → Category._id)
+      { $lookup: { from: "categories", localField: "product.category", foreignField: "_id", as: "product.category" } },
       { $unwind: { path: "$product.category", preserveNullAndEmptyArrays: true } },
 
+      // 4. Add readable fields
       {
         $addFields: {
           productName: "$product.name",
@@ -166,14 +175,19 @@ exports.getInventoryDashboard = async (req, res) => {
         }
       },
 
-      { $sort: { ...(sort === "name" && { productName: 1 }), ...(sort === "stock" && { stockQuantity: 1 }), updatedAt: -1 } },
+      { $sort: { 
+        ...(sort === "name" && { productName: 1 }), 
+        ...(sort === "stock" && { stockQuantity: 1 }), 
+        updatedAt: -1 
+      }},
+
       { $skip: skip },
       { $limit: limitNum },
 
       {
         $project: {
-          variantId: "$_id",
           _id: 1,
+          variantId: "$_id",
           productName: 1,
           brandName: 1,
           categoryName: 1,
@@ -188,20 +202,28 @@ exports.getInventoryDashboard = async (req, res) => {
       }
     ]);
 
-    const total = await Variant.countDocuments({ isDeleted: { $ne: true }, status: { $ne: "Discontinued" }, ...searchFilter });
+    const total = await Variant.countDocuments({ 
+      isDeleted: { $ne: true }, 
+      status: { $ne: "Discontinued" }, 
+      ...searchFilter 
+    });
 
     res.json({
       success: true,
       data: variants,
-      pagination: { total, page: pageNum, pages: Math.ceil(total / limitNum), limit: limitNum }
+      pagination: { 
+        total, 
+        page: pageNum, 
+        pages: Math.ceil(total / limitNum), 
+        limit: limitNum 
+      }
     });
+
   } catch (err) {
     console.error("Dashboard Error:", err);
-    res.status(500).json({ success: false, msg: "Failed to load inventory" });
+    res.status(500).json({ success: false, msg: "Failed to load inventory", error: err.message });
   }
 };
-
-
 
 
 // Get single variant → returns basic info + LATEST STOCK MOVEMENT
