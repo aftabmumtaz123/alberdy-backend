@@ -80,6 +80,11 @@ exports.createPayment = async (req, res) => {
     //   });
     // }
 
+
+
+
+
+
     // Validate payment method
     const allowedMethods = ['Bank Transfer', 'Credit Card', 'Cash', 'Check', 'Other'];
     if (!allowedMethods.includes(paymentMethod)) {
@@ -152,6 +157,16 @@ exports.updatePayment = async (req, res) => {
         msg: 'Payment not found',
       });
     }
+
+
+    // Optional: Restrict editing of certain statuses
+    if(payment.status === "Completed"){
+      return res.status(400).json({
+        success: false,
+        msg: 'Cannot edit completed payments',
+      }) 
+    }
+
 
     // Validate customer if provided
     if (customerId) {
