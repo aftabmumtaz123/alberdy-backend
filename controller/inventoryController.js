@@ -132,7 +132,7 @@ exports.getInventoryDashboard = async (req, res) => {
     const { 
       search = "", 
       page = 1, 
-      limit = 50,
+      limit = 500,
       movementType = "",
       startDate = "",
       endDate = ""
@@ -244,7 +244,6 @@ exports.getInventoryDashboard = async (req, res) => {
         total,
         page: pageNum,
         pages: Math.ceil(total / limitNum),
-        limit: limitNum
       }
     });
 
