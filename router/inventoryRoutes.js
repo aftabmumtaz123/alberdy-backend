@@ -10,7 +10,7 @@ const {
 
 
 router.post('/add', addInventory);
-router.put('/update/:id', updateInventory);
+router.put('/update/:variantId', updateInventory);
 router.get('/summary', getInventoryDashboard);
 router.get('/:id', getSingleVariant);
 module.exports = router;
