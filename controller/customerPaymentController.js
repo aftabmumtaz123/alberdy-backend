@@ -21,13 +21,6 @@ exports.createPayment = async (req, res) => {
   try {
     const { customerId, amountPaid, amountDue, paymentMethod, date, notes, totalAmount, status } = req.body;
 
-    // Validate input
-    if (!customerId || !amountPaid || !paymentMethod || totalAmount === undefined) {
-      return res.status(400).json({
-        success: false,
-        msg: 'Customer ID, amount paid, payment method, and total amount are required',
-      });
-    }
 
 
     if(!customerId){
