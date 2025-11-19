@@ -126,102 +126,135 @@ exports.updateInventory = (req, res) => adjustStock(req, res, req.params.variant
 
 
 
-
+// NEW: Stock Movements Dashboard – Shows Activity Log with Product Details
 exports.getInventoryDashboard = async (req, res) => {
   try {
-    const { search = "", sort = "name", page = 1, limit = 200 } = req.query;
+    const { 
+      search = "", 
+      page = 1, 
+      limit = 50,
+      movementType = "",
+      startDate = "",
+      endDate = ""
+    } = req.query;
+
     const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(200, parseInt(limit) || 20));
+    const limitNum = Math.max(1, Math.min(200, parseInt(limit) || 50));
     const skip = (pageNum - 1) * limitNum;
 
-    const searchFilter = search ? {
-      $or: [
+    // Build filter
+    const filter = {};
+
+    if (search) {
+      filter.$or = [
+        { "variant.sku": { $regex: search, $options: "i" } },
         { "product.name": { $regex: search, $options: "i" } },
-        { sku: { $regex: search, $options: "i" } },
-        { "product.brand.brandName": { $regex: search, $options: "i" } },
-        { "product.category.name": { $regex: search, $options: "i" } },
-      ]
-    } : {};
+        { reason: { $regex: search, $options: "i" } },
+        { movementType: { $regex: search, $options: "i" } }
+      ];
+    }
 
-    const variants = await Variant.aggregate([
-      { $match: { isDeleted: { $ne: true }, status: { $ne: "Discontinued" }, ...searchFilter } },
+    if (movementType) filter.movementType = movementType;
 
-      // 1. Get Product
-      { $lookup: { from: "products", localField: "product", foreignField: "_id", as: "product" } },
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(new Date(endDate).setHours(23,59,59,999));
+    }
+
+    const movements = await StockMovement.aggregate([
+      { $match: filter },
+
+      // 1. Get Variant + SKU
+      { $lookup: { from: "variants", localField: "variant", foreignField: "_id", as: "variant" } },
+      { $unwind: { path: "$variant", preserveNullAndEmptyArrays: true } },
+
+      // 2. Get Product from Variant
+      { $lookup: { from: "products", localField: "variant.product", foreignField: "_id", as: "product" } },
       { $unwind: { path: "$product", preserveNullAndEmptyArrays: true } },
 
-      // 2. Get Brand (correct: product.brand → Brand._id)
+      // 3. Get Brand
       { $lookup: { from: "brands", localField: "product.brand", foreignField: "_id", as: "product.brand" } },
       { $unwind: { path: "$product.brand", preserveNullAndEmptyArrays: true } },
 
-      // 3. Get Category (correct: product.category → Category._id)
+      // 4. Get Category
       { $lookup: { from: "categories", localField: "product.category", foreignField: "_id", as: "product.category" } },
       { $unwind: { path: "$product.category", preserveNullAndEmptyArrays: true } },
 
-      // 4. Add readable fields
+      // 5. Get Performed By
+      { $lookup: { from: "users", localField: "performedBy", foreignField: "_id", as: "performedByUser" } },
+      { $unwind: { path: "$performedByUser", preserveNullAndEmptyArrays: true } },
+
+      // 6. Final Fields
       {
         $addFields: {
           productName: "$product.name",
           brandName: "$product.brand.brandName",
           categoryName: "$product.category.name",
-          thumbnail: { $ifNull: ["$image", "$product.thumbnail", "/placeholder.jpg"] },
-          statusLabel: {
-            $cond: {
-              if: { $and: ["$expiryDate", { $lt: ["$expiryDate", new Date()] }] },
-              then: "Expired",
-              else: { $cond: [{ $lte: ["$stockQuantity", 10] }, "Low Stock", "Good"] }
-            }
-          }
+          sku: "$variant.sku",
+          thumbnail: { $ifNull: ["$variant.image", "$product.thumbnail", "/placeholder.jpg"] },
+          performedByName: { 
+            $ifNull: ["$performedByUser.name", "System"] 
+          },
+          change: {
+            $cond: [
+              "$isStockIncreasing",
+              { $concat: ["+", { $toString: "$changeQuantity" }] },
+              { $concat: ["−", { $toString: "$changeQuantity" }] }
+            ]
+          },
+          stockAfter: "$newQuantity"
         }
       },
 
-      { $sort: { 
-        ...(sort === "name" && { productName: 1 }), 
-        ...(sort === "stock" && { stockQuantity: 1 }), 
-        updatedAt: -1 
-      }},
-
+      { $sort: { createdAt: -1 } },
       { $skip: skip },
       { $limit: limitNum },
 
       {
         $project: {
           _id: 1,
-          variantId: "$_id",
+          sku: 1,
           productName: 1,
           brandName: 1,
           categoryName: 1,
           thumbnail: 1,
-          sku: 1,
-          stockQuantity: 1,
-          expiryDate: 1,
-          statusLabel: 1,
-          updatedAt: 1,
+          previousQuantity: 1,
+          newQuantity: 1,
+          stockAfter: 1,
+          change: 1,
+          changeQuantity: 1,
+          isStockIncreasing: 1,
+          movementType: 1,
+          reason: 1,
+          referenceId: 1,
+          performedByName: 1,
+          performedAt: "$createdAt",
           createdAt: 1
         }
       }
     ]);
 
-    const total = await Variant.countDocuments({ 
-      isDeleted: { $ne: true }, 
-      status: { $ne: "Discontinued" }, 
-      ...searchFilter 
-    });
+    const total = await StockMovement.countDocuments(filter);
 
     res.json({
       success: true,
-      data: variants,
-      pagination: { 
-        total, 
-        page: pageNum, 
-        pages: Math.ceil(total / limitNum), 
-        limit: limitNum 
+      data: movements,
+      pagination: {
+        total,
+        page: pageNum,
+        pages: Math.ceil(total / limitNum),
+        limit: limitNum
       }
     });
 
   } catch (err) {
-    console.error("Dashboard Error:", err);
-    res.status(500).json({ success: false, msg: "Failed to load inventory", error: err.message });
+    console.error("Stock Movements Dashboard Error:", err);
+    res.status(500).json({ 
+      success: false, 
+      msg: "Failed to load stock movements", 
+      error: err.message 
+    });
   }
 };
 
