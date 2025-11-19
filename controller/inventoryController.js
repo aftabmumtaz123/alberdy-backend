@@ -254,7 +254,8 @@ exports.getSingleVariant = async (req, res) => {
           reason: latestMovement.reason,
           referenceId: latestMovement.referenceId || null,
           performedBy: latestMovement.performedBy?.name || "System",
-          performedAt: latestMovement.createdAt
+          performedAt: latestMovement.createdAt,
+          createdAt: latestMovement.createdAt
         } : null
       }
     });
