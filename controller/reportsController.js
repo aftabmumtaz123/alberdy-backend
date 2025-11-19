@@ -238,15 +238,17 @@ static async getExpiredProducts(req, res) {
     })
       .populate({
         path: 'product',
-        select: 'name thumbnail',           
+        select: 'name thumbnail',   
+        match: { $expr: { $ne: ["$product", null] } },         
         populate: {
           path: 'category',
           select: 'name image'
         }
       })
+      .where('product').ne(null) 
       .select('sku expiryDate product stockQuantity')
       .sort({ expiryDate: 1 })
-      .limit(10);
+      .limit(20);
 
     const data = variants.map(v => {
       const expiry = moment.tz(v.expiryDate, 'Asia/Karachi').startOf('day');
