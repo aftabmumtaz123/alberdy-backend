@@ -289,6 +289,8 @@ exports.getSingleVariant = async (req, res) => {
       data: {
         variantId: variant._id.toString(),
         productName: variant.product?.name || "Unknown Product",
+        brandName: variant.product?.brand?.brandName || "Unknown Brand",
+        categoryName: variant.product?.category?.name || "Unknown Category",
         sku: variant.sku || "N/A",
         currentStock: variant.stockQuantity,
         thumbnail: variant.image || variant.product?.thumbnail || "/placeholder.jpg",
