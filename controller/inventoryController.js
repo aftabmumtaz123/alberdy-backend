@@ -125,14 +125,13 @@ exports.addInventory    = (req, res) => adjustStock(req, res);
 exports.updateInventory = (req, res) => adjustStock(req, res, req.params.variantId);
 
 
-
-// NEW: Stock Movements Dashboard – Shows Activity Log with Product Details
+// NEW: Stock Movements Dashboard – With variantId
 exports.getInventoryDashboard = async (req, res) => {
   try {
     const { 
       search = "", 
       page = 1, 
-      limit = 500,
+      limit = 5000,
       movementType = "",
       startDate = "",
       endDate = ""
@@ -142,7 +141,6 @@ exports.getInventoryDashboard = async (req, res) => {
     const limitNum = Math.max(1, Math.min(200, parseInt(limit) || 50));
     const skip = (pageNum - 1) * limitNum;
 
-    // Build filter
     const filter = {};
 
     if (search) {
@@ -165,45 +163,41 @@ exports.getInventoryDashboard = async (req, res) => {
     const movements = await StockMovement.aggregate([
       { $match: filter },
 
-      // 1. Get Variant + SKU
-      { $lookup: { from: "variants", localField: "variant", foreignField: "_id", as: "variant" } },
-      { $unwind: { path: "$variant", preserveNullAndEmptyArrays: true } },
+      // Get Variant (with _id → variantId)
+      { $lookup: { from: "variants", localField: "variant", foreignField: "_id", as: "variantDoc" } },
+      { $unwind: { path: "$variantDoc", preserveNullAndEmptyArrays: true } },
 
-      // 2. Get Product from Variant
-      { $lookup: { from: "products", localField: "variant.product", foreignField: "_id", as: "product" } },
+      // Get Product
+      { $lookup: { from: "products", localField: "variantDoc.product", foreignField: "_id", as: "product" } },
       { $unwind: { path: "$product", preserveNullAndEmptyArrays: true } },
 
-      // 3. Get Brand
-      { $lookup: { from: "brands", localField: "product.brand", foreignField: "_id", as: "product.brand" } },
-      { $unwind: { path: "$product.brand", preserveNullAndEmptyArrays: true } },
+      // Get Brand & Category
+      { $lookup: { from: "brands", localField: "product.brand", foreignField: "_id", as: "brand" } },
+      { $unwind: { path: "$brand", preserveNullAndEmptyArrays: true } },
+      { $lookup: { from: "categories", localField: "product.category", foreignField: "_id", as: "category" } },
+      { $unwind: { path: "$category", preserveNullAndEmptyArrays: true } },
 
-      // 4. Get Category
-      { $lookup: { from: "categories", localField: "product.category", foreignField: "_id", as: "product.category" } },
-      { $unwind: { path: "$product.category", preserveNullAndEmptyArrays: true } },
+      // Get User
+      { $lookup: { from: "users", localField: "performedBy", foreignField: "_id", as: "user" } },
+      { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
 
-      // 5. Get Performed By
-      { $lookup: { from: "users", localField: "performedBy", foreignField: "_id", as: "performedByUser" } },
-      { $unwind: { path: "$performedByUser", preserveNullAndEmptyArrays: true } },
-
-      // 6. Final Fields
+      // Final Fields
       {
         $addFields: {
+          variantId: "$variantDoc._id",                    // ← HERE IT IS
+          sku: "$variantDoc.sku",
           productName: "$product.name",
-          brandName: "$product.brand.brandName",
-          categoryName: "$product.category.name",
-          sku: "$variant.sku",
-          thumbnail: { $ifNull: ["$variant.image", "$product.thumbnail", "/placeholder.jpg"] },
-          performedByName: { 
-            $ifNull: ["$performedByUser.name", "System"] 
-          },
-          change: {
+          brandName: "$brand.brandName",
+          categoryName: "$category.name",
+          thumbnail: { $ifNull: ["$variantDoc.image", "$product.thumbnail", "/placeholder.jpg"] },
+          performedByName: { $ifNull: ["$user.name", "System"] },
+          changeDisplay: {
             $cond: [
               "$isStockIncreasing",
               { $concat: ["+", { $toString: "$changeQuantity" }] },
               { $concat: ["−", { $toString: "$changeQuantity" }] }
             ]
-          },
-          stockAfter: "$newQuantity"
+          }
         }
       },
 
@@ -214,6 +208,7 @@ exports.getInventoryDashboard = async (req, res) => {
       {
         $project: {
           _id: 1,
+          variantId: 1,                    // ← variantId included
           sku: 1,
           productName: 1,
           brandName: 1,
@@ -221,9 +216,8 @@ exports.getInventoryDashboard = async (req, res) => {
           thumbnail: 1,
           previousQuantity: 1,
           newQuantity: 1,
-          stockAfter: 1,
-          change: 1,
           changeQuantity: 1,
+          changeDisplay: 1,
           isStockIncreasing: 1,
           movementType: 1,
           reason: 1,
@@ -239,6 +233,7 @@ exports.getInventoryDashboard = async (req, res) => {
 
     res.json({
       success: true,
+      msg: "Stock movements fetched successfully",
       data: movements,
       pagination: {
         total,
