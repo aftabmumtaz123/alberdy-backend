@@ -4,7 +4,7 @@ const {
   addInventory,
   getInventoryDashboard,
   updateInventory,
-  getSingleInventory
+  getSingleVariant
 } = require('../controller/inventoryController');
 
 
@@ -12,5 +12,5 @@ const {
 router.post('/add', addInventory);
 router.put('/update/:id', updateInventory);
 router.get('/summary', getInventoryDashboard);
-router.get('/:id', getSingleInventory);
+router.get('/:id', getSingleVariant);
 module.exports = router;
