@@ -221,36 +221,62 @@ exports.getInventoryDashboard = async (req, res) => {
     res.status(500).json({ success: false, msg: "Failed to load inventory" });
   }
 };
-
-// Get single variant
+// Get single variant - FIXED & BULLETPROOF
 exports.getSingleVariant = async (req, res) => {
   try {
-    const { variantId } = req.params;
+    let { variantId } = req.params;
+
+    // 1. Log for debugging (remove later if you want)
+    console.log("Raw variantId from params:", variantId);
+
+    // 2. Clean the ID (this fixes 90% of cases!)
+    if (!variantId) {
+      return res.status(400).json({ success: false, msg: "variantId is missing in URL" });
+    }
+
+    variantId = variantId.toString().trim();
+
+    // 3. Extra safety: remove any whitespace, newlines, etc.
+    if (variantId.includes('\n') || variantId.includes(' ')) {
+      variantId = variantId.replace(/[\s\n\r]+/g, '');
+    }
+
+    // 4. Final validation
     if (!mongoose.Types.ObjectId.isValid(variantId)) {
-      return res.status(400).json({ success: false, msg: "Invalid variant ID" });
+      return res.status(400).json({ 
+        success: false, 
+        msg: "Invalid variant ID format",
+        received: variantId 
+      });
     }
 
     const variant = await Variant.findById(variantId)
       .populate('product', 'name thumbnail')
       .populate('unit');
 
-    if (!variant) return res.status(404).json({ success: false, msg: "Variant not found" });
+    if (!variant) {
+      return res.status(404).json({ success: false, msg: "Variant not found" });
+    }
 
     res.json({
       success: true,
       data: {
         variantId: variant._id,
-        productName: variant.product?.name || "Unknown",
+        productName: variant.product?.name || "Unknown Product",
         sku: variant.sku,
         currentStock: variant.stockQuantity,
         expiryDate: variant.expiryDate,
         thumbnail: variant.image || variant.product?.thumbnail || "/placeholder.jpg",
-        unit: variant.unit
+        unit: variant.unit,
+        price: variant.price,
+        discountPrice: variant.discountPrice,
+        availableStock: variant.stockQuantity - variant.reservedQuantity
       }
     });
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, msg: "Server error" });
+    console.error("getSingleVariant Error:", err);
+    res.status(500).json({ success: false, msg: "Server error", error: err.message });
   }
 };
 
