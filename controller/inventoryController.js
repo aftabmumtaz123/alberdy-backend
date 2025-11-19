@@ -127,7 +127,7 @@ exports.updateInventory = (req, res) => adjustStock(req, res, req.params.variant
 // Dashboard (unchanged – perfect as is)
 exports.getInventoryDashboard = async (req, res) => {
   try {
-    const { search = "", sort = "name", page = 1, limit = 20 } = req.query;
+    const { search = "", sort = "name", page = 1, limit = 200 } = req.query;
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
