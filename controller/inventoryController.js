@@ -101,8 +101,11 @@ exports.addInventory = async (req, res) => {
 
 exports.getInventoryDashboard = async (req, res) => {
   try {
-    const { search = "", sort = "name", page = 1, limit=100 } = req.query;
-    const skip = (page - 1) * limit;
+    const { search = "", sort = "name", page = 1, limit = 100 } = req.query;
+
+    const pageNum = Number(page);
+    const limitNum = Number(limit);
+    const skip = (pageNum - 1) * limitNum;
 
     // Build search filter
     const searchFilter = search
@@ -111,6 +114,7 @@ exports.getInventoryDashboard = async (req, res) => {
             { "product.name": { $regex: search, $options: "i" } },
             { sku: { $regex: search, $options: "i" } },
             { "product.brand.name": { $regex: search, $options: "i" } },
+            { "product.category.name": { $regex: search, $options: "i" } }, // added category in search
           ],
         }
       : {};
@@ -123,6 +127,8 @@ exports.getInventoryDashboard = async (req, res) => {
           ...searchFilter,
         },
       },
+
+      // ===== PRODUCT LOOKUP =====
       {
         $lookup: {
           from: "products",
@@ -132,6 +138,8 @@ exports.getInventoryDashboard = async (req, res) => {
         },
       },
       { $unwind: "$product" },
+
+      // ===== BRAND LOOKUP =====
       {
         $lookup: {
           from: "brands",
@@ -141,10 +149,23 @@ exports.getInventoryDashboard = async (req, res) => {
         },
       },
       { $unwind: { path: "$product.brand", preserveNullAndEmptyArrays: true } },
+
+      // ===== CATEGORY LOOKUP (ADDED) =====
+      {
+        $lookup: {
+          from: "categories",
+          localField: "product.category",
+          foreignField: "_id",
+          as: "product.category",
+        },
+      },
+      { $unwind: { path: "$product.category", preserveNullAndEmptyArrays: true } },
+
       {
         $addFields: {
           productName: "$product.name",
           brandName: "$product.brand.brandName",
+          categoryName: "$product.category.name", // ADDED
           thumbnail: {
             $ifNull: ["$image", "$product.thumbnail", "/placeholder.jpg"],
           },
@@ -166,6 +187,7 @@ exports.getInventoryDashboard = async (req, res) => {
           },
         },
       },
+
       {
         $sort: {
           ...(sort === "name" && { productName: 1 }),
@@ -174,13 +196,16 @@ exports.getInventoryDashboard = async (req, res) => {
           updatedAt: -1,
         },
       },
+
       { $skip: skip },
-      { $limit: Number(limit) },
+      { $limit: limitNum },
+
       {
         $project: {
           _id: 1,
           productName: 1,
           brandName: 1,
+          categoryName: 1, // ADDED IN OUTPUT
           thumbnail: 1,
           sku: 1,
           stockQuantity: 1,
@@ -203,10 +228,10 @@ exports.getInventoryDashboard = async (req, res) => {
       data: variants,
       pagination: {
         total,
-        page: Number(page),
-        pages: Math.ceil(total / limit),
-        hasNext: page * limit < total,
-        hasPrev: page > 1,
+        page: pageNum,
+        pages: Math.ceil(total / limitNum),
+        hasNext: pageNum * limitNum < total,
+        hasPrev: pageNum > 1,
       },
     });
   } catch (err) {
