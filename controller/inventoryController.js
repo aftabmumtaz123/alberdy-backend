@@ -14,16 +14,18 @@ const getPerformedBy = async (req) => {
 const generateReferenceId = () => `ADJ-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 
 // Core stock adjustment (shared between add & update)
+
+
 const adjustStock = async (req, res, variantIdFromParam = null) => {
   const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
+    session.startTransaction();
+
     const {
       variantId: bodyVariantId,
       quantityChange,
       isStockIncreasing,
-      movementType,        // ← NOW ACCEPT ANY STRING FROM FRONTEND (NO VALIDATION)
+      movementType = "Manual Adjustment",
       reason,
       referenceId,
       expiryAlertDate
@@ -31,34 +33,21 @@ const adjustStock = async (req, res, variantIdFromParam = null) => {
 
     const variantId = variantIdFromParam || bodyVariantId;
 
-    // === BASIC REQUIRED VALIDATION ===
+    // Validation
     if (!variantId || !mongoose.Types.ObjectId.isValid(variantId)) {
-      return res.status(400).json({ success: false, msg: "Valid variantId is required" });
+      return res.status(400).json({ success: false, msg: "Valid variantId required" });
     }
-
-    if (quantityChange === undefined || quantityChange === null) {
-      return res.status(400).json({ success: false, msg: "quantityChange is required" });
+    if (quantityChange == null || isStockIncreasing == null || !reason?.trim()) {
+      return res.status(400).json({ success: false, msg: "Missing required fields" });
     }
-
-    if (isStockIncreasing === undefined) {
-      return res.status(400).json({ success: false, msg: "isStockIncreasing (true/false) is required" });
-    }
-
-    if (!reason?.trim()) {
-      return res.status(400).json({ success: false, msg: "Reason is required" });
-    }
-
-    // movementType can be ANY string — no validation at all
-    const movementTypeStr = (movementType || 'Manual Adjustment').toString().trim();
 
     const qty = Math.abs(Number(quantityChange));
     if (isNaN(qty) || qty === 0) {
-      return res.status(400).json({ success: false, msg: "quantityChange must be a positive non-zero number" });
+      return res.status(400).json({ success: false, msg: "Invalid quantity" });
     }
 
     const changeAmount = isStockIncreasing ? qty : -qty;
 
-    // === FIND VARIANT ===
     const variant = await Variant.findById(variantId)
       .populate('product', 'name')
       .session(session);
@@ -68,71 +57,60 @@ const adjustStock = async (req, res, variantIdFromParam = null) => {
       return res.status(404).json({ success: false, msg: "Variant not found" });
     }
 
-    // === PREVENT NEGATIVE STOCK ===
     if (variant.stockQuantity + changeAmount < 0) {
       await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        msg: `Cannot reduce below zero. Current stock: ${variant.stockQuantity}`
-      });
+      return res.status(400).json({ success: false, msg: "Insufficient stock" });
     }
 
     const previousQty = variant.stockQuantity;
     variant.stockQuantity += changeAmount;
 
-    // Optional expiry update
     if (expiryAlertDate) {
       const exp = new Date(expiryAlertDate);
-      if (!isNaN(exp.getTime())) {
-        variant.expiryDate = exp;
-      }
+      if (!isNaN(exp)) variant.expiryDate = exp;
     }
 
     await variant.save({ session });
 
-    // Auto generate reference if not provided
-    const finalRefId = referenceId?.trim() || generateReferenceId();
-
-    // === RECORD STOCK MOVEMENT ===
-    await StockMovement.create([{
+    // THIS LINE IS CRITICAL – DO NOT SKIP!
+    const movement = await StockMovement.create([{
       variant: variant._id,
       sku: variant.sku,
       previousQuantity: previousQty,
       newQuantity: variant.stockQuantity,
       changeQuantity: changeAmount,
       isStockIncreasing: isStockIncreasing === true,
-      movementType: movementTypeStr,           // ← ANY STRING ALLOWED
+      movementType: movementType.trim(),
       reason: reason.trim(),
-      referenceId: finalRefId,
+      referenceId: referenceId?.trim() || generateReferenceId(),
       performedBy: await getPerformedBy(req),
-    }], { session });
+    }], { session });  // ← MUST include session!
 
+    // COMMIT ONLY AFTER BOTH SAVE
     await session.commitTransaction();
 
-    // === SUCCESS RESPONSE ===
     res.json({
       success: true,
       msg: isStockIncreasing ? "Stock increased" : "Stock decreased",
       data: {
         variantId: variant._id,
-        productName: variant.product?.name || "Unknown",
+        productName: variant.product.name,
         sku: variant.sku,
         previousQuantity: previousQty,
         newQuantity: variant.stockQuantity,
         change: changeAmount,
-        movementType: movementTypeStr,
-        referenceId: finalRefId,
+        movementType: movementType.trim(),
+        referenceId: movement[0].referenceId,
         isStockIncreasing: isStockIncreasing === true,
         performedBy: req.user?.name || "System",
         performedAt: new Date().toISOString(),
-        reason: reason.trim(),
-
+        reason: reason.trim()
       }
     });
 
   } catch (err) {
     await session.abortTransaction();
-    console.error("Stock Adjustment Error:", err);
+    console.error("Stock Adjustment FAILED:", err);
     res.status(500).json({ success: false, msg: "Server error", error: err.message });
   } finally {
     session.endSession();
