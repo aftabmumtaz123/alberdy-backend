@@ -11,4 +11,3 @@ router.post('/add', addInventory);
 
 router.get('/summary', getInventoryDashboard);
 module.exports = router;
-

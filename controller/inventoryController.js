@@ -13,7 +13,6 @@ exports.addInventory = async (req, res) => {
       expiryAlertDate
     } = req.body;
 
-    // === VALIDATION ===
     if (!variantId || quantityChange === undefined || !reason?.trim()) {
       return res.status(400).json({
         success: false,
@@ -100,9 +99,6 @@ exports.addInventory = async (req, res) => {
 
 
 
-
-
-// controllers/inventoryController.js  ← Add this function
 exports.getInventoryDashboard = async (req, res) => {
   try {
     const { search = "", sort = "name", page = 1, limit } = req.query;
@@ -149,7 +145,7 @@ exports.getInventoryDashboard = async (req, res) => {
       {
         $addFields: {
           productName: "$product.name",
-          brandName: "$product.brand.name",
+          brandName: "$product.brand.brandName",
           thumbnail: {
             $ifNull: ["$image", "$product.thumbnail", "/placeholder.jpg"],
           },
