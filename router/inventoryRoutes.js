@@ -1,3 +1,4 @@
+// routes/inventory.js
 const express = require('express');
 const router = express.Router();
 const {
@@ -7,10 +8,9 @@ const {
   getSingleVariant
 } = require('../controller/inventoryController');
 
-
-
 router.post('/add', addInventory);
 router.put('/update/:variantId', updateInventory);
 router.get('/summary', getInventoryDashboard);
-router.get('/:variantId', getSingleVariant);
+router.get('/:variantId', getSingleVariant);   // Perfect
+
 module.exports = router;
