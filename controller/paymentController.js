@@ -167,6 +167,13 @@ exports.updatePayment = async (req, res) => {
       });
     }
 
+     if(payment.status === "Completed"){
+      return res.status(400).json({
+        success: false,
+        msg: 'Cannot edit completed payments',
+      }) 
+    }
+
     // Validate supplier if provided
     if (supplierId) {
       const supplier = await Supplier.findById(supplierId);

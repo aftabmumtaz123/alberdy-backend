@@ -159,7 +159,7 @@ exports.updatePayment = async (req, res) => {
     }
 
 
-    // Optional: Restrict editing of certain statuses
+    
     if(payment.status === "Completed"){
       return res.status(400).json({
         success: false,
