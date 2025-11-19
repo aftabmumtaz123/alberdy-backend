@@ -31,6 +31,13 @@ exports.createPayment = async (req, res) => {
     }
 
 
+    if (amountPaid === undefined || amountPaid === null) {
+  return res.status(400).json({
+    success: false,
+    message: 'Amount Paid is required',
+  });
+}
+
 
     // Check if customer exists and is a Customer
     const customer = await User.findById(customerId);

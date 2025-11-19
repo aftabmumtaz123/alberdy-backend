@@ -30,12 +30,13 @@ exports.createPayment = async (req, res) => {
       });
     }
 
-    if(!amountPaid){
-      return res.status(400).json({
-        success: false,
-        message: 'Amount Paid is required',
-      });
-    }
+if (amountPaid === undefined || amountPaid === null) {
+  return res.status(400).json({
+    success: false,
+    message: 'Amount Paid is required',
+  });
+}
+
 
     if(!paymentMethod){
       return res.status(400).json({
