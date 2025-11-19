@@ -364,7 +364,7 @@ exports.getAllPayments = async (req, res) => {
     // Fetch payments
     const payments = await CustomerPayment.find(query)
       .populate('customer', 'name email')
-      .sort({ date: -1 })
+      .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
 

@@ -378,7 +378,7 @@ exports.getAllPayments = async (req, res) => {
     // Fetch payments
     const payments = await Payment.find(query)
       .populate('supplier', 'supplierName supplierCode email phone address')
-      .sort({ date: -1 })
+      .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
 
