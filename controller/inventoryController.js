@@ -145,9 +145,9 @@ exports.getInventoryDashboard = async (req, res) => {
       { $match: { isDeleted: { $ne: true }, status: { $ne: "Discontinued" }, ...searchFilter } },
       { $lookup: { from: "products", localField: "product", foreignField: "_id", as: "product" } },
       { $unwind: "$product" },
-      { $lookup: { from: "brands", localField: "product.brand", foreignField: "_id", as: "product.brand" } },
+      { $lookup: { from: "brands", localField: "brand.brandName", foreignField: "_id", as: "product.brand" } },
       { $unwind: { path: "$product.brand", preserveNullAndEmptyArrays: true } },
-      { $lookup: { from: "categories", localField: "product.category", foreignField: "_id", as: "product.category" } },
+      { $lookup: { from: "categories", localField: "category.name", foreignField: "_id", as: "product.category" } },
       { $unwind: { path: "$product.category", preserveNullAndEmptyArrays: true } },
 
       {
