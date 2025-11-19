@@ -10,14 +10,16 @@ const stockMovementSchema = new mongoose.Schema({
   sku: { type: String, required: true },
   previousQuantity: { type: Number, required: true },
   newQuantity: { type: Number, required: true, min: 0 },
-  changeQuantity: { type: Number, required: true }, // +ve or -ve
+
+  isStockIncreasing: { type: Boolean, required: true },
+  changeQuantity: { type: Number, required: true }, 
   movementType: {
     type: String,
-    enum: ['Purchase/Received', 'Sale/Usage', 'Return', 'Damage', 'Adjustment'],
+    minlength: 5,
     required: true,
   },
   reason: { type: String, required: true, trim: true },
-  referenceId: { type: String, trim: true }, // orderId, purchaseId, etc.
+  referenceId: { type: String, trim: true },
   performedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
