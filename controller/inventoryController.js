@@ -9,7 +9,6 @@ exports.addInventory = async (req, res) => {
       variantId,
       quantityChange,
       reason,
-      referenceId,
       expiryAlertDate
     } = req.body;
 
@@ -70,7 +69,6 @@ exports.addInventory = async (req, res) => {
       changeQuantity: qty,
       movementType: qty > 0 ? 'Purchase/Received' : 'Damage',
       reason: reason.trim(),
-      referenceId: referenceId?.trim() || null,
       performedBy
     });
 
@@ -240,6 +238,149 @@ exports.getInventoryDashboard = async (req, res) => {
       success: false,
       msg: "Failed to load inventory",
       error: err.message,
+    });
+  }
+};
+
+
+
+exports.updateInventory = async (req, res) => {
+  try {
+    const { variantId } = req.params;
+    const {
+      quantityChange,     // positive = add, negative = remove
+      reason,
+      expiryAlertDate
+    } = req.body;
+
+    // Validation
+    if (quantityChange === undefined || !reason?.trim()) {
+      return res.status(400).json({
+        success: false,
+        msg: "quantityChange and reason are required"
+      });
+    }
+
+    const qty = Number(quantityChange);
+    if (isNaN(qty) || qty === 0) {
+      return res.status(400).json({ success: false, msg: "quantityChange must be a non-zero number" });
+    }
+
+    // Find variant
+    const variant = await Variant.findById(variantId).populate('product', 'name');
+    if (!variant) {
+      return res.status(404).json({ success: false, msg: "Product variant not found" });
+    }
+
+    // Prevent negative stock
+    if (variant.stockQuantity + qty < 0) {
+      return res.status(400).json({
+        success: false,
+        msg: `Insufficient stock. Current: ${variant.stockQuantity}, Requested: ${qty}`
+      });
+    }
+
+    const previousQty = variant.stockQuantity;
+
+    // Update stock
+    variant.stockQuantity += qty;
+
+    // Update expiry if provided
+    if (expiryAlertDate) {
+      const exp = new Date(expiryAlertDate);
+      if (!isNaN(exp.getTime())) {
+        variant.expiryDate = exp;
+      }
+    }
+
+    await variant.save();
+
+    // Get performedBy safely
+    let performedBy = req.user?._id;
+    if (!performedBy) {
+      const User = mongoose.model('User');
+      const admin = await User.findOne({ role: { $in: ['Admin', 'Inventory Manager'] } }).lean();
+      performedBy = admin?._id || "507f1f77bcf86cd799439011";
+    }
+
+    // Create audit log
+    await StockMovement.create({
+      variant: variant._id,
+      sku: variant.sku,
+      previousQuantity: previousQty,
+      newQuantity: variant.stockQuantity,
+      changeQuantity: qty,
+      movementType: qty > 0 ? 'Purchase/Received' : 'Damage',
+      reason: reason.trim(),
+      performedBy
+    });
+
+    res.json({
+      success: true,
+      msg: qty > 0 ? "Stock added successfully" : "Stock removed successfully",
+      data: {
+        variantId: variant._id,
+        productName: variant.product?.name || "Unknown",
+        sku: variant.sku,
+        previousQuantity: previousQty,
+        newQuantity: variant.stockQuantity,
+        change: qty,
+        expiryDate: variant.expiryDate
+      }
+    });
+
+  } catch (err) {
+    console.error("Update Inventory Error:", err);
+    res.status(500).json({
+      success: false,
+      msg: "Failed to update inventory",
+      error: err.message
+    });
+  }
+};
+
+
+
+
+exports.getSingleInventory = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Validate ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        msg: "Invalid inventory ID",
+      });
+    }
+
+    // Find the variant + inventory
+    const variant = await Variant.findById(id)
+      .populate("product")
+      .populate("unit");
+
+    if (!variant) {
+      return res.status(404).json({
+        success: false,
+        msg: "Inventory not found",
+      });
+    }
+
+    // Find existing inventory entry for this variant
+    const inventory = await Inventory.findOne({ variant: id });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        variant,
+        inventory,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching single inventory:", error);
+    return res.status(500).json({
+      success: false,
+      msg: "Server error",
     });
   }
 };
