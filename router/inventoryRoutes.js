@@ -11,6 +11,6 @@ const {
 router.post('/add', addInventory);
 router.put('/update/:variantId', updateInventory);
 router.get('/summary', getInventoryDashboard);
-router.get('/:variantId', getSingleVariant);   // Perfect
+router.get('/:variantId', getSingleVariant); 
 
 module.exports = router;

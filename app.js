@@ -64,7 +64,6 @@ app.use('/api', require('./router/customer'));
 app.use('/api/expenses', require('./router/expense')); 
 app.use('/api/expense-categories', require('./router/expenseCategory')); 
 app.use('/api/currencies', require('./router/currency')); 
-app.use('/api', require('./router/inventoryRoutes')); 
 app.use('/api/configuration', require('./router/appConfigurationRouter')); 
 app.use('/api/dashboard', require('./router/dashboard'));
 app.use('/api/offer', require('./router/offer'));
