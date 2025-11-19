@@ -115,7 +115,6 @@ exports.getInventoryDashboard = async (req, res) => {
         }
       : {};
 
-    // Main aggregation pipeline
     const variants = await Variant.aggregate([
       {
         $match: {
@@ -161,19 +160,6 @@ exports.getInventoryDashboard = async (req, res) => {
                   { $lte: ["$stockQuantity", 10] },
                   "Low Stock",
                   "Good",
-                ],
-              },
-            },
-          },
-          statusColor: {
-            $cond: {
-              if: { $and: ["$expiryDate", { $lt: ["$expiryDate", new Date()] }] },
-              then: "expired",
-              else: {
-                $cond: [
-                  { $lte: ["$stockQuantity", 10] },
-                  "low",
-                  "good",
                 ],
               },
             },
