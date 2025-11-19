@@ -123,7 +123,10 @@ const adjustStock = async (req, res, variantIdFromParam = null) => {
         movementType: movementTypeStr,
         referenceId: finalRefId,
         isStockIncreasing: isStockIncreasing === true,
-        expiryDate: variant.expiryDate || null
+        performedBy: req.user?.name || "System",
+        performedAt: new Date().toISOString(),
+        reason: reason.trim(),
+
       }
     });
 
