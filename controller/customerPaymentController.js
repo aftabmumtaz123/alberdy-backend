@@ -193,13 +193,7 @@ exports.updatePayment = async (req, res) => {
       });
     }
 
-    // Validate amountPaid if provided
-    if (amountPaid && amountPaid < 0) {
-      return res.status(400).json({
-        success: false,
-        msg: 'Amount paid must be greater than zero',
-      });
-    }
+
 
     // Validate amountDue if provided
     if (amountDue !== undefined && amountDue < 0) {
