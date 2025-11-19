@@ -205,6 +205,7 @@ exports.getInventoryDashboard = async (req, res) => {
           expiryDate: 1,
           statusLabel: 1,
           updatedAt: 1,
+          createdAt: 1
         }
       }
     ]);
