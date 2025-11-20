@@ -308,7 +308,7 @@ exports.getSingleVariant = async (req, res) => {
         movement: latestMovement ? {
           previousQuantity: latestMovement.previousQuantity,
           newQuantity: latestMovement.newQuantity,
-          changeQuantity: Math.abs(latestMovement.changeQuantity),
+          changeQuantity: latestMovement.changeQuantity,
           isStockIncreasing: latestMovement.isStockIncreasing,
           movementType: latestMovement.movementType,
           reason: latestMovement.reason,
