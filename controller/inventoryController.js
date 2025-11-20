@@ -127,7 +127,10 @@ exports.addInventory    = (req, res) => adjustStock(req, res);
 exports.updateInventory = (req, res) => adjustStock(req, res, req.params.variantId);
 
 
-// NEW: Stock Movements Dashboard – With variantId
+
+
+
+// NEW: Stock Movements Dashboard – NEWEST FIRST + variantId
 exports.getInventoryDashboard = async (req, res) => {
   try {
     const { 
@@ -159,34 +162,35 @@ exports.getInventoryDashboard = async (req, res) => {
     if (startDate || endDate) {
       filter.createdAt = {};
       if (startDate) filter.createdAt.$gte = new Date(startDate);
-      if (endDate) filter.createdAt.$lte = new Date(new Date(endDate).setHours(23,59,59,999));
+      if (endDate) filter.createdAt.$lte = new Date(new Date(endDate).setHours(23, 59, 59, 999));
     }
 
     const movements = await StockMovement.aggregate([
       { $match: filter },
 
-      // Get Variant (with _id → variantId)
+      // CRITICAL: Sort by newest first EARLY
+      { $sort: { createdAt: -1 } },
+
+      // Now do lookups (order is now preserved)
       { $lookup: { from: "variants", localField: "variant", foreignField: "_id", as: "variantDoc" } },
       { $unwind: { path: "$variantDoc", preserveNullAndEmptyArrays: true } },
 
-      // Get Product
       { $lookup: { from: "products", localField: "variantDoc.product", foreignField: "_id", as: "product" } },
       { $unwind: { path: "$product", preserveNullAndEmptyArrays: true } },
 
-      // Get Brand & Category
       { $lookup: { from: "brands", localField: "product.brand", foreignField: "_id", as: "brand" } },
       { $unwind: { path: "$brand", preserveNullAndEmptyArrays: true } },
+
       { $lookup: { from: "categories", localField: "product.category", foreignField: "_id", as: "category" } },
       { $unwind: { path: "$category", preserveNullAndEmptyArrays: true } },
 
-      // Get User
       { $lookup: { from: "users", localField: "performedBy", foreignField: "_id", as: "user" } },
       { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
 
-      // Final Fields
+      // Add computed fields
       {
         $addFields: {
-          variantId: "$variantDoc._id",                    // ← HERE IT IS
+          variantId: "$variantDoc._id",
           sku: "$variantDoc.sku",
           productName: "$product.name",
           brandName: "$brand.brandName",
@@ -203,14 +207,15 @@ exports.getInventoryDashboard = async (req, res) => {
         }
       },
 
-      { $sort: { createdAt: -1 } },
+      // Pagination (after sort!)
       { $skip: skip },
       { $limit: limitNum },
 
+      // Final projection
       {
         $project: {
           _id: 1,
-          variantId: 1,                    // ← variantId included
+          variantId: 1,
           sku: 1,
           productName: 1,
           brandName: 1,
@@ -241,6 +246,7 @@ exports.getInventoryDashboard = async (req, res) => {
         total,
         page: pageNum,
         pages: Math.ceil(total / limitNum),
+        limit: limitNum
       }
     });
 
@@ -253,6 +259,8 @@ exports.getInventoryDashboard = async (req, res) => {
     });
   }
 };
+
+
 
 
 // Get single variant → returns basic info + LATEST STOCK MOVEMENT
