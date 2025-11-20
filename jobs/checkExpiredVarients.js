@@ -1,7 +1,7 @@
 const cron = require('node-cron');
 const Variant = require('../model/variantProduct');
 
-// Schedule job to run every day at midnight
+
 const checkExpiredVariants = () => {
   cron.schedule('0 0 * * *', async () => {
     console.log('Running expired variants check...');
