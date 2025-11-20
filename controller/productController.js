@@ -815,7 +815,6 @@ exports.updateProduct = async (req, res) => {
     }
   };
 
-  let variationImages = {}; // To hold new variant images
 
   try {
     const productId = req.params.id;
