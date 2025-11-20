@@ -7,35 +7,43 @@ const variantSchema = new mongoose.Schema({
     required: true,
     index: true,
   },
-  attribute: { type: String, trim: true }, // e.g., "Size", "Color"
-  value: { type: String, trim: true },     // e.g., "XL", "Red"
+
+  attribute: { type: String, trim: true },
+  value: { type: String, trim: true },
+
   sku: {
     type: String,
     trim: true,
     uppercase: true,
     unique: true,
-    sparse: true, // allows nulls but enforces uniqueness when present
-    required: [true, 'SKU is required'],
+    sparse: true,
+    default: function () {
+      return `SKU-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+    },
   },
+
   unit: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Unit',
     required: true,
   },
+
   purchasePrice: {
     type: Number,
     required: true,
-    min: [0, 'Purchase price cannot be negative'],
+    min: 0,
     default: 0,
   },
+
   price: {
     type: Number,
     required: true,
-    min: [0, 'Selling price cannot be negative'],
+    min: 0,
   },
+
   discountPrice: {
     type: Number,
-    min: [0, 'Discount price cannot be negative'],
+    min: 0,
     default: 0,
     validate: {
       validator: function (v) {
@@ -44,46 +52,57 @@ const variantSchema = new mongoose.Schema({
       message: 'Discount price must be less than or equal to regular price',
     },
   },
+
   stockQuantity: {
     type: Number,
     required: true,
-    min: [0, 'Stock cannot be negative'],
+    min: 0,
     default: 0,
   },
+
   reservedQuantity: {
     type: Number,
-    default: 0,
     min: 0,
-  }, // for pending orders
+    default: 0,
+  },
+
   expiryDate: {
     type: Date,
     validate: {
       validator: function (v) {
-        return !v || v >= new Date(Date.now() - 86400000); // allow today
+        return !v || v >= new Date(Date.now() - 86400000);
       },
       message: 'Expiry date must not be in the past',
     },
   },
+
   weightQuantity: {
     type: Number,
     required: true,
-    min: [0, 'Weight quantity cannot be negative'],
+    min: 0,
   },
+
   image: { type: String, trim: true },
+
   status: {
     type: String,
     enum: ['Active', 'Inactive', 'Discontinued'],
     default: 'Active',
   },
-  isDeleted: { type: Boolean, default: false }, // soft delete
+
+  isDeleted: { type: Boolean, default: false },
 },
 {
-  timestamps: true, // gives createdAt & updatedAt automatically
+  timestamps: true,
   toJSON: { virtuals: true },
   toObject: { virtuals: true },
 });
 
-// === Virtuals ===
+
+// =========================
+//  Virtual Fields
+// =========================
+
 variantSchema.virtual('availableStock').get(function () {
   return this.stockQuantity - this.reservedQuantity;
 });
@@ -92,88 +111,82 @@ variantSchema.virtual('effectivePrice').get(function () {
   return this.discountPrice > 0 ? this.discountPrice : this.price;
 });
 
-// === Indexes ===
+
+// =========================
+//  Indexes
+// =========================
+
 variantSchema.index({ sku: 1 }, { unique: true, sparse: true });
-variantSchema.index({ product: 1, 'attribute': 1, 'value': 1 }, { unique: true }); // prevent duplicate variants
+variantSchema.index({ product: 1, attribute: 1, value: 1 }, { unique: true });
 variantSchema.index({ stockQuantity: 1 });
 variantSchema.index({ expiryDate: 1 });
 variantSchema.index({ status: 1 });
 variantSchema.index({ isDeleted: 1 });
 
-// === Middleware ===
 
-// Auto-set status based on expiry
-const autoSetStatus = function (next) {
-  if (this.isModified('expiryDate') || this.isNew) {
-    const now = Date.now();
-    const expiry = this.expiryDate ? this.expiryDate.getTime() : null;
+// =========================
+//  Auto Status Update
+// =========================
 
-    if (expiry && expiry < now) {
-      this.status = 'Inactive';
-    } else if (this.stockQuantity === 0) {
-      this.status = 'Inactive';
-    } else {
-      this.status = 'Active';
-    }
-  }
+function evaluateStatus(doc) {
+  const now = new Date();
+  const expired = doc.expiryDate && doc.expiryDate < now;
+  const outOfStock = doc.stockQuantity === 0;
+
+  if (expired || outOfStock) return 'Inactive';
+  return 'Active';
+}
+
+
+// =========================
+//  Middleware - Pre Save
+// =========================
+
+variantSchema.pre('save', function (next) {
+  this.status = evaluateStatus(this);
   next();
-};
+});
 
-variantSchema.pre('save', autoSetStatus);
+
+// =========================
+//  Middleware - Pre findOneAndUpdate
+// =========================
+
 variantSchema.pre('findOneAndUpdate', async function (next) {
   const update = this.getUpdate();
 
-  // Handle expiryDate changes
-  if (update.expiryDate !== undefined) {
-    const newExpiry = update.expiryDate ? new Date(update.expiryDate) : null;
-    const now = Date.now();
+  let doc = await this.model.findOne(this.getQuery());
+  if (!doc) return next();
 
-    if (newExpiry && newExpiry < now) {
-      this.set({ status: 'Inactive' });
-    } else if (update.stockQuantity !== undefined && update.stockQuantity === 0) {
-      this.set({ status: 'Inactive' });
-    } else if (!update.status) {
-      this.set({ status: 'Active' });
-    }
-  }
+  const newDoc = { ...doc.toObject(), ...update };
 
-  // Prevent setting Active if expired
-  if (update.status === 'Active') {
-    const doc = await this.model.findOne(this.getQuery());
-    if (doc && doc.expiryDate && doc.expiryDate < new Date()) {
-      return next(new Error('Cannot activate variant with expired date'));
-    }
-  }
+  update.status = evaluateStatus(newDoc);
+
+  this.setUpdate(update);
 
   next();
 });
 
-// === Static Methods ===
 
-// Run this via cron daily at 2 AM
+// =========================
+//  Static Methods
+// =========================
+
+// Auto disable expired items (cron)
 variantSchema.statics.updateExpiredVariants = async function () {
   const now = new Date();
-  const result = await this.updateMany(
+
+  return await this.updateMany(
     {
       expiryDate: { $lt: now },
       status: { $ne: 'Inactive' },
       isDeleted: false,
     },
-    {
-      $set: {
-        status: 'Inactive',
-        updatedAt: now,
-      },
-    }
+    { $set: { status: 'Inactive', updatedAt: now } }
   );
-
-  if (result.modifiedCount > 0) {
-    console.log(`Updated ${result.modifiedCount} expired variants to Inactive`);
-  }
-  return result;
 };
 
-// Low stock alert finder
+// Low stock finder
 variantSchema.statics.findLowStock = function (threshold = 10) {
   return this.find({
     stockQuantity: { $lte: threshold },
@@ -183,5 +196,6 @@ variantSchema.statics.findLowStock = function (threshold = 10) {
     .populate('product', 'name')
     .sort({ stockQuantity: 1 });
 };
+
 
 module.exports = mongoose.model('Variant', variantSchema);
