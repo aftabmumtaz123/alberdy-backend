@@ -11,16 +11,19 @@ const variantSchema = new mongoose.Schema({
   attribute: { type: String, trim: true },
   value: { type: String, trim: true },
 
-  sku: {
-    type: String,
-    trim: true,
-    uppercase: true,
-    unique: true,
-    sparse: true,
-    default: function () {
-      return `SKU-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
-    },
-  },
+sku: {
+  type: String,
+  trim: true,
+  uppercase: true,
+  unique: true,
+  sparse: true,  // allows unique only when value exists
+  default: null,
+  set: function (v) {
+    // If user sends empty string, convert it to null
+    if (!v || v.trim() === "") return null;
+    return v.toUpperCase();
+  }
+},
 
   unit: {
     type: mongoose.Schema.Types.ObjectId,
