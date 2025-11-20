@@ -15,7 +15,7 @@ const stockMovementSchema = new mongoose.Schema({
   changeQuantity: { type: Number, required: true }, 
   movementType: {
     type: String,
-    minlength: 5,
+    minlength: 2,
     required: true,
   },
   reason: { type: String, required: true, trim: true },
