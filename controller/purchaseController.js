@@ -291,12 +291,12 @@ exports.updatePurchase = async (req, res) => {
       }
       newProducts = purchase.products; // Preserve existing products
       // Reset financials
-      // purchase.payment.amountDue = 0;
-      // purchase.payment.amountPaid = 0;
-      // purchase.summary.subtotal = 0;
-      // purchase.summary.grandTotal = 0;
-      // purchase.summary.otherCharges = 0;
-      // purchase.summary.discount = 0;
+      purchase.payment.amountDue = 0;
+      purchase.payment.amountPaid = 0;
+      purchase.summary.subtotal = 0;
+      purchase.summary.grandTotal = 0;
+      purchase.summary.otherCharges = 0;
+      purchase.summary.discount = 0;
     } else {
       // Validate products for non-cancelled purchases
       if (!Array.isArray(products) || products.length === 0) {
