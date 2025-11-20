@@ -92,15 +92,13 @@ exports.createSupplier = async (req, res) => {
       email: email.trim(),
       phone: phone.trim(),
       supplierType: supplierType.trim(),
-      address: address
-        ? {
-            street: address.street?.trim(),
-            city: address.city?.trim(),
-            state: address.state?.trim(),
-            zip: address.zip?.trim(),
-            country: address.country?.trim(),
-          }
-        : undefined,
+      address: {
+        street: address?.street?.trim(),
+        city: address?.city?.trim(),
+        state: address?.state?.trim(),
+        zip: address?.zip?.trim(),
+        country: address?.country?.trim(),
+      },
       status: statusToUse,
       attachments,
     });
