@@ -394,7 +394,6 @@ exports.getAllPayments = async (req, res) => {
       success: true,
       message: 'Payments fetched successfully',
       data: payments,
-      amountDue: payments.totalAmount - payments.amountPaid,
       total: totalPayments,
       currentPage: parseInt(page),
       totalPages: Math.ceil(totalPayments / limit),
