@@ -187,17 +187,9 @@ exports.getSupplierById = async (req, res) => {
   }
 }
 
-
-
 exports.updateSupplier = async (req, res) => {
   try {
     const { id } = req.params;
-    if (!req.body) {
-      return res.status(400).json({
-        success: false,
-        message: 'Request body is missing',
-      });
-    }
 
     let {
       supplierName,
@@ -208,48 +200,52 @@ exports.updateSupplier = async (req, res) => {
       supplierType,
       address,
       status,
+      attachments, // ← Expect updated list from frontend (array of objects)
+      removedAttachmentIds, // ← Optional: array of Cloudinary public_ids or _ids to delete
     } = req.body;
 
-    const errors = {};
-
-    // --- Validations ---
-    if (supplierName && supplierName.trim().length < 2) {
-      return res.json({
-        success: false,
-        message: 'Supplier name must be at least 2 characters',
-      })
-    }
-
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      errors.email = 'Valid email is required';
-    } else if (email) {
-      const existingEmail = await Supplier.findOne({
-        email: email.trim(),
-        _id: { $ne: id },
-      });
-      if (existingEmail) {return res.json({
-        success: false,
-        message: 'Email already exists',
-      });}
-    }
-
-
-  
-
-    // Validate address JSON
-    if (address) {
+    // Parse address if string
+    if (address && typeof address === 'string') {
       try {
-        address = typeof address === 'string' ? JSON.parse(address) : address;
-      } catch {
-        res.status(400).json({
+        address = JSON.parse(address);
+      } catch (err) {
+        return res.status(400).json({
           success: false,
           message: 'Address must be valid JSON',
         });
       }
     }
 
+    // === Validations (same as before) ===
+    if (supplierName && supplierName.trim().length < 2) {
+      return res.status(400).json({
+        success: false,
+        message: 'Supplier name must be at least 2 characters',
+      });
+    }
+
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid email is required',
+      });
+    }
+
+    if (email) {
+      const existingEmail = await Supplier.findOne({
+        email: email.trim(),
+        _id: { $ne: id },
+      });
+      if (existingEmail) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email already exists',
+        });
+      }
+    }
+
     if (status && !['Active', 'Inactive'].includes(status)) {
-     return res.json({
+      return res.status(400).json({
         success: false,
         message: 'Status must be either Active or Inactive',
       });
@@ -261,33 +257,77 @@ exports.updateSupplier = async (req, res) => {
         _id: { $ne: id },
       });
       if (existingCode) {
-        return res.json({
-        success: false,
-        message: 'Supplier code already exists',
-      });
-    }
+        return res.status(400).json({
+          success: false,
+          message: 'Supplier code already exists',
+        });
+      }
     }
 
-    // --- Handle uploaded files ---
-    let attachments = [];
+    // === Get current supplier to preserve existing attachments ===
+    const currentSupplier = await Supplier.findById(id);
+    if (!currentSupplier) {
+      return res.status(404).json({
+        success: false,
+        message: 'Supplier not found',
+      });
+    }
+
+    // Start with existing attachments
+    let updatedAttachments = [...currentSupplier.attachments];
+
+    // Option 1: If frontend sends full `attachments` array → replace all
+    if (attachments && Array.isArray(attachments)) {
+      try {
+        updatedAttachments = JSON.parse(attachments); // if sent as string
+      } catch {
+        // already parsed
+      }
+    }
+
+    // Option 2: Remove specific attachments by public_id or _id
+    if (removedAttachmentIds) {
+      let idsToRemove;
+      try {
+        idsToRemove = typeof removedAttachmentIds === 'string'
+          ? JSON.parse(removedAttachmentIds)
+          : removedAttachmentIds;
+      } catch {
+        idsToRemove = [];
+      }
+
+      if (Array.isArray(idsToRemove) && idsToRemove.length > 0) {
+        // Optional: Delete from Cloudinary
+        for (const publicId of idsToRemove) {
+          try {
+            // Extract public_id from URL or use directly
+            const id = publicId.includes('/') ? publicId.split('/').pop().split('.')[0] : publicId;
+            await cloudinary.uploader.destroy(`Uploads/${id}`);
+          } catch (err) {
+            console.warn('Failed to delete from Cloudinary:', publicId, err.message);
+            // Don't fail the whole update
+          }
+        }
+
+        // Remove from array
+        updatedAttachments = updatedAttachments.filter(
+          att => !idsToRemove.includes(att.filePath) && 
+                 !idsToRemove.includes(att._id?.toString())
+        );
+      }
+    }
+
+    // === Add newly uploaded files ===
     if (req.files && req.files.length > 0) {
-      attachments = req.files.map(file => ({
+      const newFiles = req.files.map(file => ({
         fileName: file.originalname,
-        filePath: file.path,
+        filePath: file.path, // Cloudinary URL
         uploadedAt: new Date(),
       }));
+      updatedAttachments.push(...newFiles);
     }
 
-    // --- Return validation errors ---
-    if (Object.keys(errors).length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation errors occurred',
-        errors,
-      });
-    }
-
-    // --- Prepare update object ---
+    // === Prepare update data ===
     const updateData = {
       ...(supplierName && { supplierName: supplierName.trim() }),
       ...(supplierCode && { supplierCode: supplierCode.trim() }),
@@ -305,31 +345,21 @@ exports.updateSupplier = async (req, res) => {
         },
       }),
       ...(status && { status }),
+      attachments: updatedAttachments, // ← Fully replaced/updated
     };
 
-    // --- Append new attachments (if any) ---
-    if (attachments.length > 0) {
-      updateData.$push = { attachments: { $each: attachments } };
-    }
-
-    // --- Update supplier ---
+    // === Final Update ===
     const supplier = await Supplier.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
     });
-
-    if (!supplier) {
-      return res.status(404).json({
-        success: false,
-        message: 'Supplier not found',
-      });
-    }
 
     res.status(200).json({
       success: true,
       message: 'Supplier updated successfully',
       data: supplier,
     });
+
   } catch (error) {
     console.error('Update Supplier Error:', error);
     res.status(500).json({
@@ -339,7 +369,6 @@ exports.updateSupplier = async (req, res) => {
     });
   }
 };
-
 
 
 
