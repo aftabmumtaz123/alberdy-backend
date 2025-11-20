@@ -312,7 +312,6 @@ exports.deletePayment = async (req, res) => {
       });
     }
 
-    // Optional: Restrict deletion of certain statuses
     if (payment.status === 'Completed') {
       return res.status(400).json({
         success: false,
@@ -320,7 +319,6 @@ exports.deletePayment = async (req, res) => {
       });
     }
 
-    // Remove payment from supplier's payment history
     await Supplier.findByIdAndUpdate(
       payment.supplier,
       { $pull: { paymentHistory: id } },
