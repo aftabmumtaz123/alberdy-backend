@@ -1,10 +1,11 @@
 const Supplier = require('../model/Supplier');
-const upload = require('../config/multer'); 
-const Order = require('../model/Order')
+const Order = require('../model/Order');
+const upload = require('../config/multer');
+const cloudinary = require('cloudinary').v2;
 
+// ==================== CREATE SUPPLIER ====================
 exports.createSupplier = async (req, res) => {
   try {
-
     let {
       supplierName,
       supplierCode,
@@ -16,20 +17,20 @@ exports.createSupplier = async (req, res) => {
       status,
     } = req.body;
 
-    const errors = {};
-
-
-
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      errors.email = 'Valid email required';
-    } else if (await Supplier.findOne({ email })) {
+    // --- Required Field Validations ---
+    if (!supplierName || supplierName.trim().length < 2) {
       return res.status(400).json({
         success: false,
-        message: 'Email already exists',
+        message: 'Supplier name must be at least 2 characters',
       });
     }
 
- 
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid email is required',
+      });
+    }
 
     if (!supplierType || supplierType.trim() === '') {
       return res.status(400).json({
@@ -38,9 +39,38 @@ exports.createSupplier = async (req, res) => {
       });
     }
 
-    if (address) {
+    // --- Unique Checks ---
+    const emailExists = await Supplier.findOne({ email: email.trim() });
+    if (emailExists) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email already exists',
+      });
+    }
+
+    let supplierCodeToUse = supplierCode?.trim();
+    if (!supplierCodeToUse) {
+      let isUnique = false;
+      while (!isUnique) {
+        supplierCodeToUse = `SUP-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+        if (!(await Supplier.findOne({ supplierCode: supplierCodeToUse }))) {
+          isUnique = true;
+        }
+      }
+    } else {
+      const codeExists = await Supplier.findOne({ supplierCode: supplierCodeToUse });
+      if (codeExists) {
+        return res.status(400).json({
+          success: false,
+          message: 'Supplier code already exists',
+        });
+      }
+    }
+
+    // --- Parse Address ---
+    if (address && typeof address === 'string') {
       try {
-        address = typeof address === 'string' ? JSON.parse(address) : address;
+        address = JSON.parse(address);
       } catch {
         return res.status(400).json({
           success: false,
@@ -49,56 +79,34 @@ exports.createSupplier = async (req, res) => {
       }
     }
 
-    const allowedStatus = ['Active', 'Inactive'];
-    const statusToUse = allowedStatus.includes(status) ? status : 'Active';
+    const statusToUse = ['Active', 'Inactive'].includes(status) ? status : 'Active';
 
-    let supplierCodeToUse = supplierCode?.trim();
-    if (!supplierCodeToUse) {
-      let isUnique = false;
-      while (!isUnique) {
-        const randomCode = `SUP-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-        if (!(await Supplier.findOne({ supplierCode: randomCode }))) {
-          supplierCodeToUse = randomCode;
-          isUnique = true;
-        }
-      }
-    } else if (await Supplier.findOne({ supplierCode: supplierCodeToUse })) {
-      return res.status(400).json({
-        success: false,
-        message: 'Supplier code already exists',
-      });
-    }
-
+    // --- Handle File Uploads ---
     const attachments = req.files
-      ? req.files.map(f => ({
-          fileName: f.originalname,
-          filePath: f.path,
+      ? req.files.map(file => ({
+          fileName: file.originalname,
+          filePath: file.path, // Cloudinary secure_url
           uploadedAt: new Date(),
         }))
       : [];
 
-    if (Object.keys(errors).length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation errors occurred',
-        errors,
-      });
-    }
-
+    // --- Create Supplier ---
     const supplier = new Supplier({
       supplierName: supplierName.trim(),
       supplierCode: supplierCodeToUse,
       contactPerson: contactPerson?.trim(),
       email: email.trim(),
-      phone: phone.trim(),
+      phone: phone?.trim(),
       supplierType: supplierType.trim(),
-      address: {
-        street: address?.street?.trim(),
-        city: address?.city?.trim(),
-        state: address?.state?.trim(),
-        zip: address?.zip?.trim(),
-        country: address?.country?.trim(),
-      },
+      address: address
+        ? {
+            street: address.street?.trim(),
+            city: address.city?.trim(),
+            state: address.state?.trim(),
+            zip: address.zip?.trim(),
+            country: address.country?.trim(),
+          }
+        : undefined,
       status: statusToUse,
       attachments,
     });
@@ -120,18 +128,17 @@ exports.createSupplier = async (req, res) => {
   }
 };
 
-
-// Get all suppliers
+// ==================== GET ALL SUPPLIERS ====================
 exports.getAllSuppliers = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit);
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit) || 10));
     const skip = (page - 1) * limit;
 
     const suppliers = await Supplier.find()
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limit)
+      .limit(limit);
 
     const totalSuppliers = await Supplier.countDocuments();
 
@@ -139,10 +146,12 @@ exports.getAllSuppliers = async (req, res) => {
       success: true,
       message: 'Suppliers fetched successfully',
       data: suppliers,
-      total: totalSuppliers,
-      currentPage: page,
-      totalPages: Math.ceil(totalSuppliers / limit),
-      count: suppliers.length,
+      pagination: {
+        total: totalSuppliers,
+        page,
+        pages: Math.ceil(totalSuppliers / limit),
+        limit,
+      },
     });
   } catch (error) {
     console.error('Fetch Suppliers Error:', error);
@@ -154,9 +163,7 @@ exports.getAllSuppliers = async (req, res) => {
   }
 };
 
-
-
-
+// ==================== GET SUPPLIER BY ID ====================
 exports.getSupplierById = async (req, res) => {
   try {
     const supplier = await Supplier.findById(req.params.id)
@@ -168,22 +175,31 @@ exports.getSupplierById = async (req, res) => {
       });
 
     if (!supplier) {
-      return res.status(404).json({ success: false, msg: 'Supplier not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'Supplier not found',
+      });
     }
 
     const ordersCount = await Order.countDocuments({ supplier: supplier._id });
 
-    const response = {
-      ...supplier.toObject(),
-      ordersCount,
-    };
-
-    res.json({ success: true, data: response });
+    res.json({
+      success: true,
+      data: {
+        ...supplier.toObject(),
+        ordersCount,
+      },
+    });
   } catch (err) {
     console.error('Get supplier error:', err);
-    res.status(500).json({ success: false, msg: 'Server error fetching supplier' });
+    res.status(500).json({
+      success: false,
+      message: 'Server error fetching supplier',
+    });
   }
-}
+};
+
+
 
 exports.updateSupplier = async (req, res) => {
   try {
@@ -198,134 +214,61 @@ exports.updateSupplier = async (req, res) => {
       supplierType,
       address,
       status,
-      attachments, // ← Expect updated list from frontend (array of objects)
-      removedAttachmentIds, // ← Optional: array of Cloudinary public_ids or _ids to delete
+      attachments, // ← Full current list from frontend (most important)
     } = req.body;
 
-    // Parse address if string
+    // Parse address
     if (address && typeof address === 'string') {
-      try {
-        address = JSON.parse(address);
-      } catch (err) {
-        return res.status(400).json({
-          success: false,
-          message: 'Address must be valid JSON',
-        });
+      try { address = JSON.parse(address); } catch {
+        return res.status(400).json({ success: false, message: 'Invalid address JSON' });
       }
     }
 
     // === Validations (same as before) ===
-    if (supplierName && supplierName.trim().length < 2) {
-      return res.status(400).json({
-        success: false,
-        message: 'Supplier name must be at least 2 characters',
-      });
-    }
+    if (supplierName && supplierName.trim().length < 2)
+      return res.status(400).json({ success: false, message: 'Name too short' });
 
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Valid email is required',
-      });
-    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      return res.status(400).json({ success: false, message: 'Invalid email' });
 
     if (email) {
-      const existingEmail = await Supplier.findOne({
-        email: email.trim(),
-        _id: { $ne: id },
-      });
-      if (existingEmail) {
-        return res.status(400).json({
-          success: false,
-          message: 'Email already exists',
-        });
-      }
+      const exists = await Supplier.findOne({ email: email.trim(), _id: { $ne: id } });
+      if (exists) return res.status(400).json({ success: false, message: 'Email already used' });
     }
 
-    if (status && !['Active', 'Inactive'].includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Status must be either Active or Inactive',
-      });
+    if (supplierCode?.trim()) {
+      const exists = await Supplier.findOne({ supplierCode: supplierCode.trim(), _id: { $ne: id } });
+      if (exists) return res.status(400).json({ success: false, message: 'Code already exists' });
     }
 
-    if (supplierCode && supplierCode.trim()) {
-      const existingCode = await Supplier.findOne({
-        supplierCode: supplierCode.trim(),
-        _id: { $ne: id },
-      });
-      if (existingCode) {
-        return res.status(400).json({
-          success: false,
-          message: 'Supplier code already exists',
-        });
-      }
-    }
+    // === Build new attachments list ===
+    let finalAttachments = [];
 
-    // === Get current supplier to preserve existing attachments ===
-    const currentSupplier = await Supplier.findById(id);
-    if (!currentSupplier) {
-      return res.status(404).json({
-        success: false,
-        message: 'Supplier not found',
-      });
-    }
-
-    // Start with existing attachments
-    let updatedAttachments = [...currentSupplier.attachments];
-
-    // Option 1: If frontend sends full `attachments` array → replace all
-    if (attachments && Array.isArray(attachments)) {
+    // Option 1: Frontend sends full current list → use it (BEST)
+    if (attachments) {
       try {
-        updatedAttachments = JSON.parse(attachments); // if sent as string
-      } catch {
-        // already parsed
-      }
-    }
-
-    // Option 2: Remove specific attachments by public_id or _id
-    if (removedAttachmentIds) {
-      let idsToRemove;
-      try {
-        idsToRemove = typeof removedAttachmentIds === 'string'
-          ? JSON.parse(removedAttachmentIds)
-          : removedAttachmentIds;
-      } catch {
-        idsToRemove = [];
-      }
-
-      if (Array.isArray(idsToRemove) && idsToRemove.length > 0) {
-        // Optional: Delete from Cloudinary
-        for (const publicId of idsToRemove) {
-          try {
-            // Extract public_id from URL or use directly
-            const id = publicId.includes('/') ? publicId.split('/').pop().split('.')[0] : publicId;
-            await cloudinary.uploader.destroy(`Uploads/${id}`);
-          } catch (err) {
-            console.warn('Failed to delete from Cloudinary:', publicId, err.message);
-            // Don't fail the whole update
-          }
+        const list = typeof attachments === 'string' ? JSON.parse(attachments) : attachments;
+        if (Array.isArray(list)) {
+          finalAttachments = list.map(att => ({
+            fileName: att.fileName,
+            filePath: att.filePath,
+            uploadedAt: att.uploadedAt || new Date(),
+          }));
         }
-
-        // Remove from array
-        updatedAttachments = updatedAttachments.filter(
-          att => !idsToRemove.includes(att.filePath) && 
-                 !idsToRemove.includes(att._id?.toString())
-        );
-      }
+      } catch (e) { /* ignore */ }
     }
 
-    // === Add newly uploaded files ===
+    // Option 2: If no list sent, but files uploaded → use uploaded ones
     if (req.files && req.files.length > 0) {
-      const newFiles = req.files.map(file => ({
-        fileName: file.originalname,
-        filePath: file.path, // Cloudinary URL
+      const newFiles = req.files.map(f => ({
+        fileName: f.originalname,
+        filePath: f.path,
         uploadedAt: new Date(),
       }));
-      updatedAttachments.push(...newFiles);
+      finalAttachments = newFiles;
     }
 
-    // === Prepare update data ===
+    // === Update supplier ===
     const updateData = {
       ...(supplierName && { supplierName: supplierName.trim() }),
       ...(supplierCode && { supplierCode: supplierCode.trim() }),
@@ -343,16 +286,19 @@ exports.updateSupplier = async (req, res) => {
         },
       }),
       ...(status && { status }),
-      attachments: updatedAttachments, // ← Fully replaced/updated
+      attachments: finalAttachments, // ← Just replace everything
     };
 
-    // === Final Update ===
     const supplier = await Supplier.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
     });
 
-    res.status(200).json({
+    if (!supplier) {
+      return res.status(404).json({ success: false, message: 'Supplier not found' });
+    }
+
+    res.json({
       success: true,
       message: 'Supplier updated successfully',
       data: supplier,
@@ -362,7 +308,7 @@ exports.updateSupplier = async (req, res) => {
     console.error('Update Supplier Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error occurred while updating supplier',
+      message: 'Server error',
       error: error.message,
     });
   }
@@ -370,13 +316,13 @@ exports.updateSupplier = async (req, res) => {
 
 
 
-// Delete a supplier
+
+// ==================== DELETE SUPPLIER ====================
 exports.deleteSupplier = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const supplier = await Supplier.findByIdAndDelete(id);
-
+    const supplier = await Supplier.findById(id);
     if (!supplier) {
       return res.status(404).json({
         success: false,
@@ -384,9 +330,23 @@ exports.deleteSupplier = async (req, res) => {
       });
     }
 
+    // Optional: Delete all attachments from Cloudinary
+    if (supplier.attachments && supplier.attachments.length > 0) {
+      for (const att of supplier.attachments) {
+        try {
+          const publicId = att.filePath.split('/').pop().split('.')[0];
+          await cloudinary.uploader.destroy(`Uploads/${publicId}`);
+        } catch (err) {
+          console.warn('Failed to delete attachment:', att.filePath);
+        }
+      }
+    }
+
+    await Supplier.findByIdAndDelete(id);
+
     res.status(200).json({
       success: true,
-      message: 'Supplier deleted successfully',
+      message: 'Supplier and attachments deleted successfully',
     });
   } catch (error) {
     console.error('Delete Supplier Error:', error);
