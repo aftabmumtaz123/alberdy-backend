@@ -93,6 +93,7 @@ if (amountPaid === undefined || amountPaid === null) {
     //     message: 'Total amount must equal amount paid plus amount due',
     //   });
     // }
+    const calculatedDue = totalAmount - amountPaid;
 
     // Validate payment method
     const allowedMethods = ['Bank Transfer', 'Credit Card', 'Cash', 'Check', 'Other'];
@@ -121,7 +122,7 @@ if (amountPaid === undefined || amountPaid === null) {
       supplier: supplierId,
       totalAmount,
       amountPaid,
-      amountDue,
+      amountDue: calculatedDue,
       paymentMethod: paymentMethod,
       invoiceNo,
       date: date || Date.now(),
@@ -384,6 +385,10 @@ exports.getAllPayments = async (req, res) => {
       .limit(parseInt(limit));
 
     const totalPayments = await Payment.countDocuments(query);
+
+
+
+
 
     res.status(200).json({
       success: true,
