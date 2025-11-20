@@ -458,13 +458,13 @@ exports.updateSale = async (req, res) => {
       }
       // Clear products for cancelled sale
       newProducts = [];
-      sale.products = []; // Ensure no products remain in the sale
-      sale.payment.amountDue = 0;
-      sale.payment.amountPaid = 0;
-      sale.summary.subTotal = 0;
-      sale.summary.taxTotal = 0;
-      sale.summary.grandTotal = 0;
-      sale.summary.totalQuantity = 0;
+      // sale.products = []; // Ensure no products remain in the sale
+      // sale.payment.amountDue = 0;
+      // sale.payment.amountPaid = 0;
+      // sale.summary.subTotal = 0;
+      // sale.summary.taxTotal = 0;
+      // sale.summary.grandTotal = 0;
+      // sale.summary.totalQuantity = 0;
     } else {
       // Validate products for non-cancelled sales
       if (!Array.isArray(products) || products.length === 0) {
