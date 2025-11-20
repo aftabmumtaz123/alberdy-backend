@@ -384,7 +384,6 @@ exports.getAllPayments = async (req, res) => {
       pagination: {
         total: totalPayments,
         page: parseInt(page),
-        limit: parseInt(limit),
         totalPages: Math.ceil(totalPayments / limit),
         hasNextPage: parseInt(page) * parseInt(limit) < totalPayments,
         hasPrevPage: parseInt(page) > 1,
