@@ -294,13 +294,16 @@ exports.getSingleVariant = async (req, res) => {
       .populate({
         path: 'variant',
         select: 'sku stockQuantity image product lowStockThreshold reorderLevel',
-        populate: { path: 'product', select: 'name thumbnail brand category brandName' }
+        populate: {
+          path: 'product',
+          select: 'name thumbnail brand category',
+          populate: { path: 'brand', select: 'brandName' }
+        }
       })
       .populate('performedBy', 'name')
       .lean();
 
     if (movement) {
-      // IT'S A HISTORICAL MOVEMENT → RETURN FROZEN DATA
       const variant = movement.variant;
 
       return res.json({
@@ -310,22 +313,24 @@ exports.getSingleVariant = async (req, res) => {
           variantId: variant._id.toString(),
           movementId: movement._id.toString(),
           productName: variant.product?.name || "Unknown",
-          brandName: variant.product?.brand?.brandName || "Cat",
-          sku: movement.sku,
+          brandName: variant.product?.brand?.brandName || "Unknown",
+          sku: movement.sku || variant.sku,
           thumbnail: variant.image || variant.product?.thumbnail || "/placeholder.jpg",
 
-          // HISTORICAL TRUTH
+          // Historical frozen values
           currentStock: movement.newQuantity,
           stockBefore: movement.previousQuantity,
           stockAfter: movement.newQuantity,
-          changeDisplay: movement.isStockIncreasing ? `+${movement.changeQuantity}` : `−${Math.abs(movement.changeQuantity)}`,
+          changeDisplay: movement.isStockIncreasing 
+            ? `+${movement.changeQuantity}` 
+            : `−${Math.abs(movement.changeQuantity)}`,
 
           lowStockThreshold: variant.lowStockThreshold || variant.reorderLevel || 10,
           stockStatus: movement.newQuantity <= 0 ? "Out of Stock" :
             movement.newQuantity <= (variant.lowStockThreshold || variant.reorderLevel || 10) ? "Low Stock" : "Good",
 
           movement: {
-            _id: movement._id,
+            _id: movement._id.toString(),
             previousQuantity: movement.previousQuantity,
             newQuantity: movement.newQuantity,
             changeQuantity: movement.changeQuantity,
@@ -343,13 +348,17 @@ exports.getSingleVariant = async (req, res) => {
       });
     }
 
-    // NOT A MOVEMENT → It's a real variantId → show latest movement
+    // NOT A MOVEMENT → Real variantId → get latest movement + full info
     const result = await StockMovement.aggregate([
       { $match: { variant: new mongoose.Types.ObjectId(id) } },
       { $sort: { createdAt: -1 } },
       { $limit: 1 },
+
+      // Get variant
       { $lookup: { from: "variants", localField: "variant", foreignField: "_id", as: "variantDoc" } },
       { $unwind: { path: "$variantDoc", preserveNullAndEmptyArrays: true } },
+
+      // Get product + populate brand inside it
       {
         $lookup: {
           from: "products",
@@ -367,28 +376,30 @@ exports.getSingleVariant = async (req, res) => {
             { $unwind: { path: "$brandObj", preserveNullAndEmptyArrays: true } },
             {
               $addFields: {
-                "brandName": "$brandObj.brandName"
+                brandName: "$brandObj.brandName"
               }
-            }
+            },
+            { $project: { name: 1, thumbnail: 1, brandName: 1 } }
           ],
           as: "product"
         }
       },
       { $unwind: { path: "$product", preserveNullAndEmptyArrays: true } },
-      { $lookup: { from: "brands", localField: "product.brand", foreignField: "_id", as: "brand" } },
-      { $unwind: { path: "$brand", preserveNullAndEmptyArrays: true } },
+
+      // Get performedBy user
       { $lookup: { from: "users", localField: "performedBy", foreignField: "_id", as: "user" } },
       { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
 
+      // Final fields
       {
         $addFields: {
           variantId: "$variantDoc._id",
           sku: "$variantDoc.sku",
           productName: "$product.name",
-          brandName: "$brand.brandName",
+          brandName: { $ifNull: ["$product.brandName", "Unknown"] },
           thumbnail: { $ifNull: ["$variantDoc.image", "$product.thumbnail", "/placeholder.jpg"] },
-          performedByName: { $ifNull: ["$user.name", "System"] },
           currentStock: "$variantDoc.stockQuantity",
+          performedByName: { $ifNull: ["$user.name", "System"] },
           changeDisplay: {
             $cond: [
               "$isStockIncreasing",
@@ -398,6 +409,8 @@ exports.getSingleVariant = async (req, res) => {
           }
         }
       },
+
+      // Final projection
       {
         $project: {
           _id: 1,
@@ -420,18 +433,20 @@ exports.getSingleVariant = async (req, res) => {
       }
     ]);
 
+    // If no movements found → return just variant info
     if (result.length === 0) {
-      // No movements → just return variant info
       const variant = await Variant.findById(id)
-        .select('sku stockQuantity image product')
+        .select('sku stockQuantity image product lowStockThreshold reorderLevel')
         .populate({
           path: 'product',
           select: 'name thumbnail brand category',
-          populate: [{ path: 'brand', select: 'brandName' }]
+          populate: { path: 'brand', select: 'brandName' }
         })
         .lean();
 
-      if (!variant) return res.status(404).json({ success: false, msg: "Variant not found" });
+      if (!variant) {
+        return res.status(404).json({ success: false, msg: "Variant not found" });
+      }
 
       return res.json({
         success: true,
@@ -442,28 +457,31 @@ exports.getSingleVariant = async (req, res) => {
           sku: variant.sku || "N/A",
           currentStock: variant.stockQuantity,
           thumbnail: variant.image || variant.product?.thumbnail || "/placeholder.jpg",
+          lowStockThreshold: variant.lowStockThreshold || variant.reorderLevel || 10,
           movement: null
         }
       });
     }
 
     const latest = result[0];
+
     res.json({
       success: true,
       data: {
         variantId: latest.variantId.toString(),
-        productName: latest.productName,
+        productName: latest.productName || "Unknown",
         brandName: latest.brandName,
-        sku: latest.sku,
+        sku: latest.sku || "N/A",
         currentStock: latest.currentStock,
         thumbnail: latest.thumbnail,
         movement: {
-          _id: latest._id,
+          _id: latest._id.toString(),
           previousQuantity: latest.previousQuantity,
           newQuantity: latest.newQuantity,
           changeDisplay: latest.changeDisplay,
           movementType: latest.movementType,
           reason: latest.reason,
+          referenceId: latest.referenceId,
           performedBy: latest.performedByName,
           performedAt: latest.performedAt
         }
@@ -475,4 +493,3 @@ exports.getSingleVariant = async (req, res) => {
     res.status(500).json({ success: false, msg: "Server error" });
   }
 };
-
