@@ -162,8 +162,7 @@ exports.getAllSuppliers = async (req, res) => {
     });
   }
 };
-
-// ==================== GET SUPPLIER BY ID ====================
+// ==================== GET SUPPLIER BY ID (FINAL & BULLETPROOF) ====================
 exports.getSupplierById = async (req, res) => {
   try {
     const supplier = await Supplier.findById(req.params.id)
@@ -172,7 +171,8 @@ exports.getSupplierById = async (req, res) => {
         path: 'paymentHistory',
         select: 'totalAmount amountPaid amountDue paymentMethod invoiceNo status date notes createdAt',
         options: { sort: { date: -1 } },
-      });
+      })
+      .lean(); // ← THIS IS THE KEY: Converts to plain JS object EARLY
 
     if (!supplier) {
       return res.status(404).json({
@@ -181,20 +181,33 @@ exports.getSupplierById = async (req, res) => {
       });
     }
 
+    // Count orders
     const ordersCount = await Order.countDocuments({ supplier: supplier._id });
 
+    // Ensure attachments always have full data (even if somehow missing)
+    const safeAttachments = (supplier.attachments || []).map(att => ({
+      _id: att._id || undefined,
+      fileName: att.fileName || 'Unknown file',
+      filePath: att.filePath || '',
+      uploadedAt: att.uploadedAt || new Date(),
+    }));
+
+    // Final clean response
     res.json({
       success: true,
       data: {
-        ...supplier.toObject(),
+        ...supplier,
+        attachments: safeAttachments,
         ordersCount,
       },
     });
-  } catch (err) {
+  } 
+  catch (err) {
     console.error('Get supplier error:', err);
     res.status(500).json({
       success: false,
       message: 'Server error fetching supplier',
+      error: err.message,
     });
   }
 };
