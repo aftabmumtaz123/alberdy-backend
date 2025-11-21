@@ -317,197 +317,99 @@ exports.getSupplierById = async (req, res) => {
 //   }
 // };
 
+
+
 exports.updateSupplier = async (req, res) => {
   try {
     const { id } = req.params;
+    let { attachments: keptAttachmentsJson, ...otherFields } = req.body;
 
-    let {
-      supplierName,
-      supplierCode,
-      contactPerson,
-      email,
-      phone,
-      supplierType,
-      address,
-      status,
-      attachments, // ← This must be the current list of files user wants to KEEP (from frontend)
-    } = req.body;
-
-    // === Parse address if sent as JSON string ===
-    if (address && typeof address === 'string') {
-      try {
-        address = JSON.parse(address);
-      } catch (err) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid address JSON format',
-        });
-      }
-    }
-
-    // === Basic Validations ===
-    if (supplierName && supplierName.trim().length < 2) {
-      return res.status(400).json({
-        success: false,
-        message: 'Supplier name must be at least 2 characters',
-      });
-    }
-
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide a valid email address',
-      });
-    }
-
-    // === Unique Checks (exclude current supplier) ===
-    if (email) {
-      const emailExists = await Supplier.findOne({
-        email: email.trim(),
-        _id: { $ne: id },
-      });
-      if (emailExists) {
-        return res.status(400).json({
-          success: false,
-          message: 'Email is already used by another supplier',
-        });
-      }
-    }
-
-    if (supplierCode && supplierCode.trim()) {
-      const codeExists = await Supplier.findOne({
-        supplierCode: supplierCode.trim(),
-        _id: { $ne: id },
-      });
-      if (codeExists) {
-        return res.status(400).json({
-          success: false,
-          message: 'Supplier code already exists',
-        });
-      }
-    }
-
-    // === Get current supplier to compare attachments and delete removed files ===
+    // === 1. Always get current supplier first (for Cloudinary cleanup) ===
     const currentSupplier = await Supplier.findById(id);
     if (!currentSupplier) {
-      return res.status(404).json({
-        success: false,
-        message: 'Supplier not found',
-      });
+      return res.status(404).json({ success: false, message: 'Supplier not found' });
     }
 
-    // === Build Final Attachments List ===
+    // === 2. Parse kept attachments (frontend MUST send this always!) ===
     let finalAttachments = [];
 
-    // Step 1: Files user wants to KEEP (sent from frontend)
-    if (attachments) {
+    if (keptAttachmentsJson !== undefined) {
       try {
-        const keptList = typeof attachments === 'string' ? JSON.parse(attachments) : attachments;
+        const kept = typeof keptAttachmentsJson === 'string'
+          ? JSON.parse(keptAttachmentsJson)
+          : keptAttachmentsJson;
 
-        if (Array.isArray(keptList)) {
-          finalAttachments = keptList.map(att => ({
-            fileName: att.fileName || att.originalname,
-            filePath: att.filePath || att.path,
+        if (Array.isArray(kept)) {
+          finalAttachments = kept.map(att => ({
+            _id: att._id,
+            fileName: att.fileName,
+            filePath: att.filePath,
             uploadedAt: att.uploadedAt ? new Date(att.uploadedAt) : new Date(),
-            _id: att._id || undefined, // preserve MongoDB sub-document _id
           }));
         }
       } catch (e) {
-        console.warn('Failed to parse kept attachments:', e);
+        return res.status(400).json({ success: false, message: 'Invalid attachments format' });
       }
+    } else {
+      // === THIS IS THE CRITICAL FIX ===
+      // If frontend doesn't send 'attachments' field at all → keep existing ones!
+      finalAttachments = (currentSupplier.attachments || []).map(att => ({
+        _id: att._id,
+        fileName: att.fileName,
+        filePath: att.filePath,
+        uploadedAt: att.uploadedAt,
+      }));
     }
 
-    // Step 2: Add newly uploaded files
+    // === 3. Add new files only if uploaded ===
     if (req.files && req.files.length > 0) {
-      const newFiles = req.files.map(file => ({
-        fileName: file.originalname,
-        filePath: file.path, // Cloudinary secure_url
+      const newFiles = req.files.map(f => ({
+        fileName: f.originalname,
+        filePath: f.path,
         uploadedAt: new Date(),
       }));
-
       finalAttachments = [...finalAttachments, ...newFiles];
     }
 
-    // Step 3: Enforce max 5 files
+    // === 4. Enforce max 5 ===
     if (finalAttachments.length > 5) {
-      return res.status(400).json({
-        success: false,
-        message: 'Maximum 5 attachments are allowed',
-      });
+      return res.status(400).json({ success: false, message: 'Maximum 5 attachments allowed' });
     }
 
-    // === Delete Removed Files from Cloudinary ===
-    if (currentSupplier.attachments && currentSupplier.attachments.length > 0) {
-      const oldPaths = currentSupplier.attachments.map(a => a.filePath);
-      const newPaths = finalAttachments.map(a => a.filePath);
+    // === 5. Delete removed files from Cloudinary ===
+    const oldPaths = currentSupplier.attachments.map(a => a.filePath);
+    const newPaths = finalAttachments.map(a => a.filePath);
+    const removedPaths = oldPaths.filter(p => !newPaths.includes(p));
 
-      const removedPaths = oldPaths.filter(path => !newPaths.includes(path));
-
-      for (const filePath of removedPaths) {
-        try {
-          // Extract public_id from Cloudinary URL
-          const urlParts = filePath.split('/');
-          const fileName = urlParts[urlParts.length - 1];
-          const publicId = fileName.split('.')[0]; // remove extension
-
-          await cloudinary.uploader.destroy(`Uploads/${publicId}`);
-          console.log('Deleted from Cloudinary:', publicId);
-        } catch (err) {
-          console.warn('Failed to delete file from Cloudinary:', filePath, err.message);
-          // Don't fail the whole update if Cloudinary delete fails
-        }
+    for (const path of removedPaths) {
+      try {
+        const publicId = path.split('/').pop().split('.')[0];
+        await cloudinary.uploader.destroy(`Uploads/${publicId}`);
+      } catch (err) {
+        console.warn('Failed to delete from Cloudinary:', path);
       }
     }
 
-    // === Prepare Update Data ===
-    const updateData = {
-      ...(supplierName && { supplierName: supplierName.trim() }),
-      ...(supplierCode && { supplierCode: supplierCode.trim() }),
-      ...(contactPerson && { contactPerson: contactPerson.trim() }),
-      ...(email && { email: email.trim() }),
-      ...(phone && { phone: phone?.trim() }),
-      ...(supplierType && { supplierType: supplierType.trim() }),
-      ...(address && {
-        address: {
-          street: address.street?.trim(),
-          city: address.city?.trim(),
-          state: address.state?.trim(),
-          zip: address.zip?.trim(),
-          country: address.country?.trim(),
-        },
-      }),
-      ...(status && ['Active', 'Inactive'].includes(status) && { status }),
-      attachments: finalAttachments,
-    };
+    // === 6. Update supplier ===
+    const updated = await Supplier.findByIdAndUpdate(id, {
+      $set: {
+        ...otherFields,
+        attachments: finalAttachments,
+      }
+    }, { new: true, runValidators: true });
 
-    // === Perform Update ===
-    const updatedSupplier = await Supplier.findByIdAndUpdate(
-      id,
-      { $set: updateData },
-      { new: true, runValidators: true }
-    );
-
-    if (!updatedSupplier) {
-      return res.status(404).json({
-        success: false,
-        message: 'Supplier not found',
-      });
-    }
-
-    res.status(200).json({
+    res.json({
       success: true,
       message: 'Supplier updated successfully',
-      data: updatedSupplier,
+      data: updated
     });
+
   } catch (error) {
     console.error('Update Supplier Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while updating supplier',
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
+
 
 
 // ==================== DELETE SUPPLIER ====================
