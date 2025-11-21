@@ -167,6 +167,10 @@ exports.getSupplierById = async (req, res) => {
   }
 };
 
+
+
+const fs = require("fs");
+
 // ==================== UPDATE SUPPLIER ====================
 exports.updateSupplier = async (req, res) => {
   try {
@@ -180,59 +184,78 @@ exports.updateSupplier = async (req, res) => {
       supplierType,
       address,
       status,
-      attachments: existingAttachments = '[]', // sent from frontend as JSON string
     } = req.body;
 
     const supplier = await Supplier.findById(id);
     if (!supplier) {
-      return res.status(404).json({ success: false, message: 'Supplier not found' });
+      return res.status(404).json({ success: false, message: "Supplier not found" });
     }
 
     // === Validations ===
     if (supplierName && supplierName.trim().length < 2) {
-      return res.status(400).json({ success: false, message: 'Name too short' });
+      return res.status(400).json({ success: false, message: "Name too short" });
     }
 
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({ success: false, message: 'Invalid email' });
+      return res.status(400).json({ success: false, message: "Invalid email" });
     }
 
     if (email && email.trim() !== supplier.email) {
       if (await Supplier.findOne({ email: email.trim(), _id: { $ne: id } })) {
-        return res.status(400).json({ success: false, message: 'Email already used' });
+        return res.status(400).json({ success: false, message: "Email already used" });
       }
     }
 
     if (supplierCode?.trim() && supplierCode.trim() !== supplier.supplierCode) {
-      if (await Supplier.findOne({ supplierCode: supplierCode.trim(), _id: { $ne: id } }).countDocuments() > 0) {
-        return res.status(400).json({ success: false, message: 'Code already exists' });
+      const codeExists = await Supplier.countDocuments({
+        supplierCode: supplierCode.trim(),
+        _id: { $ne: id },
+      });
+
+      if (codeExists > 0) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Code already exists" });
       }
     }
 
-    // === Handle Attachments (Preserve old + add new) ===
-    let parsedExisting = [];
-    try {
-      parsedExisting = JSON.parse(existingAttachments);
-      if (!Array.isArray(parsedExisting)) parsedExisting = [];
-    } catch (e) {
-      parsedExisting = [];
+    // ============================ 
+    // 🚀 HANDLE ATTACHMENTS (REPLACE OLD IF NEW UPLOADED)
+    // ============================
+    let finalAttachments = [];
+
+    if (req.files && req.files.length > 0) {
+      // Delete old files from server
+      if (supplier.attachments && supplier.attachments.length > 0) {
+        supplier.attachments.forEach((file) => {
+          try {
+            fs.unlinkSync(file.filePath);
+          } catch (err) {
+            console.error("File delete error:", err.message);
+          }
+        });
+      }
+
+      // Save new files
+      finalAttachments = req.files.map((file) => ({
+        fileName: file.originalname,
+        filePath: file.path,
+        uploadedAt: new Date(),
+      }));
+    } else {
+      // No new file → keep old ones
+      finalAttachments = supplier.attachments;
     }
-
-    const newUploaded = req.files?.map(file => ({
-      fileName: file.originalname,
-      filePath: file.path,
-      uploadedAt: new Date(),
-    })) || [];
-
-    const finalAttachments = [...parsedExisting, ...newUploaded];
 
     // === Build Update Object ===
     const updateData = {
       ...(supplierName && { supplierName: supplierName.trim() }),
       ...(supplierCode && { supplierCode: supplierCode.trim() }),
-      ...(contactPerson !== undefined && { contactPerson: contactPerson.trim() || '' }),
+      ...(contactPerson !== undefined && {
+        contactPerson: contactPerson.trim() || "",
+      }),
       ...(email && { email: email.trim() }),
-      ...(phone !== undefined && { phone: phone.trim() || '' }),
+      ...(phone !== undefined && { phone: phone.trim() || "" }),
       ...(supplierType && { supplierType: supplierType.trim() }),
       ...(address !== undefined && { address: normalizeAddress(address) }),
       ...(status && { status }),
@@ -246,18 +269,19 @@ exports.updateSupplier = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Supplier updated successfully',
+      message: "Supplier updated successfully",
       data: updatedSupplier,
     });
   } catch (error) {
-    console.error('Update Supplier Error:', error);
+    console.error("Update Supplier Error:", error);
     res.status(500).json({
       success: false,
-      message: 'Server error',
+      message: "Server error",
       error: error.message,
     });
   }
 };
+
 
 // ==================== DELETE SUPPLIER ====================
 exports.deleteSupplier = async (req, res) => {
