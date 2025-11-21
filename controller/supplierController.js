@@ -218,6 +218,9 @@ exports.updateSupplier = async (req, res) => {
       attachments, // ← MUST be sent by frontend (full current list)
     } = req.body;
 
+    console.log('Raw attachments value:', req.body.attachments);
+    console.log('req.files:', req.files?.map(f => f.originalname));
+
     // Parse address if string
     if (address && typeof address === 'string') {
       try { address = JSON.parse(address); } catch {
