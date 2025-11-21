@@ -145,8 +145,7 @@ exports.addInventory    = (req, res) => adjustStock(req, res);
 exports.updateInventory = (req, res) => adjustStock(req, res, req.params.variantId);
 
 
-
-// FINAL WORKING VERSION – NO MORE $cond ERROR
+// FINAL PERFECT VERSION – LISTING 100% CORRECT
 exports.getInventoryDashboard = async (req, res) => {
   try {
     const { 
@@ -196,38 +195,17 @@ exports.getInventoryDashboard = async (req, res) => {
         }
       }] : []),
 
-      // FIXED $addFields – CORRECT $cond SYNTAX
+      // Only compute real fields here
       {
         $addFields: {
-          // HACK: Send movement _id as variantId so frontend clicks it → we show historical view
-          variantId: "$_id",
-
+          realVariantId: "$variantDoc._id",
           sku: "$variantDoc.sku",
           productName: "$product.name",
           brandName: "$brand.brandName",
           thumbnail: { $ifNull: ["$variantDoc.image", "$product.thumbnail", "/placeholder.jpg"] },
           performedByName: { $ifNull: ["$user.name", "System"] },
-
-          // Show stock AT THE TIME of this movement
-          currentStock: "$newQuantity",
-
+          currentStock: "$newQuantity",  // stock at that time
           lowStockThreshold: { $ifNull: ["$variantDoc.lowStockThreshold", "$variantDoc.reorderLevel", 10] },
-
-          // FIXED: Proper nested $cond (3 arguments only!)
-          stockStatus: {
-            $cond: {
-              if: { $lte: ["$newQuantity", 0] },
-              then: "Out of Stock",
-              else: {
-                $cond: {
-                  if: { $lte: ["$newQuantity", { $ifNull: ["$variantDoc.lowStockThreshold", "$variantDoc.reorderLevel", 10] }] },
-                  then: "Low Stock",
-                  else: "Good"
-                }
-              }
-            }
-          },
-
           changeDisplay: {
             $cond: [
               "$isStockIncreasing",
@@ -241,15 +219,18 @@ exports.getInventoryDashboard = async (req, res) => {
       { $skip: skip },
       { $limit: limitNum },
 
+      // FINAL HACK HERE — ONLY IN $project
       {
         $project: {
           _id: 1,
-          variantId: 1,           // ← This is MOVEMENT ID (hack works!)
+          movementId: "$_id",           // keep original movement ID
+          variantId: "$_id",            // ← HACK: send movement _id as variantId
+          realVariantId: 1,             // optional debug
           sku: 1,
           productName: 1,
           brandName: 1,
           thumbnail: 1,
-          currentStock: 1,         // ← stock AT THAT MOMENT
+          currentStock: 1,              // ← stock AT THAT TIME
           previousQuantity: 1,
           newQuantity: 1,
           changeQuantity: 1,
@@ -260,7 +241,20 @@ exports.getInventoryDashboard = async (req, res) => {
           referenceId: 1,
           performedByName: 1,
           performedAt: "$createdAt",
-          createdAt: 1
+          createdAt: 1,
+          stockStatus: {
+            $cond: {
+              if: { $lte: ["$newQuantity", 0] },
+              then: "Out of Stock",
+              else: {
+                $cond: {
+                  if: { $lte: ["$newQuantity", { $ifNull: ["$variantDoc.lowStockThreshold", "$variantDoc.reorderLevel", 10] }] },
+                  then: "Low Stock",
+                  else: "Good"
+                }
+              }
+            }
+          }
         }
       }
     ];
@@ -284,7 +278,6 @@ exports.getInventoryDashboard = async (req, res) => {
     res.status(500).json({ success: false, msg: "Failed to load movements", error: err.message });
   }
 };
-
 
 
 // // Get single variant → returns basic info + LATEST STOCK MOVEMENT
