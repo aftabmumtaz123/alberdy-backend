@@ -1,7 +1,36 @@
 const Supplier = require('../model/Supplier');
 const Order = require('../model/Order');
-const upload = require('../config/multer');
 const cloudinary = require('cloudinary').v2;
+
+// ==================== HELPER: Normalize Address ====================
+const normalizeAddress = (address) => {
+  if (!address) return undefined;
+
+  let addrObj = address;
+
+  // If it's a string (sent from frontend as JSON string or double-stringified)
+  if (typeof address === 'string') {
+    try {
+      addrObj = JSON.parse(address);
+    } catch (e) {
+      // If parsing fails, treat as empty
+      addrObj = {};
+    }
+  }
+
+  // Ensure it's an object
+  if (typeof addrObj !== 'object' || addrObj === null) {
+    addrObj = {};
+  }
+
+  return {
+    street: addrObj.street?.trim() || '',
+    city: addrObj.city?.trim() || '',
+    state: addrObj.state?.trim() || '',
+    zip: addrObj.zip?.trim() || '',
+    country: addrObj.country?.trim() || '',
+  };
+};
 
 // ==================== CREATE SUPPLIER ====================
 exports.createSupplier = async (req, res) => {
@@ -17,101 +46,52 @@ exports.createSupplier = async (req, res) => {
       status,
     } = req.body;
 
-    // --- Required Field Validations ---
+    // Required validations
     if (!supplierName || supplierName.trim().length < 2) {
-      return res.status(400).json({
-        success: false,
-        message: 'Supplier name must be at least 2 characters',
-      });
+      return res.status(400).json({ success: false, message: 'Supplier name must be at least 2 characters' });
     }
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Valid email is required',
-      });
+      return res.status(400).json({ success: false, message: 'Valid email is required' });
     }
 
     if (!supplierType || supplierType.trim() === '') {
-      return res.status(400).json({
-        success: false,
-        message: 'Supplier type is required',
-      });
+      return res.status(400).json({ success: false, message: 'Supplier type is required' });
     }
 
-    // --- Unique Checks ---
-    const emailExists = await Supplier.findOne({ email: email.trim() });
-    if (emailExists) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email already exists',
-      });
+    // Unique checks
+    if (await Supplier.findOne({ email: email.trim() }).countDocuments() > 0) {
+      return res.status(400).json({ success: false, message: 'Email already exists' });
     }
 
     let supplierCodeToUse = supplierCode?.trim();
     if (!supplierCodeToUse) {
-      let isUnique = false;
-      while (!isUnique) {
-        supplierCodeToUse = `SUP-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-        if (!(await Supplier.findOne({ supplierCode: supplierCodeToUse }))) {
-          isUnique = true;
-        }
-      }
-    } else {
-      const codeExists = await Supplier.findOne({ supplierCode: supplierCodeToUse });
-      if (codeExists) {
-        return res.status(400).json({
-          success: false,
-          message: 'Supplier code already exists',
-        });
-      }
-    }
-
-    // --- Parse Address ---
-    if (address && typeof address === 'string') {
-      try {
-        address = JSON.parse(address);
-      } catch {
-        return res.status(400).json({
-          success: false,
-          message: 'Address must be valid JSON',
-        });
-      }
+      do {
+        supplierCodeToUse = `SUP-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+      } while (await Supplier.findOne({ supplierCode: supplierCodeToUse }));
+    } else if (await Supplier.findOne({ supplierCode: supplierCodeToUse })) {
+      return res.status(400).json({ success: false, message: 'Supplier code already exists' });
     }
 
     const statusToUse = ['Active', 'Inactive'].includes(status) ? status : 'Active';
 
-    // --- Handle File Uploads ---
-    const attachments = req.files
-      ? req.files.map(file => ({
-          fileName: file.originalname,
-          filePath: file.path, // Cloudinary secure_url
-          uploadedAt: new Date(),
-        }))
-      : [];
+    const attachments = req.files?.map(file => ({
+      fileName: file.originalname,
+      filePath: file.path, // Cloudinary URL
+      uploadedAt: new Date(),
+    })) || [];
 
-    // --- Create Supplier ---
-    const supplier = new Supplier({
+    const supplier = await Supplier.create({
       supplierName: supplierName.trim(),
       supplierCode: supplierCodeToUse,
-      contactPerson: contactPerson?.trim(),
+      contactPerson: contactPerson?.trim() || '',
       email: email.trim(),
-      phone: phone?.trim(),
+      phone: phone?.trim() || '',
       supplierType: supplierType.trim(),
-      address: address
-        ? {
-            street: address.street?.trim(),
-            city: address.city?.trim(),
-            state: address.state?.trim(),
-            zip: address.zip?.trim(),
-            country: address.country?.trim(),
-          }
-        : undefined,
+      address: normalizeAddress(address),
       status: statusToUse,
       attachments,
     });
-
-    await supplier.save();
 
     res.status(201).json({
       success: true,
@@ -122,7 +102,7 @@ exports.createSupplier = async (req, res) => {
     console.error('Create Supplier Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error occurred while creating supplier',
+      message: 'Server error',
       error: error.message,
     });
   }
@@ -135,31 +115,25 @@ exports.getAllSuppliers = async (req, res) => {
     const limit = Math.max(1, Math.min(100, parseInt(req.query.limit) || 10));
     const skip = (page - 1) * limit;
 
-    const suppliers = await Supplier.find()
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
+    const [suppliers, total] = await Promise.all([
+      Supplier.find().sort({ createdAt: -1 }).skip(skip).limit(limit),
+      Supplier.countDocuments(),
+    ]);
 
-    const totalSuppliers = await Supplier.countDocuments();
-
-    res.status(200).json({
+    res.json({
       success: true,
       message: 'Suppliers fetched successfully',
       data: suppliers,
       pagination: {
-        total: totalSuppliers,
+        total,
         page,
-        pages: Math.ceil(totalSuppliers / limit),
+        pages: Math.ceil(total / limit),
         limit,
       },
     });
   } catch (error) {
     console.error('Fetch Suppliers Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error occurred while fetching suppliers',
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
@@ -175,10 +149,7 @@ exports.getSupplierById = async (req, res) => {
       });
 
     if (!supplier) {
-      return res.status(404).json({
-        success: false,
-        message: 'Supplier not found',
-      });
+      return res.status(404).json({ success: false, message: 'Supplier not found' });
     }
 
     const ordersCount = await Order.countDocuments({ supplier: supplier._id });
@@ -192,19 +163,14 @@ exports.getSupplierById = async (req, res) => {
     });
   } catch (err) {
     console.error('Get supplier error:', err);
-    res.status(500).json({
-      success: false,
-      message: 'Server error fetching supplier',
-    });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
-
-
+// ==================== UPDATE SUPPLIER ====================
 exports.updateSupplier = async (req, res) => {
   try {
     const { id } = req.params;
-
     let {
       supplierName,
       supplierCode,
@@ -214,84 +180,75 @@ exports.updateSupplier = async (req, res) => {
       supplierType,
       address,
       status,
-      attachments, // ← Full current list from frontend (most important)
+      attachments: existingAttachments = '[]', // sent from frontend as JSON string
     } = req.body;
 
-    // Parse address
-    if (address && typeof address === 'string') {
-      try { address = JSON.parse(address); } catch {
-        return res.status(400).json({ success: false, message: 'Invalid address JSON' });
-      }
-    }
-
-    // === Validations (same as before) ===
-    if (supplierName && supplierName.trim().length < 2)
-      return res.status(400).json({ success: false, message: 'Name too short' });
-
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-      return res.status(400).json({ success: false, message: 'Invalid email' });
-
-    if (email) {
-      const exists = await Supplier.findOne({ email: email.trim(), _id: { $ne: id } });
-      if (exists) return res.status(400).json({ success: false, message: 'Email already used' });
-    }
-
-    if (supplierCode?.trim()) {
-      const exists = await Supplier.findOne({ supplierCode: supplierCode.trim(), _id: { $ne: id } });
-      if (exists) return res.status(400).json({ success: false, message: 'Code already exists' });
-    }
-
-    // === Build new attachments list ===
-    let finalAttachments = [];
-
-    
-
-    // Option 2: If no list sent, but files uploaded → use uploaded ones
-    if (req.files && req.files.length > 0) {
-      const newFiles = req.files.map(f => ({
-        fileName: f.originalname,
-        filePath: f.path,
-        uploadedAt: new Date(),
-      }));
-      finalAttachments = newFiles;
-    }
-
-    // === Update supplier ===
-    const updateData = {
-      ...(supplierName && { supplierName: supplierName.trim() }),
-      ...(supplierCode && { supplierCode: supplierCode.trim() }),
-      ...(contactPerson && { contactPerson: contactPerson.trim() }),
-      ...(email && { email: email.trim() }),
-      ...(phone && { phone: phone.trim() }),
-      ...(supplierType && { supplierType: supplierType.trim() }),
-      ...(address && {
-        address: {
-          street: address.street?.trim(),
-          city: address.city?.trim(),
-          state: address.state?.trim(),
-          zip: address.zip?.trim(),
-          country: address.country?.trim(),
-        },
-      }),
-      ...(status && { status }),
-      attachments: finalAttachments, // ← Just replace everything
-    };
-
-    const supplier = await Supplier.findByIdAndUpdate(id, updateData, {
-      new: true,
-      runValidators: true,
-    });
-
+    const supplier = await Supplier.findById(id);
     if (!supplier) {
       return res.status(404).json({ success: false, message: 'Supplier not found' });
     }
 
+    // === Validations ===
+    if (supplierName && supplierName.trim().length < 2) {
+      return res.status(400).json({ success: false, message: 'Name too short' });
+    }
+
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ success: false, message: 'Invalid email' });
+    }
+
+    if (email && email.trim() !== supplier.email) {
+      if (await Supplier.findOne({ email: email.trim(), _id: { $ne: id } })) {
+        return res.status(400).json({ success: false, message: 'Email already used' });
+      }
+    }
+
+    if (supplierCode?.trim() && supplierCode.trim() !== supplier.supplierCode) {
+      if (await Supplier.findOne({ supplierCode: supplierCode.trim(), _id: { $ne: id } }).countDocuments() > 0) {
+        return res.status(400).json({ success: false, message: 'Code already exists' });
+      }
+    }
+
+    // === Handle Attachments (Preserve old + add new) ===
+    let parsedExisting = [];
+    try {
+      parsedExisting = JSON.parse(existingAttachments);
+      if (!Array.isArray(parsedExisting)) parsedExisting = [];
+    } catch (e) {
+      parsedExisting = [];
+    }
+
+    const newUploaded = req.files?.map(file => ({
+      fileName: file.originalname,
+      filePath: file.path,
+      uploadedAt: new Date(),
+    })) || [];
+
+    const finalAttachments = [...parsedExisting, ...newUploaded];
+
+    // === Build Update Object ===
+    const updateData = {
+      ...(supplierName && { supplierName: supplierName.trim() }),
+      ...(supplierCode && { supplierCode: supplierCode.trim() }),
+      ...(contactPerson !== undefined && { contactPerson: contactPerson.trim() || '' }),
+      ...(email && { email: email.trim() }),
+      ...(phone !== undefined && { phone: phone.trim() || '' }),
+      ...(supplierType && { supplierType: supplierType.trim() }),
+      ...(address !== undefined && { address: normalizeAddress(address) }),
+      ...(status && { status }),
+      attachments: finalAttachments,
+    };
+
+    const updatedSupplier = await Supplier.findByIdAndUpdate(id, updateData, {
+      new: true,
+      runValidators: true,
+    });
+
     res.json({
       success: true,
       message: 'Supplier updated successfully',
-      data: supplier,
+      data: updatedSupplier,
     });
-
   } catch (error) {
     console.error('Update Supplier Error:', error);
     res.status(500).json({
@@ -302,37 +259,31 @@ exports.updateSupplier = async (req, res) => {
   }
 };
 
-
-
-
 // ==================== DELETE SUPPLIER ====================
 exports.deleteSupplier = async (req, res) => {
   try {
     const { id } = req.params;
-
     const supplier = await Supplier.findById(id);
+
     if (!supplier) {
-      return res.status(404).json({
-        success: false,
-        message: 'Supplier not found',
-      });
+      return res.status(404).json({ success: false, message: 'Supplier not found' });
     }
 
-    // Optional: Delete all attachments from Cloudinary
-    if (supplier.attachments && supplier.attachments.length > 0) {
+    // Delete files from Cloudinary
+    if (supplier.attachments?.length > 0) {
       for (const att of supplier.attachments) {
         try {
           const publicId = att.filePath.split('/').pop().split('.')[0];
           await cloudinary.uploader.destroy(`Uploads/${publicId}`);
         } catch (err) {
-          console.warn('Failed to delete attachment:', att.filePath);
+          console.warn('Failed to delete from Cloudinary:', att.filePath);
         }
       }
     }
 
     await Supplier.findByIdAndDelete(id);
 
-    res.status(200).json({
+    res.json({
       success: true,
       message: 'Supplier and attachments deleted successfully',
     });
@@ -340,7 +291,7 @@ exports.deleteSupplier = async (req, res) => {
     console.error('Delete Supplier Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error occurred while deleting supplier',
+      message: 'Server error',
       error: error.message,
     });
   }
