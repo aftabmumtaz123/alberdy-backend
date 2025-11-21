@@ -84,10 +84,10 @@ exports.createSupplier = async (req, res) => {
     // --- Handle File Uploads ---
     const attachments = req.files
       ? req.files.map(file => ({
-        fileName: file.originalname,
-        filePath: file.path, // Cloudinary secure_url
-        uploadedAt: new Date(),
-      }))
+          fileName: file.originalname,
+          filePath: file.path, // Cloudinary secure_url
+          uploadedAt: new Date(),
+        }))
       : [];
 
     // --- Create Supplier ---
@@ -100,12 +100,12 @@ exports.createSupplier = async (req, res) => {
       supplierType: supplierType.trim(),
       address: address
         ? {
-          street: address.street?.trim(),
-          city: address.city?.trim(),
-          state: address.state?.trim(),
-          zip: address.zip?.trim(),
-          country: address.country?.trim(),
-        }
+            street: address.street?.trim(),
+            city: address.city?.trim(),
+            state: address.state?.trim(),
+            zip: address.zip?.trim(),
+            country: address.country?.trim(),
+          }
         : undefined,
       status: statusToUse,
       attachments,
@@ -201,7 +201,6 @@ exports.getSupplierById = async (req, res) => {
 
 
 
-// Only the updateSupplier part – rest stays the same
 exports.updateSupplier = async (req, res) => {
   try {
     const { id } = req.params;
@@ -215,46 +214,61 @@ exports.updateSupplier = async (req, res) => {
       supplierType,
       address,
       status,
-      attachments, // ← this is TEXT (JSON string of kept files)
+      attachments, // ← Full current list from frontend (most important)
     } = req.body;
 
-    // Parse address if needed
+    // Parse address
     if (address && typeof address === 'string') {
       try { address = JSON.parse(address); } catch {
         return res.status(400).json({ success: false, message: 'Invalid address JSON' });
       }
     }
 
-    // === Build final attachments array ===
+    // === Validations (same as before) ===
+    if (supplierName && supplierName.trim().length < 2)
+      return res.status(400).json({ success: false, message: 'Name too short' });
+
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      return res.status(400).json({ success: false, message: 'Invalid email' });
+
+    if (email) {
+      const exists = await Supplier.findOne({ email: email.trim(), _id: { $ne: id } });
+      if (exists) return res.status(400).json({ success: false, message: 'Email already used' });
+    }
+
+    if (supplierCode?.trim()) {
+      const exists = await Supplier.findOne({ supplierCode: supplierCode.trim(), _id: { $ne: id } });
+      if (exists) return res.status(400).json({ success: false, message: 'Code already exists' });
+    }
+
+    // === Build new attachments list ===
     let finalAttachments = [];
 
-    // 1. Kept attachments from frontend (text field)
+    // Option 1: Frontend sends full current list → use it (BEST)
     if (attachments) {
       try {
-        const parsed = typeof attachments === 'string' ? JSON.parse(attachments) : attachments;
-        if (Array.isArray(parsed)) {
-          finalAttachments = parsed.map(att => ({
+        const list = typeof attachments === 'string' ? JSON.parse(attachments) : attachments;
+        if (Array.isArray(list)) {
+          finalAttachments = list.map(att => ({
             fileName: att.fileName,
             filePath: att.filePath,
-            uploadedAt: att.uploadedAt ? new Date(att.uploadedAt) : new Date(),
+            uploadedAt: att.uploadedAt || new Date(),
           }));
         }
-      } catch (e) {
-        return res.status(400).json({ success: false, message: 'Invalid attachments format' });
-      }
+      } catch (e) { /* ignore */ }
     }
 
-    // 2. Append newly uploaded files (from req.files → field name 'files')
+    // Option 2: If no list sent, but files uploaded → use uploaded ones
     if (req.files && req.files.length > 0) {
-      const newFiles = req.files.map(file => ({
-        fileName: file.originalname,
-        filePath: file.path,                    // This is the Cloudinary URL!
+      const newFiles = req.files.map(f => ({
+        fileName: f.originalname,
+        filePath: f.path,
         uploadedAt: new Date(),
       }));
-      finalAttachments.push(...newFiles);
+      finalAttachments = newFiles;
     }
 
-    // === Prepare update data ===
+    // === Update supplier ===
     const updateData = {
       ...(supplierName && { supplierName: supplierName.trim() }),
       ...(supplierCode && { supplierCode: supplierCode.trim() }),
@@ -272,7 +286,7 @@ exports.updateSupplier = async (req, res) => {
         },
       }),
       ...(status && { status }),
-      attachments: finalAttachments, // fully replaced, correct list
+      attachments: finalAttachments, // ← Just replace everything
     };
 
     const supplier = await Supplier.findByIdAndUpdate(id, updateData, {
