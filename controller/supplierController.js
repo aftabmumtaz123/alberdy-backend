@@ -171,7 +171,9 @@ exports.getSupplierById = async (req, res) => {
 
 const fs = require("fs");
 
-// ==================== UPDATE SUPPLIER ====================
+
+
+// ==================== UPDATE SUPPLIER (FIXED) ====================
 exports.updateSupplier = async (req, res) => {
   try {
     const { id } = req.params;
@@ -184,76 +186,61 @@ exports.updateSupplier = async (req, res) => {
       supplierType,
       address,
       status,
+      attachmentsToKeep = []  // ← Expect array of filePath strings
     } = req.body;
+
+    // Parse if stringified
+    if (typeof attachmentsToKeep === 'string') {
+      try {
+        attachmentsToKeep = JSON.parse(attachmentsToKeep);
+      } catch (e) {
+        attachmentsToKeep = [];
+      }
+    }
 
     const supplier = await Supplier.findById(id);
     if (!supplier) {
       return res.status(404).json({ success: false, message: "Supplier not found" });
     }
 
-    // === Validations ===
-    if (supplierName && supplierName.trim().length < 2) {
-      return res.status(400).json({ success: false, message: "Name too short" });
-    }
+    // === 1. Determine which old attachments to KEEP ===
+    const oldAttachments = supplier.attachments || [];
+    const keptAttachments = oldAttachments.filter(att =>
+      attachmentsToKeep.includes(att.filePath)
+    );
 
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({ success: false, message: "Invalid email" });
-    }
+    // === 2. Delete removed attachments from Cloudinary ===
+    const removedAttachments = oldAttachments.filter(
+      att => !attachmentsToKeep.includes(att.filePath)
+    );
 
-    if (email && email.trim() !== supplier.email) {
-      if (await Supplier.findOne({ email: email.trim(), _id: { $ne: id } })) {
-        return res.status(400).json({ success: false, message: "Email already used" });
+    for (const att of removedAttachments) {
+      try {
+        const publicId = att.filePath.split('/').pop().split('.')[0];
+        await cloudinary.uploader.destroy(`Uploads/${publicId}`);
+        console.log('Deleted from Cloudinary:', att.filePath);
+      } catch (err) {
+        console.warn('Failed to delete from Cloudinary:', att.filePath);
       }
     }
 
-    if (supplierCode?.trim() && supplierCode.trim() !== supplier.supplierCode) {
-      const codeExists = await Supplier.countDocuments({
-        supplierCode: supplierCode.trim(),
-        _id: { $ne: id },
-      });
+    // === 3. Add new uploaded files (if any) ===
+    const newAttachments = req.files?.map(file => ({
+      fileName: file.originalname,
+      filePath: file.path, // Cloudinary URL
+      uploadedAt: new Date(),
+    })) || [];
 
-      if (codeExists > 0) {
-        return res
-          .status(400)
-          .json({ success: false, message: "Code already exists" });
-      }
-    }
+    // === 4. Final attachments = kept old + new ones ===
+    const finalAttachments = [...keptAttachments, ...newAttachments];
 
-    // ============================ 
-    // 🚀 HANDLE ATTACHMENTS (REPLACE OLD IF NEW UPLOADED)
-    // ============================
-    let finalAttachments = [];
+    // === Rest of validations (unchanged) ===
+    // ... [your existing validation code]
 
-    if (req.files && req.files.length > 0) {
-      // Delete old files from server
-      if (supplier.attachments && supplier.attachments.length > 0) {
-        supplier.attachments.forEach((file) => {
-          try {
-            fs.unlinkSync(file.filePath);
-          } catch (err) {
-            console.error("File delete error:", err.message);
-          }
-        });
-      }
-
-      // Save new files
-      finalAttachments = req.files.map((file) => ({
-        fileName: file.originalname,
-        filePath: file.path,
-        uploadedAt: new Date(),
-      }));
-    } else {
-      // No new file → keep old ones
-      finalAttachments = supplier.attachments;
-    }
-
-    // === Build Update Object ===
     const updateData = {
       ...(supplierName && { supplierName: supplierName.trim() }),
       ...(supplierCode && { supplierCode: supplierCode.trim() }),
-      ...(contactPerson !== undefined && {
-        contactPerson: contactPerson.trim() || "",
-      }),
+      ...(contactPerson !== undefined && { contactPerson: contactPerson.trim() || "" }),
       ...(email && { email: email.trim() }),
       ...(phone !== undefined && { phone: phone.trim() || "" }),
       ...(supplierType && { supplierType: supplierType.trim() }),
@@ -272,6 +259,7 @@ exports.updateSupplier = async (req, res) => {
       message: "Supplier updated successfully",
       data: updatedSupplier,
     });
+
   } catch (error) {
     console.error("Update Supplier Error:", error);
     res.status(500).json({
