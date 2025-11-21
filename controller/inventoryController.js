@@ -146,7 +146,7 @@ exports.updateInventory = (req, res) => adjustStock(req, res, req.params.variant
 
 
 
-// FIXED: Stock Movements Dashboard – NOW 100% SORTS CORRECTLY
+// FINAL: Stock Movements Dashboard – Sends MOVEMENT ID as variantId (Frontend sees nothing changed)
 exports.getInventoryDashboard = async (req, res) => {
   try {
     const { 
@@ -162,11 +162,9 @@ exports.getInventoryDashboard = async (req, res) => {
     const limitNum = Math.max(1, Math.min(200, parseInt(limit) || 50));
     const skip = (pageNum - 1) * limitNum;
 
-    // Build base match for fields that exist on StockMovement
     const baseMatch = {};
 
     if (movementType) baseMatch.movementType = movementType;
-
     if (startDate || endDate) {
       baseMatch.createdAt = {};
       if (startDate) baseMatch.createdAt.$gte = new Date(startDate);
@@ -175,27 +173,19 @@ exports.getInventoryDashboard = async (req, res) => {
 
     const pipeline = [
       { $match: baseMatch },
-
-      // MUST sort early for performance (before heavy lookups)
       { $sort: { createdAt: -1 } },
 
-      // Now do all lookups
+      // Lookups
       { $lookup: { from: "variants", localField: "variant", foreignField: "_id", as: "variantDoc" } },
       { $unwind: { path: "$variantDoc", preserveNullAndEmptyArrays: true } },
-
       { $lookup: { from: "products", localField: "variantDoc.product", foreignField: "_id", as: "product" } },
       { $unwind: { path: "$product", preserveNullAndEmptyArrays: true } },
-
       { $lookup: { from: "brands", localField: "product.brand", foreignField: "_id", as: "brand" } },
       { $unwind: { path: "$brand", preserveNullAndEmptyArrays: true } },
-
-      { $lookup: { from: "categories", localField: "product.category", foreignField: "_id", as: "category" } },
-      { $unwind: { path: "$category", preserveNullAndEmptyArrays: true } },
-
       { $lookup: { from: "users", localField: "performedBy", foreignField: "_id", as: "user" } },
       { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
 
-      // NOW it's safe to search on joined fields
+      // Search after lookups
       ...(search ? [{
         $match: {
           $or: [
@@ -207,31 +197,34 @@ exports.getInventoryDashboard = async (req, res) => {
         }
       }] : []),
 
-      // Add computed fields
+      // THE HACK + HISTORICAL ACCURACY
       {
         $addFields: {
-          variantId: "$variantDoc._id",
+          // HACK: Send movement _id as variantId → frontend clicks it → magic
+          variantId: "$_id",
+
+          // Real variant ID (optional, for internal use)
+          realVariantId: "$variantDoc._id",
+
           sku: "$variantDoc.sku",
           productName: "$product.name",
           brandName: "$brand.brandName",
-          categoryName: "$category.name",
           thumbnail: { $ifNull: ["$variantDoc.image", "$product.thumbnail", "/placeholder.jpg"] },
           performedByName: { $ifNull: ["$user.name", "System"] },
-          currentStock: "$variantDoc.stockQuantity",
+
+          // Show stock AT THAT TIME (not current live)
+          currentStock: "$newQuantity",
+
           lowStockThreshold: { $ifNull: ["$variantDoc.lowStockThreshold", "$variantDoc.reorderLevel", 10] },
           stockStatus: {
             $cond: [
-              { $lte: ["$variantDoc.stockQuantity", 0] },
-              "Out of Stock",
-              {
-                $cond: [
-                  { $lte: ["$variantDoc.stockQuantity", { $ifNull: ["$variantDoc.lowStockThreshold", "$variantDoc.reorderLevel", 10] }] },
-                  "Low Stock",
-                  "Good"
-                ]
-              }
+              { $lte: ["$newQuantity", 0] }, "Out of Stock",
+              { $lte: ["$newQuantity", { $ifNull: ["$variantDoc.lowStockThreshold", "$variantDoc.reorderLevel", 10] }] },
+              "Low Stock",
+              "Good"
             ]
           },
+
           changeDisplay: {
             $cond: [
               "$isStockIncreasing",
@@ -248,15 +241,13 @@ exports.getInventoryDashboard = async (req, res) => {
       {
         $project: {
           _id: 1,
-          variantId: 1,
+          variantId: 1,           // ← This is MOVEMENT ID (hack!)
+          realVariantId: 1,        // optional
           sku: 1,
           productName: 1,
           brandName: 1,
-          categoryName: 1,
           thumbnail: 1,
-          currentStock: 1,
-          lowStockThreshold: 1,
-          stockStatus: 1,
+          currentStock: 1,         // ← stock AT THAT TIME
           previousQuantity: 1,
           newQuantity: 1,
           changeQuantity: 1,
@@ -278,17 +269,12 @@ exports.getInventoryDashboard = async (req, res) => {
     res.json({
       success: true,
       data: movements,
-      pagination: {
-        total,
-        page: pageNum,
-        pages: Math.ceil(total / limitNum),
-        limit: limitNum
-      }
+      pagination: { total, page: pageNum, pages: Math.ceil(total / limitNum), limit: limitNum }
     });
 
   } catch (err) {
-    console.error("Stock Movements Dashboard Error:", err);
-    res.status(500).json({ success: false, msg: "Failed to load stock movements", error: err.message });
+    console.error("Dashboard Error:", err);
+    res.status(500).json({ success: false, msg: "Failed to load movements" });
   }
 };
 
@@ -367,31 +353,80 @@ exports.getInventoryDashboard = async (req, res) => {
 //   }
 // };
 
+// FINAL: Smart getSingleVariant → accepts BOTH variantId and movementId (as variantId)
 exports.getSingleVariant = async (req, res) => {
   try {
     let id = req.params.variantId || req.params.id;
-    if (!id || !mongoose.Types.ObjectId.isValid(id.toString().trim())) {
-      return res.status(400).json({ success: false, msg: "Valid variantId is required" });
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, msg: "Invalid ID" });
     }
     id = id.toString().trim();
 
+    // FIRST: Check if it's a StockMovement ID
+    const movement = await StockMovement.findById(id)
+      .populate({
+        path: 'variant',
+        select: 'sku stockQuantity image product lowStockThreshold reorderLevel',
+        populate: { path: 'product', select: 'name thumbnail brand category brandName' }
+      })
+      .populate('performedBy', 'name')
+      .lean();
+
+    if (movement) {
+      // IT'S A HISTORICAL MOVEMENT → RETURN FROZEN DATA
+      const variant = movement.variant;
+
+      return res.json({
+        success: true,
+        msg: "Historical stock movement",
+        data: {
+          variantId: variant._id.toString(),
+          movementId: movement._id.toString(),
+          productName: variant.product?.name || "Unknown",
+          brandName: variant.product?.brand?.brandName || "Unknown",
+          sku: movement.sku,
+          thumbnail: variant.image || variant.product?.thumbnail || "/placeholder.jpg",
+
+          // HISTORICAL TRUTH
+          currentStock: movement.newQuantity,
+          stockBefore: movement.previousQuantity,
+          stockAfter: movement.newQuantity,
+          changeDisplay: movement.isStockIncreasing ? `+${movement.changeQuantity}` : `−${Math.abs(movement.changeQuantity)}`,
+
+          lowStockThreshold: variant.lowStockThreshold || variant.reorderLevel || 10,
+          stockStatus: movement.newQuantity <= 0 ? "Out of Stock" :
+                       movement.newQuantity <= (variant.lowStockThreshold || variant.reorderLevel || 10) ? "Low Stock" : "Good",
+
+          movement: {
+            _id: movement._id,
+            previousQuantity: movement.previousQuantity,
+            newQuantity: movement.newQuantity,
+            changeQuantity: movement.changeQuantity,
+            isStockIncreasing: movement.isStockIncreasing,
+            movementType: movement.movementType,
+            reason: movement.reason,
+            referenceId: movement.referenceId,
+            performedBy: movement.performedBy?.name || "System",
+            performedAt: movement.createdAt,
+          },
+
+          currentLiveStock: variant.stockQuantity,
+          isHistoricalView: true
+        }
+      });
+    }
+
+    // NOT A MOVEMENT → It's a real variantId → show latest movement
     const result = await StockMovement.aggregate([
       { $match: { variant: new mongoose.Types.ObjectId(id) } },
       { $sort: { createdAt: -1 } },
       { $limit: 1 },
-
       { $lookup: { from: "variants", localField: "variant", foreignField: "_id", as: "variantDoc" } },
       { $unwind: { path: "$variantDoc", preserveNullAndEmptyArrays: true } },
-
       { $lookup: { from: "products", localField: "variantDoc.product", foreignField: "_id", as: "product" } },
       { $unwind: { path: "$product", preserveNullAndEmptyArrays: true } },
-
       { $lookup: { from: "brands", localField: "product.brand", foreignField: "_id", as: "brand" } },
       { $unwind: { path: "$brand", preserveNullAndEmptyArrays: true } },
-
-      { $lookup: { from: "categories", localField: "product.category", foreignField: "_id", as: "category" } },
-      { $unwind: { path: "$category", preserveNullAndEmptyArrays: true } },
-
       { $lookup: { from: "users", localField: "performedBy", foreignField: "_id", as: "user" } },
       { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
 
@@ -401,24 +436,9 @@ exports.getSingleVariant = async (req, res) => {
           sku: "$variantDoc.sku",
           productName: "$product.name",
           brandName: "$brand.brandName",
-          categoryName: "$category.name",
           thumbnail: { $ifNull: ["$variantDoc.image", "$product.thumbnail", "/placeholder.jpg"] },
           performedByName: { $ifNull: ["$user.name", "System"] },
           currentStock: "$variantDoc.stockQuantity",
-          lowStockThreshold: { $ifNull: ["$variantDoc.lowStockThreshold", "$variantDoc.reorderLevel", 10] },
-          stockStatus: {
-            $cond: [
-              { $lte: ["$variantDoc.stockQuantity", 0] },
-              "Out of Stock",
-              {
-                $cond: [
-                  { $lte: ["$variantDoc.stockQuantity", { $ifNull: ["$variantDoc.lowStockThreshold", "$variantDoc.reorderLevel", 10] }] },
-                  "Low Stock",
-                  "Good"
-                ]
-              }
-            ]
-          },
           changeDisplay: {
             $cond: [
               "$isStockIncreasing",
@@ -428,7 +448,6 @@ exports.getSingleVariant = async (req, res) => {
           }
         }
       },
-
       {
         $project: {
           _id: 1,
@@ -436,59 +455,42 @@ exports.getSingleVariant = async (req, res) => {
           sku: 1,
           productName: 1,
           brandName: 1,
-          categoryName: 1,
           thumbnail: 1,
           currentStock: 1,
-          lowStockThreshold: 1,
-          stockStatus: 1,
           previousQuantity: 1,
           newQuantity: 1,
           changeQuantity: 1,
           changeDisplay: 1,
-          isStockIncreasing: 1,
           movementType: 1,
           reason: 1,
           referenceId: 1,
           performedByName: 1,
-          performedAt: "$createdAt",
-          createdAt: 1
+          performedAt: "$createdAt"
         }
       }
     ]);
 
-    if (!result || result.length === 0) {
+    if (result.length === 0) {
+      // No movements → just return variant info
       const variant = await Variant.findById(id)
-        .select('sku stockQuantity image product lowStockThreshold reorderLevel')
+        .select('sku stockQuantity image product')
         .populate({
           path: 'product',
           select: 'name thumbnail brand category',
-          populate: [
-            { path: 'brand', select: 'brandName' },
-            { path: 'category', select: 'name' }
-          ]
+          populate: [{ path: 'brand', select: 'brandName' }]
         })
         .lean();
 
-      if (!variant) {
-        return res.status(404).json({ success: false, msg: "Variant not found" });
-      }
-
-      const threshold = variant.lowStockThreshold || variant.reorderLevel || 10;
-      const status = variant.stockQuantity <= 0 ? "Out of Stock" :
-                     variant.stockQuantity <= threshold ? "Low Stock" : "Good";
+      if (!variant) return res.status(404).json({ success: false, msg: "Variant not found" });
 
       return res.json({
         success: true,
-        msg: "Variant found, but no stock movements yet",
         data: {
           variantId: variant._id.toString(),
-          productName: variant.product?.name || "Unknown Product",
+          productName: variant.product?.name || "Unknown",
           brandName: variant.product?.brand?.brandName || "Unknown",
-          categoryName: variant.product?.category?.name || "Unknown",
           sku: variant.sku || "N/A",
           currentStock: variant.stockQuantity,
-          lowStockThreshold: threshold,
-          stockStatus: status,
           thumbnail: variant.image || variant.product?.thumbnail || "/placeholder.jpg",
           movement: null
         }
@@ -496,42 +498,34 @@ exports.getSingleVariant = async (req, res) => {
     }
 
     const latest = result[0];
-
     res.json({
       success: true,
-      msg: "Latest stock movement fetched",
       data: {
         variantId: latest.variantId.toString(),
         productName: latest.productName,
         brandName: latest.brandName,
-        categoryName: latest.categoryName,
         sku: latest.sku,
         currentStock: latest.currentStock,
-        lowStockThreshold: latest.lowStockThreshold,
-        stockStatus: latest.stockStatus,
         thumbnail: latest.thumbnail,
         movement: {
           _id: latest._id,
           previousQuantity: latest.previousQuantity,
           newQuantity: latest.newQuantity,
-          changeQuantity: latest.changeQuantity,
           changeDisplay: latest.changeDisplay,
-          isStockIncreasing: latest.isStockIncreasing,
           movementType: latest.movementType,
           reason: latest.reason,
-          referenceId: latest.referenceId || null,
           performedBy: latest.performedByName,
-          performedAt: latest.performedAt,
-          createdAt: latest.createdAt
+          performedAt: latest.performedAt
         }
       }
     });
 
   } catch (err) {
     console.error("getSingleVariant Error:", err);
-    res.status(500).json({ success: false, msg: "Server error", error: err.message });
+    res.status(500).json({ success: false, msg: "Server error" });
   }
 };
+
 
 // Stock movement history
 exports.getStockMovements = async (req, res) => {
