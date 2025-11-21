@@ -168,7 +168,7 @@ exports.getInventoryDashboard = async (req, res) => {
     const movements = await StockMovement.aggregate([
       { $match: filter },
 
-      { $sort: { createdAt: -1 } },
+      { $sort: { updatedAt: -1 } },
 
       
       { $lookup: { from: "variants", localField: "variant", foreignField: "_id", as: "variantDoc" } },
