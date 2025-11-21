@@ -168,8 +168,7 @@ exports.getInventoryDashboard = async (req, res) => {
     const movements = await StockMovement.aggregate([
       { $match: filter },
 
-      // CRITICAL: Sort by newest first EARLY
-      { $sort: { createdAt: -1 } },
+      { $sort: { createdAt: 1 } },
 
       // Now do lookups (order is now preserved)
       { $lookup: { from: "variants", localField: "variant", foreignField: "_id", as: "variantDoc" } },
