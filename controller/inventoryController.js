@@ -262,7 +262,84 @@ exports.getInventoryDashboard = async (req, res) => {
 
 
 
-// Get single variant → returns basic info + LATEST STOCK MOVEMENT
+// // Get single variant → returns basic info + LATEST STOCK MOVEMENT
+// exports.getSingleVariant = async (req, res) => {
+//   try {
+//     let id = req.params.variantId || req.params.id;
+
+//     if (!id || !mongoose.Types.ObjectId.isValid(id.toString().trim())) {
+//       return res.status(400).json({ 
+//         success: false, 
+//         msg: "Valid variantId is required" 
+//       });
+//     }
+
+//     id = id.toString().trim();
+
+//   const variant = await Variant.findById(id)
+//   .select('sku stockQuantity image product')
+//   .populate({
+//     path: 'product',
+//     select: 'name thumbnail brand category',
+//     populate: [
+//       { path: 'brand', select: 'brandName' },
+//       { path: 'category', select: 'name' }
+//     ]
+//   })
+//   .lean();
+
+
+//     if (!variant) {
+//       return res.status(404).json({ success: false, msg: "Variant not found" });
+//     }
+
+//     // 2. Get the LATEST stock movement
+//     const latestMovement = await StockMovement.findOne({ variant: id })
+//       .populate('performedBy', 'name')
+//       .sort({ createdAt: -1 })
+//       .lean();
+
+//     res.json({
+//       success: true,
+//       msg: latestMovement ? "Latest stock movement fetched" : "Variant found (no movements yet)",
+//       data: {
+//         variantId: variant._id.toString(),
+//         productName: variant.product?.name || "Unknown Product",
+//         brandName: variant.product?.brand?.brandName || "Unknown Brand",
+//         categoryName: variant.product?.category?.name || "Unknown Category",
+//         sku: variant.sku || "N/A",
+//         currentStock: variant.stockQuantity,
+//         thumbnail: variant.image || variant.product?.thumbnail || "/placeholder.jpg",
+
+//         // ONLY the movement — clean and clear
+//         movement: latestMovement ? {
+//           previousQuantity: latestMovement.previousQuantity,
+//           newQuantity: latestMovement.newQuantity,
+//           changeQuantity: latestMovement.changeQuantity,
+//           isStockIncreasing: latestMovement.isStockIncreasing,
+//           movementType: latestMovement.movementType,
+//           reason: latestMovement.reason,
+//           referenceId: latestMovement.referenceId || null,
+//           performedBy: latestMovement.performedBy?.name || "System",
+//           performedAt: latestMovement.createdAt,
+//           createdAt: latestMovement.createdAt
+//         } : null
+//       }
+//     });
+
+//   } catch (err) {
+//     console.error("getSingleVariant Error:", err);
+//     res.status(500).json({ 
+//       success: false, 
+//       msg: "Server error", 
+//       error: err.message 
+//     });
+//   }
+// };
+
+
+
+// Get single variant → returns basic info + LATEST STOCK MOVEMENT (with full enriched data like dashboard)
 exports.getSingleVariant = async (req, res) => {
   try {
     let id = req.params.variantId || req.params.id;
@@ -276,54 +353,133 @@ exports.getSingleVariant = async (req, res) => {
 
     id = id.toString().trim();
 
-  const variant = await Variant.findById(id)
-  .select('sku stockQuantity image product')
-  .populate({
-    path: 'product',
-    select: 'name thumbnail brand category',
-    populate: [
-      { path: 'brand', select: 'brandName' },
-      { path: 'category', select: 'name' }
-    ]
-  })
-  .lean();
+    const result = await StockMovement.aggregate([
+      { $match: { variant: new mongoose.Types.ObjectId(id) } },
+      
+      { $sort: { createdAt: -1 } },
+      { $limit: 1 }, // Only the latest one
 
+      { $lookup: { from: "variants", localField: "variant", foreignField: "_id", as: "variantDoc" } },
+      { $unwind: { path: "$variantDoc", preserveNullAndEmptyArrays: true } },
 
-    if (!variant) {
-      return res.status(404).json({ success: false, msg: "Variant not found" });
+      { $lookup: { from: "products", localField: "variantDoc.product", foreignField: "_id", as: "product" } },
+      { $unwind: { path: "$product", preserveNullAndEmptyArrays: true } },
+
+      { $lookup: { from: "brands", localField: "product.brand", foreignField: "_id", as: "brand" } },
+      { $unwind: { path: "$brand", preserveNullAndEmptyArrays: true } },
+
+      { $lookup: { from: "categories", localField: "product.category", foreignField: "_id", as: "category" } },
+      { $unwind: { path: "$category", preserveNullAndEmptyArrays: true } },
+
+      { $lookup: { from: "users", localField: "performedBy", foreignField: "_id", as: "user" } },
+      { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
+
+      {
+        $addFields: {
+          variantId: "$variantDoc._id",
+          sku: "$variantDoc.sku",
+          productName: "$product.name",
+          brandName: "$brand.brandName",
+          categoryName: "$category.name",
+          thumbnail: { $ifNull: ["$variantDoc.image", "$product.thumbnail", "/placeholder.jpg"] },
+          performedByName: { $ifNull: ["$user.name", "System"] },
+          changeDisplay: {
+            $cond: [
+              "$isStockIncreasing",
+              { $concat: ["+", { $toString: "$changeQuantity" }] },
+              { $concat: ["−", { $toString: { $abs: "$changeQuantity" }}] }
+            ]
+          },
+          currentStock: "$variantDoc.stockQuantity" // Important: get current stock from variant
+        }
+      },
+
+      {
+        $project: {
+          _id: 1,
+          variantId: 1,
+          sku: 1,
+          productName: 1,
+          brandName: 1,
+          categoryName: 1,
+          thumbnail: 1,
+          currentStock: 1,
+          previousQuantity: 1,
+          newQuantity: 1,
+          changeQuantity: 1,
+          changeDisplay: 1,
+          isStockIncreasing: 1,
+          movementType: 1,
+          reason: 1,
+          referenceId: 1,
+          performedByName: 1,
+          performedAt: "$createdAt",
+          createdAt: 1
+        }
+      }
+    ]);
+
+    if (!result || result.length === 0) {
+      // No movements yet → still return variant basic info
+      const variant = await Variant.findById(id)
+        .select('sku stockQuantity image product')
+        .populate({
+          path: 'product',
+          select: 'name thumbnail brand category',
+          populate: [
+            { path: 'brand', select: 'brandName' },
+            { path: 'category', select: 'name' }
+          ]
+        })
+        .lean();
+
+      if (!variant) {
+        return res.status(404).json({ success: false, msg: "Variant not found" });
+      }
+
+      return res.json({
+        success: true,
+        msg: "Variant found, but no stock movements yet",
+        data: {
+          variantId: variant._id.toString(),
+          productName: variant.product?.name || "Unknown Product",
+          brandName: variant.product?.brand?.brandName || "Unknown Brand",
+          categoryName: variant.product?.category?.name || "Unknown Category",
+          sku: variant.sku || "N/A",
+          currentStock: variant.stockQuantity,
+          thumbnail: variant.image || variant.product?.thumbnail || "/placeholder.jpg",
+          movement: null
+        }
+      });
     }
 
-    // 2. Get the LATEST stock movement
-    const latestMovement = await StockMovement.findOne({ variant: id })
-      .populate('performedBy', 'name')
-      .sort({ createdAt: -1 })
-      .lean();
+    const latest = result[0];
 
     res.json({
       success: true,
-      msg: latestMovement ? "Latest stock movement fetched" : "Variant found (no movements yet)",
+      msg: "Latest stock movement fetched",
       data: {
-        variantId: variant._id.toString(),
-        productName: variant.product?.name || "Unknown Product",
-        brandName: variant.product?.brand?.brandName || "Unknown Brand",
-        categoryName: variant.product?.category?.name || "Unknown Category",
-        sku: variant.sku || "N/A",
-        currentStock: variant.stockQuantity,
-        thumbnail: variant.image || variant.product?.thumbnail || "/placeholder.jpg",
-
-        // ONLY the movement — clean and clear
-        movement: latestMovement ? {
-          previousQuantity: latestMovement.previousQuantity,
-          newQuantity: latestMovement.newQuantity,
-          changeQuantity: latestMovement.changeQuantity,
-          isStockIncreasing: latestMovement.isStockIncreasing,
-          movementType: latestMovement.movementType,
-          reason: latestMovement.reason,
-          referenceId: latestMovement.referenceId || null,
-          performedBy: latestMovement.performedBy?.name || "System",
-          performedAt: latestMovement.createdAt,
-          createdAt: latestMovement.createdAt
-        } : null
+        variantId: latest.variantId.toString(),
+        productName: latest.productName,
+        brandName: latest.brandName,
+        categoryName: latest.categoryName,
+        sku: latest.sku,
+        currentStock: latest.currentStock,
+        thumbnail: latest.thumbnail,
+        movement: {
+          _id: latest._id,
+          previousQuantity: latest.previousQuantity,
+          newQuantity: latest.newQuantity,
+          changeQuantity: latest.changeQuantity,
+          changeDisplay: latest.changeDisplay,
+          isStockIncreasing: latest.isStockIncreasing,
+          movementType: latest.movementType,
+          reason: latest.reason,
+          referenceId: latest.referenceId || null,
+          performedBy: latest.performedByName,
+          performedAt: latest.performedAt,
+          createdAt: latest.createdAt
+        }
       }
     });
 
@@ -336,8 +492,6 @@ exports.getSingleVariant = async (req, res) => {
     });
   }
 };
-
-
 
 
 // Stock movement history
