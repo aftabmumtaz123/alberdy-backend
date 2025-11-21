@@ -318,29 +318,38 @@ exports.getSupplierById = async (req, res) => {
 // };
 
 
-
 exports.updateSupplier = async (req, res) => {
   try {
     const { id } = req.params;
-    let { attachments: keptAttachmentsJson, ...otherFields } = req.body;
 
-    // === 1. Always get current supplier first (for Cloudinary cleanup) ===
+    // === 1. Get current supplier (for cleanup) ===
     const currentSupplier = await Supplier.findById(id);
     if (!currentSupplier) {
       return res.status(404).json({ success: false, message: 'Supplier not found' });
     }
 
-    // === 2. Parse kept attachments (frontend MUST send this always!) ===
+    // === 2. Extract the JSON string of kept attachments SAFELY ===
+    let keptAttachmentsJson = null;
+
+    if (req.body.attachments) {
+      if (typeof req.body.attachments === 'string') {
+        keptAttachmentsJson = req.body.attachments;
+      } else if (Array.isArray(req.body.attachments)) {
+        // Find the JSON string in the mixed array
+        keptAttachmentsJson = req.body.attachments.find(
+          item => typeof item === 'string' && item.trim().startsWith('[')
+        );
+      }
+    }
+
+    // === 3. Parse kept attachments (or fallback to current ones) ===
     let finalAttachments = [];
 
-    if (keptAttachmentsJson !== undefined) {
+    if (keptAttachmentsJson) {
       try {
-        const kept = typeof keptAttachmentsJson === 'string'
-          ? JSON.parse(keptAttachmentsJson)
-          : keptAttachmentsJson;
-
-        if (Array.isArray(kept)) {
-          finalAttachments = kept.map(att => ({
+        const parsed = JSON.parse(keptAttachmentsJson);
+        if (Array.isArray(parsed)) {
+          finalAttachments = parsed.map(att => ({
             _id: att._id,
             fileName: att.fileName,
             filePath: att.filePath,
@@ -348,11 +357,13 @@ exports.updateSupplier = async (req, res) => {
           }));
         }
       } catch (e) {
-        return res.status(400).json({ success: false, message: 'Invalid attachments format' });
+        console.warn('Failed to parse attachments JSON:', keptAttachmentsJson);
+        // Continue with empty or existing
       }
-    } else {
-      // === THIS IS THE CRITICAL FIX ===
-      // If frontend doesn't send 'attachments' field at all → keep existing ones!
+    }
+
+    // If no valid kept attachments → preserve existing ones (when no change intended)
+    if (finalAttachments.length === 0 && (!req.files || req.files.length === 0)) {
       finalAttachments = (currentSupplier.attachments || []).map(att => ({
         _id: att._id,
         fileName: att.fileName,
@@ -361,7 +372,7 @@ exports.updateSupplier = async (req, res) => {
       }));
     }
 
-    // === 3. Add new files only if uploaded ===
+    // === 4. Add newly uploaded files ===
     if (req.files && req.files.length > 0) {
       const newFiles = req.files.map(f => ({
         fileName: f.originalname,
@@ -371,13 +382,16 @@ exports.updateSupplier = async (req, res) => {
       finalAttachments = [...finalAttachments, ...newFiles];
     }
 
-    // === 4. Enforce max 5 ===
+    // === 5. Max 5 files ===
     if (finalAttachments.length > 5) {
-      return res.status(400).json({ success: false, message: 'Maximum 5 attachments allowed' });
+      return res.status(400).json({
+        success: false,
+        message: 'Maximum 5 attachments allowed',
+      });
     }
 
-    // === 5. Delete removed files from Cloudinary ===
-    const oldPaths = currentSupplier.attachments.map(a => a.filePath);
+    // === 6. Delete removed files from Cloudinary ===
+    const oldPaths = (currentSupplier.attachments || []).map(a => a.filePath);
     const newPaths = finalAttachments.map(a => a.filePath);
     const removedPaths = oldPaths.filter(p => !newPaths.includes(p));
 
@@ -385,31 +399,40 @@ exports.updateSupplier = async (req, res) => {
       try {
         const publicId = path.split('/').pop().split('.')[0];
         await cloudinary.uploader.destroy(`Uploads/${publicId}`);
+        console.log('Deleted from Cloudinary:', publicId);
       } catch (err) {
-        console.warn('Failed to delete from Cloudinary:', path);
+        console.warn('Cloudinary delete failed:', path);
       }
     }
 
-    // === 6. Update supplier ===
-    const updated = await Supplier.findByIdAndUpdate(id, {
-      $set: {
-        ...otherFields,
-        attachments: finalAttachments,
-      }
-    }, { new: true, runValidators: true });
+    // === 7. Update supplier (exclude 'attachments' from body) ===
+    const { attachments, ...cleanBody } = req.body;
+
+    const updated = await Supplier.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          ...cleanBody,
+          attachments: finalAttachments,
+        },
+      },
+      { new: true, runValidators: true }
+    );
 
     res.json({
       success: true,
       message: 'Supplier updated successfully',
-      data: updated
+      data: updated,
     });
-
   } catch (error) {
     console.error('Update Supplier Error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message,
+    });
   }
 };
-
 
 
 // ==================== DELETE SUPPLIER ====================
