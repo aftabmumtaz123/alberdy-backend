@@ -459,7 +459,7 @@ exports.getSingleVariant = async (req, res) => {
       success: true,
       msg: "Latest stock movement fetched",
       data: {
-        variantId: latest.latest._id.toString(),
+        variantId: latest._id.toString(),
         productName: latest.productName,
         brandName: latest.brandName,
         categoryName: latest.categoryName,
