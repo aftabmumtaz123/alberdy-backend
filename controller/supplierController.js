@@ -201,6 +201,7 @@ exports.getSupplierById = async (req, res) => {
 
 
 
+
 exports.updateSupplier = async (req, res) => {
   try {
     const { id } = req.params;
@@ -214,17 +215,17 @@ exports.updateSupplier = async (req, res) => {
       supplierType,
       address,
       status,
-      attachments, // ← Full current list from frontend (most important)
+      attachments, // ← MUST be sent by frontend (full current list)
     } = req.body;
 
-    // Parse address
+    // Parse address if string
     if (address && typeof address === 'string') {
       try { address = JSON.parse(address); } catch {
         return res.status(400).json({ success: false, message: 'Invalid address JSON' });
       }
     }
 
-    // === Validations (same as before) ===
+    // === Validations ===
     if (supplierName && supplierName.trim().length < 2)
       return res.status(400).json({ success: false, message: 'Name too short' });
 
@@ -241,34 +242,36 @@ exports.updateSupplier = async (req, res) => {
       if (exists) return res.status(400).json({ success: false, message: 'Code already exists' });
     }
 
-    // === Build new attachments list ===
+    // === Build final attachments list ===
     let finalAttachments = [];
 
-    // Option 1: Frontend sends full current list → use it (BEST)
+    // Step 1: Start with what frontend says should remain
     if (attachments) {
       try {
-        const list = typeof attachments === 'string' ? JSON.parse(attachments) : attachments;
-        if (Array.isArray(list)) {
-          finalAttachments = list.map(att => ({
-            fileName: att.fileName,
+        const parsed = typeof attachments === 'string' ? JSON.parse(attachments) : attachments;
+        if (Array.isArray(parsed)) {
+          finalAttachments = parsed.map(att => ({
+            fileName: att.fileName?.trim() || 'Unknown',
             filePath: att.filePath,
-            uploadedAt: att.uploadedAt || new Date(),
+            uploadedAt: att.uploadedAt ? new Date(att.uploadedAt) : new Date(),
           }));
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        return res.status(400).json({ success: false, message: 'Invalid attachments format' });
+      }
     }
 
-    // Option 2: If no list sent, but files uploaded → use uploaded ones
+    // Step 2: Append newly uploaded files
     if (req.files && req.files.length > 0) {
-      const newFiles = req.files.map(f => ({
-        fileName: f.originalname,
-        filePath: f.path,
+      const newFiles = req.files.map(file => ({
+        fileName: file.originalname,
+        filePath: file.path,
         uploadedAt: new Date(),
       }));
-      finalAttachments = newFiles;
+      finalAttachments.push(...newFiles); // Append only
     }
 
-    // === Update supplier ===
+    // === Prepare update object ===
     const updateData = {
       ...(supplierName && { supplierName: supplierName.trim() }),
       ...(supplierCode && { supplierCode: supplierCode.trim() }),
@@ -286,9 +289,10 @@ exports.updateSupplier = async (req, res) => {
         },
       }),
       ...(status && { status }),
-      attachments: finalAttachments, // ← Just replace everything
+      attachments: finalAttachments, // Full replacement with correct list
     };
 
+    // === Update ===
     const supplier = await Supplier.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
@@ -313,6 +317,7 @@ exports.updateSupplier = async (req, res) => {
     });
   }
 };
+
 
 
 
