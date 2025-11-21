@@ -84,10 +84,10 @@ exports.createSupplier = async (req, res) => {
     // --- Handle File Uploads ---
     const attachments = req.files
       ? req.files.map(file => ({
-          fileName: file.originalname,
-          filePath: file.path, // Cloudinary secure_url
-          uploadedAt: new Date(),
-        }))
+        fileName: file.originalname,
+        filePath: file.path, // Cloudinary secure_url
+        uploadedAt: new Date(),
+      }))
       : [];
 
     // --- Create Supplier ---
@@ -100,12 +100,12 @@ exports.createSupplier = async (req, res) => {
       supplierType: supplierType.trim(),
       address: address
         ? {
-            street: address.street?.trim(),
-            city: address.city?.trim(),
-            state: address.state?.trim(),
-            zip: address.zip?.trim(),
-            country: address.country?.trim(),
-          }
+          street: address.street?.trim(),
+          city: address.city?.trim(),
+          state: address.state?.trim(),
+          zip: address.zip?.trim(),
+          country: address.country?.trim(),
+        }
         : undefined,
       status: statusToUse,
       attachments,
@@ -201,6 +201,109 @@ exports.getSupplierById = async (req, res) => {
 
 
 
+// exports.updateSupplier = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+
+//     let {
+//       supplierName,
+//       supplierCode,
+//       contactPerson,
+//       email,
+//       phone,
+//       supplierType,
+//       address,
+//       status,
+//       attachments, // ← Full current list from frontend (most important)
+//     } = req.body;
+
+//     // Parse address
+//     if (address && typeof address === 'string') {
+//       try { address = JSON.parse(address); } catch {
+//         return res.status(400).json({ success: false, message: 'Invalid address JSON' });
+//       }
+//     }
+
+//     // === Validations (same as before) ===
+//     if (supplierName && supplierName.trim().length < 2)
+//       return res.status(400).json({ success: false, message: 'Name too short' });
+
+//     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+//       return res.status(400).json({ success: false, message: 'Invalid email' });
+
+//     if (email) {
+//       const exists = await Supplier.findOne({ email: email.trim(), _id: { $ne: id } });
+//       if (exists) return res.status(400).json({ success: false, message: 'Email already used' });
+//     }
+
+//     if (supplierCode?.trim()) {
+//       const exists = await Supplier.findOne({ supplierCode: supplierCode.trim(), _id: { $ne: id } });
+//       if (exists) return res.status(400).json({ success: false, message: 'Code already exists' });
+//     }
+
+//     // === Build new attachments list ===
+//     let finalAttachments = [];
+
+//     if (attachments) {
+//       try {
+//         const list = typeof attachments === 'string' ? JSON.parse(attachments) : attachments;
+//         if (Array.isArray(list)) {
+//           finalAttachments = list.map(att => ({
+//             fileName: att.fileName,
+//             filePath: att.filePath,
+//             uploadedAt: att.uploadedAt || new Date(),
+//           }));
+//         }
+//       } catch (e) { /* ignore */ }
+//     }
+
+
+//     // === Update supplier ===
+//     const updateData = {
+//       ...(supplierName && { supplierName: supplierName.trim() }),
+//       ...(supplierCode && { supplierCode: supplierCode.trim() }),
+//       ...(contactPerson && { contactPerson: contactPerson.trim() }),
+//       ...(email && { email: email.trim() }),
+//       ...(phone && { phone: phone.trim() }),
+//       ...(supplierType && { supplierType: supplierType.trim() }),
+//       ...(address && {
+//         address: {
+//           street: address.street?.trim(),
+//           city: address.city?.trim(),
+//           state: address.state?.trim(),
+//           zip: address.zip?.trim(),
+//           country: address.country?.trim(),
+//         },
+//       }),
+//       ...(status && { status }),
+//       attachments: finalAttachments, // ← Just replace everything
+//     };
+
+//     const supplier = await Supplier.findByIdAndUpdate(id, updateData, {
+//       new: true,
+//       runValidators: true,
+//     });
+
+//     if (!supplier) {
+//       return res.status(404).json({ success: false, message: 'Supplier not found' });
+//     }
+
+//     res.json({
+//       success: true,
+//       message: 'Supplier updated successfully',
+//       data: supplier,
+//     });
+
+//   } catch (error) {
+//     console.error('Update Supplier Error:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Server error',
+//       error: error.message,
+//     });
+//   }
+// };
+
 exports.updateSupplier = async (req, res) => {
   try {
     const { id } = req.params;
@@ -214,67 +317,142 @@ exports.updateSupplier = async (req, res) => {
       supplierType,
       address,
       status,
-      attachments, // ← Full current list from frontend (most important)
+      attachments, // ← This must be the current list of files user wants to KEEP (from frontend)
     } = req.body;
 
-    // Parse address
+    // === Parse address if sent as JSON string ===
     if (address && typeof address === 'string') {
-      try { address = JSON.parse(address); } catch {
-        return res.status(400).json({ success: false, message: 'Invalid address JSON' });
+      try {
+        address = JSON.parse(address);
+      } catch (err) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid address JSON format',
+        });
       }
     }
 
-    // === Validations (same as before) ===
-    if (supplierName && supplierName.trim().length < 2)
-      return res.status(400).json({ success: false, message: 'Name too short' });
+    // === Basic Validations ===
+    if (supplierName && supplierName.trim().length < 2) {
+      return res.status(400).json({
+        success: false,
+        message: 'Supplier name must be at least 2 characters',
+      });
+    }
 
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-      return res.status(400).json({ success: false, message: 'Invalid email' });
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a valid email address',
+      });
+    }
 
+    // === Unique Checks (exclude current supplier) ===
     if (email) {
-      const exists = await Supplier.findOne({ email: email.trim(), _id: { $ne: id } });
-      if (exists) return res.status(400).json({ success: false, message: 'Email already used' });
+      const emailExists = await Supplier.findOne({
+        email: email.trim(),
+        _id: { $ne: id },
+      });
+      if (emailExists) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email is already used by another supplier',
+        });
+      }
     }
 
-    if (supplierCode?.trim()) {
-      const exists = await Supplier.findOne({ supplierCode: supplierCode.trim(), _id: { $ne: id } });
-      if (exists) return res.status(400).json({ success: false, message: 'Code already exists' });
+    if (supplierCode && supplierCode.trim()) {
+      const codeExists = await Supplier.findOne({
+        supplierCode: supplierCode.trim(),
+        _id: { $ne: id },
+      });
+      if (codeExists) {
+        return res.status(400).json({
+          success: false,
+          message: 'Supplier code already exists',
+        });
+      }
     }
 
-    // === Build new attachments list ===
+    // === Get current supplier to compare attachments and delete removed files ===
+    const currentSupplier = await Supplier.findById(id);
+    if (!currentSupplier) {
+      return res.status(404).json({
+        success: false,
+        message: 'Supplier not found',
+      });
+    }
+
+    // === Build Final Attachments List ===
     let finalAttachments = [];
 
-    // Option 1: Frontend sends full current list → use it (BEST)
+    // Step 1: Files user wants to KEEP (sent from frontend)
     if (attachments) {
       try {
-        const list = typeof attachments === 'string' ? JSON.parse(attachments) : attachments;
-        if (Array.isArray(list)) {
-          finalAttachments = list.map(att => ({
-            fileName: att.fileName,
-            filePath: att.filePath,
-            uploadedAt: att.uploadedAt || new Date(),
+        const keptList = typeof attachments === 'string' ? JSON.parse(attachments) : attachments;
+
+        if (Array.isArray(keptList)) {
+          finalAttachments = keptList.map(att => ({
+            fileName: att.fileName || att.originalname,
+            filePath: att.filePath || att.path,
+            uploadedAt: att.uploadedAt ? new Date(att.uploadedAt) : new Date(),
+            _id: att._id || undefined, // preserve MongoDB sub-document _id
           }));
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        console.warn('Failed to parse kept attachments:', e);
+      }
     }
 
-    // Option 2: If no list sent, but files uploaded → use uploaded ones
+    // Step 2: Add newly uploaded files
     if (req.files && req.files.length > 0) {
-      const newFiles = req.files.map(f => ({
-        fileName: f.originalname,
-        filePath: f.path,
+      const newFiles = req.files.map(file => ({
+        fileName: file.originalname,
+        filePath: file.path, // Cloudinary secure_url
         uploadedAt: new Date(),
       }));
-      finalAttachments = newFiles;
+
+      finalAttachments = [...finalAttachments, ...newFiles];
     }
 
-    // === Update supplier ===
+    // Step 3: Enforce max 5 files
+    if (finalAttachments.length > 5) {
+      return res.status(400).json({
+        success: false,
+        message: 'Maximum 5 attachments are allowed',
+      });
+    }
+
+    // === Delete Removed Files from Cloudinary ===
+    if (currentSupplier.attachments && currentSupplier.attachments.length > 0) {
+      const oldPaths = currentSupplier.attachments.map(a => a.filePath);
+      const newPaths = finalAttachments.map(a => a.filePath);
+
+      const removedPaths = oldPaths.filter(path => !newPaths.includes(path));
+
+      for (const filePath of removedPaths) {
+        try {
+          // Extract public_id from Cloudinary URL
+          const urlParts = filePath.split('/');
+          const fileName = urlParts[urlParts.length - 1];
+          const publicId = fileName.split('.')[0]; // remove extension
+
+          await cloudinary.uploader.destroy(`Uploads/${publicId}`);
+          console.log('Deleted from Cloudinary:', publicId);
+        } catch (err) {
+          console.warn('Failed to delete file from Cloudinary:', filePath, err.message);
+          // Don't fail the whole update if Cloudinary delete fails
+        }
+      }
+    }
+
+    // === Prepare Update Data ===
     const updateData = {
       ...(supplierName && { supplierName: supplierName.trim() }),
       ...(supplierCode && { supplierCode: supplierCode.trim() }),
       ...(contactPerson && { contactPerson: contactPerson.trim() }),
       ...(email && { email: email.trim() }),
-      ...(phone && { phone: phone.trim() }),
+      ...(phone && { phone: phone?.trim() }),
       ...(supplierType && { supplierType: supplierType.trim() }),
       ...(address && {
         address: {
@@ -285,36 +463,38 @@ exports.updateSupplier = async (req, res) => {
           country: address.country?.trim(),
         },
       }),
-      ...(status && { status }),
-      attachments: finalAttachments, // ← Just replace everything
+      ...(status && ['Active', 'Inactive'].includes(status) && { status }),
+      attachments: finalAttachments,
     };
 
-    const supplier = await Supplier.findByIdAndUpdate(id, updateData, {
-      new: true,
-      runValidators: true,
-    });
+    // === Perform Update ===
+    const updatedSupplier = await Supplier.findByIdAndUpdate(
+      id,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    );
 
-    if (!supplier) {
-      return res.status(404).json({ success: false, message: 'Supplier not found' });
+    if (!updatedSupplier) {
+      return res.status(404).json({
+        success: false,
+        message: 'Supplier not found',
+      });
     }
 
-    res.json({
+    res.status(200).json({
       success: true,
       message: 'Supplier updated successfully',
-      data: supplier,
+      data: updatedSupplier,
     });
-
   } catch (error) {
     console.error('Update Supplier Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error',
+      message: 'Server error while updating supplier',
       error: error.message,
     });
   }
 };
-
-
 
 
 // ==================== DELETE SUPPLIER ====================
