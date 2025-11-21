@@ -363,7 +363,7 @@ exports.updateSupplier = async (req, res) => {
     }
 
     // If no valid kept attachments → preserve existing ones (when no change intended)
-    if (finalAttachments.length === 0 && (!req.files || req.files.length === 0)) {
+    if (finalAttachments.length === 0 ) {
       finalAttachments = (currentSupplier.attachments || []).map(att => ({
         _id: att._id,
         fileName: att.fileName,
@@ -371,6 +371,10 @@ exports.updateSupplier = async (req, res) => {
         uploadedAt: att.uploadedAt,
       }));
     }
+
+
+    
+
 
     // === 4. Add newly uploaded files ===
     if (req.files && req.files.length > 0) {
