@@ -201,7 +201,7 @@ exports.getSupplierById = async (req, res) => {
 
 
 
-
+// Only the updateSupplier part – rest stays the same
 exports.updateSupplier = async (req, res) => {
   try {
     const { id } = req.params;
@@ -215,46 +215,26 @@ exports.updateSupplier = async (req, res) => {
       supplierType,
       address,
       status,
-      attachments, // ← MUST be sent by frontend (full current list)
+      attachments, // ← this is TEXT (JSON string of kept files)
     } = req.body;
 
-    console.log('Raw attachments value:', req.body.attachments);
-    console.log('req.files:', req.files?.map(f => f.originalname));
-
-    // Parse address if string
+    // Parse address if needed
     if (address && typeof address === 'string') {
       try { address = JSON.parse(address); } catch {
         return res.status(400).json({ success: false, message: 'Invalid address JSON' });
       }
     }
 
-    // === Validations ===
-    if (supplierName && supplierName.trim().length < 2)
-      return res.status(400).json({ success: false, message: 'Name too short' });
-
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-      return res.status(400).json({ success: false, message: 'Invalid email' });
-
-    if (email) {
-      const exists = await Supplier.findOne({ email: email.trim(), _id: { $ne: id } });
-      if (exists) return res.status(400).json({ success: false, message: 'Email already used' });
-    }
-
-    if (supplierCode?.trim()) {
-      const exists = await Supplier.findOne({ supplierCode: supplierCode.trim(), _id: { $ne: id } });
-      if (exists) return res.status(400).json({ success: false, message: 'Code already exists' });
-    }
-
-    // === Build final attachments list ===
+    // === Build final attachments array ===
     let finalAttachments = [];
 
-    // Step 1: Start with what frontend says should remain
+    // 1. Kept attachments from frontend (text field)
     if (attachments) {
       try {
         const parsed = typeof attachments === 'string' ? JSON.parse(attachments) : attachments;
         if (Array.isArray(parsed)) {
           finalAttachments = parsed.map(att => ({
-            fileName: att.fileName?.trim() || 'Unknown',
+            fileName: att.fileName,
             filePath: att.filePath,
             uploadedAt: att.uploadedAt ? new Date(att.uploadedAt) : new Date(),
           }));
@@ -264,17 +244,17 @@ exports.updateSupplier = async (req, res) => {
       }
     }
 
-    // Step 2: Append newly uploaded files
+    // 2. Append newly uploaded files (from req.files → field name 'files')
     if (req.files && req.files.length > 0) {
       const newFiles = req.files.map(file => ({
         fileName: file.originalname,
-        filePath: file.path,
+        filePath: file.path.replace(/\\/g, '/'), // fix Windows paths
         uploadedAt: new Date(),
       }));
-      finalAttachments.push(...newFiles); // Append only
+      finalAttachments.push(...newFiles);
     }
 
-    // === Prepare update object ===
+    // === Prepare update data ===
     const updateData = {
       ...(supplierName && { supplierName: supplierName.trim() }),
       ...(supplierCode && { supplierCode: supplierCode.trim() }),
@@ -292,10 +272,9 @@ exports.updateSupplier = async (req, res) => {
         },
       }),
       ...(status && { status }),
-      attachments: finalAttachments, // Full replacement with correct list
+      attachments: finalAttachments, // fully replaced, correct list
     };
 
-    // === Update ===
     const supplier = await Supplier.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
@@ -320,7 +299,6 @@ exports.updateSupplier = async (req, res) => {
     });
   }
 };
-
 
 
 

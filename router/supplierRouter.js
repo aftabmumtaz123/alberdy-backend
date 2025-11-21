@@ -1,18 +1,28 @@
+// routes/supplierRouter.js
 const express = require('express');
 const router = express.Router();
+
 const {
   createSupplier,
   getAllSuppliers,
-  deleteSupplier,
-  updateSupplier,
   getSupplierById,
-} = require('../controller/supplierController');
-const upload = require('../config/multer'); 
+  updateSupplier,
+  deleteSupplier,
+} = require('../controllers/supplierController');
 
-router.post('/', upload.array('attachments', 5), createSupplier); 
-router.get('/', getAllSuppliers); // Read all
-router.get('/:id', getSupplierById); 
-router.put('/:id', upload.array('files', 10), updateSupplier);
-router.delete('/:id', deleteSupplier); // Delete
+const { uploadCreate, uploadUpdate } = require('../config/multer');
+
+// CREATE – you can keep 'attachments' here
+router.post('/', uploadCreate.array('attachments', 5), createSupplier);
+
+// READ
+router.get('/', getAllSuppliers);
+router.get('/:id', getSupplierById);
+
+// UPDATE – NEW FIELD NAME 'files' → no conflict!
+router.put('/:id', uploadUpdate.array('files', 10), updateSupplier);
+
+// DELETE
+router.delete('/:id', deleteSupplier);
 
 module.exports = router;
