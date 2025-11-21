@@ -1,110 +1,77 @@
+// config/multer.js
 require('dotenv').config();
 const multer = require('multer');
 const path = require('path');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const cloudinary = require('cloudinary').v2;
 
-// Configure Cloudinary
+// Cloudinary config
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Dynamic storage configuration based on file type
 const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
+  cloudinary,
   params: (req, file) => {
     const isImage = file.mimetype.startsWith('image/');
-    const isPDF = file.mimetype === 'application/pdf';
+    const originalExt = path.extname(file.originalname).toLowerCase();
+    const cleanName = path.parse(file.originalname).name.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const public_id = `${Date.now()}-${cleanName}`;
 
-    // Clean filename (remove special chars, keep extension safe)
-    const originalName = path.parse(file.originalname).name;
-    const cleanName = originalName.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const timestamp = Date.now();
-    const uniqueName = `${timestamp}-${cleanName}`;
-
-    // Base config
-    const config = {
+    const base = {
       folder: 'Uploads',
-      public_id: uniqueName,
+      public_id,
+      resource_type: isImage ? 'image' : 'raw',
     };
 
     if (isImage) {
-      // Only images get optimized and converted to WebP
       return {
-        ...config,
-        resource_type: 'image',
-        format: 'webp',                    // Final delivery format
+        ...base,
+        format: 'webp',
         transformation: [
-          { quality: 'auto:best' },        // Optimal quality
-          { fetch_format: 'webp' },        // Force WebP
-          { crop: 'limit', width: 2000, height: 2000 }, // Prevent huge files
+          { quality: 'auto:best' },
+          { fetch_format: 'webp' },
+          { width: 2000, height: 2000, crop: 'limit' },
         ],
       };
     }
 
-    if (isPDF) {
-      // PDFs stay as-is, stored as raw files
-      return {
-        ...config,
-        resource_type: 'raw',              // Critical: keeps PDF unchanged
-        format: 'pdf',                     // Keeps .pdf extension
-      };
-    }
-
-    // Fallback (should not happen due to fileFilter)
+    // PDF or other docs
     return {
-      ...config,
-      resource_type: 'raw',
-      format: path.extname(file.originalname).slice(1) || 'file',
+      ...base,
+      format: originalExt.slice(1) || 'pdf',
     };
   },
 });
 
-// Strict file filter
 const fileFilter = (req, file, cb) => {
-  const allowedMimes = [
-    // Images
-    'image/jpeg',
-    'image/jpg',
-    'image/png',
-    'image/gif',
-    'image/webp',
-    'image/bmp',
-    'image/tiff',
-    'image/x-icon',
-    'image/heic',
-    'image/heif',
-    // Documents
+  const allowed = [
+    'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
+    'image/heic', 'image/heif', 'image/tiff', 'image/bmp',
     'application/pdf',
   ];
 
-  // Special case: some browsers send .jfif as octet-stream
   const ext = path.extname(file.originalname).toLowerCase();
-  const isJfifHack = ext === '.jfif' && file.mimetype === 'application/octet-stream';
+  const isJfif = ext === '.jfif' && file.mimetype === 'application/octet-stream';
 
-  if (allowedMimes.includes(file.mimetype) || isJfifHack) {
-    // Optionally force correct mimetype for jfif
-    if (isJfifHack) file.mimetype = 'image/jpeg';
+  if (allowed.includes(file.mimetype) || isJfif) {
+    if (isJfif) file.mimetype = 'image/jpeg';
     cb(null, true);
   } else {
-    const error = new Error(
-      'Invalid file type. Only images (JPEG, PNG, GIF, WebP, etc.) and PDFs are allowed.'
-    );
-    error.code = 'INVALID_FILE_TYPE';
-    cb(error, false);
+    cb(new Error('Only images and PDFs allowed'), false);
   }
 };
 
-// Multer instance
+// Two separate instances → no field name conflict!
 const upload = multer({
   storage,
   fileFilter,
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB max
-    files: 10,                  // Max 10 files per request
-  },
+  limits: { fileSize: 10 * 1024 * 1024, files: 10 },
 });
 
-module.exports = upload;
+module.exports = {
+  uploadCreate: upload,           // CREATE: field name = 'attachments'
+  uploadUpdate: upload,           // UPDATE: field name = 'files'
+};

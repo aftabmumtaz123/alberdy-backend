@@ -84,10 +84,10 @@ exports.createSupplier = async (req, res) => {
     // --- Handle File Uploads ---
     const attachments = req.files
       ? req.files.map(file => ({
-          fileName: file.originalname,
-          filePath: file.path, // Cloudinary secure_url
-          uploadedAt: new Date(),
-        }))
+        fileName: file.originalname,
+        filePath: file.path, // Cloudinary secure_url
+        uploadedAt: new Date(),
+      }))
       : [];
 
     // --- Create Supplier ---
@@ -100,12 +100,12 @@ exports.createSupplier = async (req, res) => {
       supplierType: supplierType.trim(),
       address: address
         ? {
-            street: address.street?.trim(),
-            city: address.city?.trim(),
-            state: address.state?.trim(),
-            zip: address.zip?.trim(),
-            country: address.country?.trim(),
-          }
+          street: address.street?.trim(),
+          city: address.city?.trim(),
+          state: address.state?.trim(),
+          zip: address.zip?.trim(),
+          country: address.country?.trim(),
+        }
         : undefined,
       status: statusToUse,
       attachments,
@@ -248,7 +248,7 @@ exports.updateSupplier = async (req, res) => {
     if (req.files && req.files.length > 0) {
       const newFiles = req.files.map(file => ({
         fileName: file.originalname,
-        filePath: file.path.replace(/\\/g, '/'), // fix Windows paths
+        filePath: file.path,                    // This is the Cloudinary URL!
         uploadedAt: new Date(),
       }));
       finalAttachments.push(...newFiles);
