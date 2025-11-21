@@ -146,8 +146,7 @@ exports.updateInventory = (req, res) => adjustStock(req, res, req.params.variant
 
 
 
-
-// FIXED: Stock Movements Dashboard – NEWEST FIRST + Low Stock Status
+// FIXED: Stock Movements Dashboard – NOW 100% SORTS CORRECTLY
 exports.getInventoryDashboard = async (req, res) => {
   try {
     const { 
@@ -163,32 +162,24 @@ exports.getInventoryDashboard = async (req, res) => {
     const limitNum = Math.max(1, Math.min(200, parseInt(limit) || 50));
     const skip = (pageNum - 1) * limitNum;
 
-    const filter = {};
+    // Build base match for fields that exist on StockMovement
+    const baseMatch = {};
 
-    // Text search across related fields
-    if (search) {
-      filter.$or = [
-        { "variantDoc.sku": { $regex: search, $options: "i" } },
-        { "product.name": { $regex: search, $options: "i" } },
-        { reason: { $regex: search, $options: "i" } },
-        { movementType: { $regex: search, $options: "i" } }
-      ];
-    }
-
-    if (movementType) filter.movementType = movementType;
+    if (movementType) baseMatch.movementType = movementType;
 
     if (startDate || endDate) {
-      filter.createdAt = {};
-      if (startDate) filter.createdAt.$gte = new Date(startDate);
-      if (endDate) filter.createdAt.$lte = new Date(new Date(endDate).setHours(23, 59, 59, 999));
+      baseMatch.createdAt = {};
+      if (startDate) baseMatch.createdAt.$gte = new Date(startDate);
+      if (endDate) baseMatch.createdAt.$lte = new Date(new Date(endDate).setHours(23, 59, 59, 999));
     }
 
-    const movements = await StockMovement.aggregate([
-      { $match: filter },
+    const pipeline = [
+      { $match: baseMatch },
 
-      // FIX 1: Sort by REAL field → createdAt (not performedAt!)
+      // MUST sort early for performance (before heavy lookups)
       { $sort: { createdAt: -1 } },
 
+      // Now do all lookups
       { $lookup: { from: "variants", localField: "variant", foreignField: "_id", as: "variantDoc" } },
       { $unwind: { path: "$variantDoc", preserveNullAndEmptyArrays: true } },
 
@@ -204,6 +195,19 @@ exports.getInventoryDashboard = async (req, res) => {
       { $lookup: { from: "users", localField: "performedBy", foreignField: "_id", as: "user" } },
       { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
 
+      // NOW it's safe to search on joined fields
+      ...(search ? [{
+        $match: {
+          $or: [
+            { "variantDoc.sku": { $regex: search, $options: "i" } },
+            { "product.name": { $regex: search, $options: "i" } },
+            { reason: { $regex: search, $options: "i" } },
+            { movementType: { $regex: search, $options: "i" } }
+          ]
+        }
+      }] : []),
+
+      // Add computed fields
       {
         $addFields: {
           variantId: "$variantDoc._id",
@@ -213,16 +217,8 @@ exports.getInventoryDashboard = async (req, res) => {
           categoryName: "$category.name",
           thumbnail: { $ifNull: ["$variantDoc.image", "$product.thumbnail", "/placeholder.jpg"] },
           performedByName: { $ifNull: ["$user.name", "System"] },
-
-          // Current live stock
           currentStock: "$variantDoc.stockQuantity",
-
-          // Low stock threshold (supports both common field names)
-          lowStockThreshold: {
-            $ifNull: ["$variantDoc.lowStockThreshold", "$variantDoc.reorderLevel", 10]
-          },
-
-          // Compute stock status
+          lowStockThreshold: { $ifNull: ["$variantDoc.lowStockThreshold", "$variantDoc.reorderLevel", 10] },
           stockStatus: {
             $cond: [
               { $lte: ["$variantDoc.stockQuantity", 0] },
@@ -236,7 +232,6 @@ exports.getInventoryDashboard = async (req, res) => {
               }
             ]
           },
-
           changeDisplay: {
             $cond: [
               "$isStockIncreasing",
@@ -275,13 +270,13 @@ exports.getInventoryDashboard = async (req, res) => {
           createdAt: 1
         }
       }
-    ]);
+    ];
 
-    const total = await StockMovement.countDocuments(filter);
+    const movements = await StockMovement.aggregate(pipeline);
+    const total = await StockMovement.countDocuments(baseMatch);
 
     res.json({
       success: true,
-      msg: "Stock movements fetched successfully",
       data: movements,
       pagination: {
         total,
@@ -293,11 +288,7 @@ exports.getInventoryDashboard = async (req, res) => {
 
   } catch (err) {
     console.error("Stock Movements Dashboard Error:", err);
-    res.status(500).json({ 
-      success: false, 
-      msg: "Failed to load stock movements", 
-      error: err.message 
-    });
+    res.status(500).json({ success: false, msg: "Failed to load stock movements", error: err.message });
   }
 };
 
