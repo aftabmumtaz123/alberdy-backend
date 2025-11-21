@@ -213,6 +213,7 @@ try {
     address: formattedAddress,
     attachments: safeAttachments,
     ordersCount,
+      }
     });
   } 
   catch (err) {
