@@ -7,7 +7,7 @@ const {
   getSupplierById,
   updateSupplier,
   deleteSupplier,
-} = require('../controllers/supplierController');
+} = require('../controller/supplierController');
 
 const { uploadCreate, uploadUpdate } = require('../config/multer');
 
