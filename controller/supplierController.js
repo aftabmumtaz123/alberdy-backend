@@ -172,7 +172,6 @@ exports.getSupplierById = async (req, res) => {
         select: 'totalAmount amountPaid amountDue paymentMethod invoiceNo status date notes createdAt',
         options: { sort: { date: -1 } },
       })
-      .lean(); // ← THIS IS THE KEY: Converts to plain JS object EARLY
 
     if (!supplier) {
       return res.status(404).json({
@@ -184,7 +183,6 @@ exports.getSupplierById = async (req, res) => {
     // Count orders
     const ordersCount = await Order.countDocuments({ supplier: supplier._id });
 
-    // Ensure attachments always have full data (even if somehow missing)
     const safeAttachments = (supplier.attachments || []).map(att => ({
       _id: att._id || undefined,
       fileName: att.fileName || 'Unknown file',
@@ -192,14 +190,29 @@ exports.getSupplierById = async (req, res) => {
       uploadedAt: att.uploadedAt || new Date(),
     }));
 
+
+
+
+    let formattedAddress = {};
+try {
+  formattedAddress = typeof supplier.address === "string"
+    ? JSON.parse(supplier.address)
+    : supplier.address || {};
+} catch (e) {
+  formattedAddress = {}; // fallback
+}
+
+
+
+
     // Final clean response
     res.json({
       success: true,
       data: {
-        ...supplier,
-        attachments: safeAttachments,
-        ordersCount,
-      },
+        ...supplier._doc,
+    address: formattedAddress,
+    attachments: safeAttachments,
+    ordersCount,
     });
   } 
   catch (err) {
@@ -318,42 +331,58 @@ exports.getSupplierById = async (req, res) => {
 // };
 
 
-
 exports.updateSupplier = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // 1. Get current supplier to delete old files from Cloudinary
+    // 1. Get current supplier to know which files to delete from Cloudinary
     const currentSupplier = await Supplier.findById(id);
     if (!currentSupplier) {
       return res.status(404).json({ success: false, message: 'Supplier not found' });
     }
 
-    // 2. Delete ALL old files from Cloudinary (if any)
-    if (currentSupplier.attachments && currentSupplier.attachments.length > 0) {
-      for (const att of currentSupplier.attachments) {
+    // 2. Extract kept files from payload (sent as JSON string)
+    let keptFromPayload = [];
+
+    if (req.body.attachments) {
+      let jsonString = null;
+
+      if (typeof req.body.attachments === 'string') {
+        jsonString = req.body.attachments;
+      } else if (Array.isArray(req.body.attachments)) {
+        jsonString = req.body.attachments.find(item =>
+          typeof item === 'string' && item.trim().startsWith('[')
+        );
+      }
+
+      if (jsonString) {
         try {
-          const publicId = att.filePath.split('/').pop().split('.')[0];
-          await cloudinary.uploader.destroy(`Uploads/${publicId}`);
-          console.log('Deleted from Cloudinary:', publicId);
-        } catch (err) {
-          console.warn('Failed to delete old file:', att.filePath);
+          const parsed = JSON.parse(jsonString);
+          if (Array.isArray(parsed)) {
+            keptFromPayload = parsed.map(att => ({
+              _id: att._id,
+              fileName: att.fileName,
+              filePath: att.filePath,
+              uploadedAt: att.uploadedAt ? new Date(att.uploadedAt) : new Date(),
+            }));
+          }
+        } catch (e) {
+          console.warn('Invalid attachments JSON received');
         }
       }
     }
 
-    // 3. Build new attachments ONLY from what user uploads NOW
-    let finalAttachments = [];
+    // 3. Add newly uploaded files
+    const newUploadedFiles = (req.files || []).map(file => ({
+      fileName: file.originalname,
+      filePath: file.path,
+      uploadedAt: new Date(),
+    }));
 
-    if (req.files && req.files.length > 0) {
-      finalAttachments = req.files.map(file => ({
-        fileName: file.originalname,
-        filePath: file.path, // Cloudinary URL
-        uploadedAt: new Date(),
-      }));
-    }
+    // 4. Final list = kept from payload + newly uploaded
+    const finalAttachments = [...keptFromPayload, ...newUploadedFiles];
 
-    // Optional: Allow max 5
+    // 5. Enforce max 5
     if (finalAttachments.length > 5) {
       return res.status(400).json({
         success: false,
@@ -361,14 +390,31 @@ exports.updateSupplier = async (req, res) => {
       });
     }
 
-    const { attachments, ...cleanBody } = req.body;
+    // 6. Find which old files were REMOVED (not in final list)
+    const oldPaths = (currentSupplier.attachments || []).map(a => a.filePath);
+    const newPaths = finalAttachments.map(a => a.filePath);
+    const removedPaths = oldPaths.filter(path => !newPaths.includes(path));
+
+    // 7. Delete removed files from Cloudinary
+    for (const path of removedPaths) {
+      try {
+        const publicId = path.split('/').pop().split('.')[0];
+        await cloudinary.uploader.destroy(`Uploads/${publicId}`);
+        console.log('Deleted from Cloudinary:', publicId);
+      } catch (err) {
+        console.warn('Failed to delete from Cloudinary:', path);
+      }
+    }
+
+    // 8. Update supplier
+    const { attachments, ...cleanBody } = req.body; // remove attachments field from body
 
     const updated = await Supplier.findByIdAndUpdate(
       id,
       {
         $set: {
           ...cleanBody,
-          attachments: finalAttachments, // ← Only new files
+          attachments: finalAttachments,
         },
       },
       { new: true, runValidators: true }
@@ -388,7 +434,6 @@ exports.updateSupplier = async (req, res) => {
     });
   }
 };
-
 
 // ==================== DELETE SUPPLIER ====================
 exports.deleteSupplier = async (req, res) => {
