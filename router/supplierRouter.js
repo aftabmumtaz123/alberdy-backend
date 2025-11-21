@@ -1,27 +1,18 @@
-// routes/supplierRouter.js
 const express = require('express');
 const router = express.Router();
 const {
   createSupplier,
   getAllSuppliers,
-  getSupplierById,
-  updateSupplier,
   deleteSupplier,
+  updateSupplier,
+  getSupplierById,
 } = require('../controller/supplierController');
+const upload = require('../config/multer'); 
 
-const { uploadCreate, uploadUpdate } = require('../config/multer');
-
-// CREATE → field name: 'attachments'
-router.post('/', uploadCreate.array('attachments', 5), createSupplier);
-
-// READ
-router.get('/', getAllSuppliers);
-router.get('/:id', getSupplierById);
-
-// UPDATE → field name: 'files' → NO CONFLICT!
-router.put('/:id', uploadUpdate.array('files', 10), updateSupplier);
-
-// DELETE
-router.delete('/:id', deleteSupplier);
+router.post('/', upload.array('attachments', 5), createSupplier); 
+router.get('/', getAllSuppliers); // Read all
+router.get('/:id', getSupplierById); 
+router.put('/:id', upload.array('attachments', 5), updateSupplier); 
+router.delete('/:id', deleteSupplier); // Delete
 
 module.exports = router;
