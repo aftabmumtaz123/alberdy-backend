@@ -144,133 +144,76 @@ exports.createPayment = async (req, res) => {
   }
 };
 
-// Edit a customer payment
+// ──────────────────────────────────────────────────────────────
+// UPDATE PAYMENT - FULLY FIXED (Status & amountDue always recalculated)
+// ──────────────────────────────────────────────────────────────
 exports.updatePayment = async (req, res) => {
   try {
     const { id } = req.params;
-    const { customerId, amountPaid, amountDue, payment_method, invoice_no, date, notes, totalAmount, status } = req.body;
+    const { customerId, amountPaid, payment_method, invoice_no, date, notes, totalAmount } = req.body;
+    // Note: 'status' and 'amountDue' are NOT accepted from body
 
-    // Check if payment exists
     const payment = await CustomerPayment.findById(id);
     if (!payment) {
-      return res.status(404).json({
-        success: false,
-        msg: 'Payment not found',
-      });
+      return res.status(404).json({ success: false, msg: 'Payment not found' });
     }
 
-
-    
-    if(payment.status === "Completed"){
-      return res.status(400).json({
-        success: false,
-        msg: 'Cannot edit completed payments',
-      }) 
+    if (payment.status === 'Completed') {
+      return res.status(400).json({ success: false, msg: 'Cannot edit completed payments' });
     }
 
+    // === Determine new values (fallback to existing) ===
+    const newTotalAmount = totalAmount !== undefined ? Number(totalAmount) : payment.totalAmount;
+    const newAmountPaid = amountPaid !== undefined ? Number(amountPaid) : payment.amountPaid;
 
-    // Validate customer if provided
+    // Validations
+    if (newTotalAmount < 0) {
+      return res.status(400).json({ success: false, msg: 'Total amount cannot be negative' });
+    }
+    if (newAmountPaid < 0) {
+      return res.status(400).json({ success: false, msg: 'Amount paid cannot be negative' });
+    }
+
+    // === Always recalculate amountDue and status ===
+    const newAmountDue = newTotalAmount - newAmountPaid;
+    const newStatus = newAmountPaid >= newTotalAmount && newTotalAmount > 0 ? 'Completed'
+                    : newAmountPaid > 0 ? 'Partial'
+                    : 'Pending';
+
+    // Optional: Validate customer if changing
     if (customerId) {
       const customer = await User.findById(customerId);
-      if (!customer) {
-        return res.status(404).json({
-          success: false,
-          msg: 'Customer not found',
-        });
-      }
-      if (customer.role !== 'Customer') {
-        return res.status(400).json({
-          success: false,
-          msg: 'User is not a customer',
-        });
+      if (!customer || customer.role !== 'Customer') {
+        return res.status(400).json({ success: false, msg: 'Valid customer not found' });
       }
     }
 
-    // Validate totalAmount if provided
-    if (totalAmount !== undefined && totalAmount < 0) {
-      return res.status(400).json({
-        success: false,
-        msg: 'Total amount cannot be negative',
-      });
+    // Validate payment method
+    if (payment_method && !['Bank Transfer', 'Credit Card', 'Cash', 'Check', 'Other'].includes(payment_method)) {
+      return res.status(400).json({ success: false, msg: 'Invalid payment method' });
     }
 
-
-
-    // Validate amountDue if provided
-    if (amountDue !== undefined && amountDue < 0) {
-      return res.status(400).json({
-        success: false,
-        msg: 'Amount due cannot be negative',
-      });
-    }
-
-    // Validate consistency: totalAmount = amountPaid + amountDue
-    if (totalAmount !== undefined || amountPaid !== undefined || amountDue !== undefined) {
-      const updatedTotal = totalAmount !== undefined ? totalAmount : payment.totalAmount;
-      const updatedPaid = amountPaid !== undefined ? amountPaid : payment.amountPaid;
-      const updatedDue = amountDue !== undefined ? amountDue : payment.amountDue || 0;
-      // if (updatedTotal !== updatedPaid + updatedDue) {
-      //   return res.status(400).json({
-      //     success: false,
-      //     msg: 'Total amount must equal amount paid plus amount due',
-      //   });
-      // }
-    }
-
-    // Validate payment method if provided
-    if (payment_method) {
-      const allowedMethods = ['Bank Transfer', 'Credit Card', 'Cash', 'Check', 'Other'];
-      if (!allowedMethods.includes(payment_method)) {
-        return res.status(400).json({
-          success: false,
-          msg: 'Invalid payment method',
-        });
-      }
-    }
-
-    // Validate invoiceNo if provided
+    // Validate invoice_no uniqueness
     if (invoice_no) {
-      if (invoice_no.trim() === '') {
-        return res.status(400).json({
-          success: false,
-          msg: 'Invoice number cannot be empty',
-        });
-      }
-      // Check for uniqueness if invoiceNo is being updated
-      const existingPayment = await CustomerPayment.findOne({ invoiceNo: invoice_no, _id: { $ne: id } });
-      if (existingPayment) {
-        return res.status(400).json({
-          success: false,
-          msg: 'Invoice number already exists',
-        });
+      const exists = await CustomerPayment.findOne({ invoiceNo: invoice_no, _id: { $ne: id } });
+      if (exists) {
+        return res.status(400).json({ success: false, msg: 'Invoice number already exists' });
       }
     }
 
-    // Validate status if provided
-    if (status) {
-      const allowedStatuses = ['Pending', 'Completed', 'Partial', 'Cancelled'];
-      if (!allowedStatuses.includes(status)) {
-        return res.status(400).json({
-          success: false,
-          msg: 'Invalid payment status',
-        });
-      }
-    }
-
-    // Prepare update object
+    // === Build update object ===
     const updateData = {
       ...(customerId && { customer: customerId }),
-      ...(totalAmount !== undefined && { totalAmount }),
-      ...(amountPaid && { amountPaid }),
-      ...(amountDue !== undefined && { amountDue }),
-      ...(payment_method && { payment_method: payment_method }),
+      totalAmount: newTotalAmount,
+      amountPaid: newAmountPaid,
+      amountDue: newAmountDue,
+      status: newStatus, // Always auto-calculated
+      ...(payment_method && { payment_method }),
       ...(invoice_no && { invoiceNo: invoice_no }),
       ...(date && { date }),
       ...(notes !== undefined && { notes }),
-      ...(status && { status }),
     };
 
-    // Update payment
     const updatedPayment = await CustomerPayment.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
@@ -283,10 +226,7 @@ exports.updatePayment = async (req, res) => {
     });
   } catch (err) {
     console.error('Update Payment Error:', err);
-    res.status(500).json({
-      success: false,
-      msg: 'Server error occurred while updating payment',
-    });
+    res.status(500).json({ success: false, msg: 'Server error' });
   }
 };
 

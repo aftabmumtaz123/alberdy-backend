@@ -349,9 +349,12 @@ exports.createProduct = async (req, res) => {
   }
 };
 
+
+
 exports.getAllProducts = async (req, res) => {
   const { page = 1, limit, category, subcategory, brand, status, name, lowStock } = req.query;
   const filter = {};
+
   try {
     // Fetch currency configuration
     const config = await Configuration.findOne().lean();
@@ -386,9 +389,14 @@ exports.getAllProducts = async (req, res) => {
     if (status) filter.status = status;
     if (name) filter.name = { $regex: name, $options: 'i' };
 
-    // ---------- BASE AGGREGATION PIPELINE ----------
+    // ---------- BASE AGGREGATION PIPELINE (WITH EARLY SORT) ----------
     let pipeline = [
       { $match: filter },
+
+      // CRITICAL FIX: Sort by newest first EARLY in the pipeline
+      { $sort: { createdAt: -1 } },
+
+      // Now all subsequent operations preserve the correct order
       {
         $lookup: {
           from: 'categories',
@@ -421,11 +429,7 @@ exports.getAllProducts = async (req, res) => {
           from: 'variants',
           let: { varIds: { $ifNull: ['$variations', []] } },
           pipeline: [
-            {
-              $match: {
-                $expr: { $in: ['$_id', '$$varIds'] },
-              },
-            },
+            { $match: { $expr: { $in: ['$_id', '$$varIds'] } } },
             {
               $lookup: {
                 from: 'units',
@@ -441,12 +445,12 @@ exports.getAllProducts = async (req, res) => {
                   $cond: {
                     if: {
                       $and: [
-                        { $ne: ['$expiryDate', null] }, // Check if expiryDate exists
-                        { $lt: ['$expiryDate', new Date()] }, // Check if expiryDate is in the past
+                        { $ne: ['$expiryDate', null] },
+                        { $lt: ['$expiryDate', new Date()] },
                       ],
                     },
                     then: 'inactive',
-                    else: { $ifNull: ['$status', 'active'] }, // Use existing status or default to active
+                    else: { $ifNull: ['$status', 'active'] },
                   },
                 },
               },
@@ -491,13 +495,7 @@ exports.getAllProducts = async (req, res) => {
             },
             { $sort: { createdAt: -1 } },
             { $limit: 1 },
-            {
-              $project: {
-                discountType: 1,
-                discountValue: 1,
-                _id: 0,
-              },
-            },
+            { $project: { discountType: 1, discountValue: 1, _id: 0 } },
           ],
           as: 'activeOffer',
         },
@@ -550,7 +548,7 @@ exports.getAllProducts = async (req, res) => {
       },
     ];
 
-    // ---------- LOW STOCK FILTER ----------
+    // ---------- LOW STOCK FILTER (applied AFTER sort) ----------
     if (lowStock === 'true') {
       pipeline.push({
         $addFields: { totalStock: { $sum: '$variations.stockQuantity' } },
@@ -558,26 +556,29 @@ exports.getAllProducts = async (req, res) => {
       pipeline.push({ $match: { totalStock: { $lt: 10 } } });
     }
 
-    // ---------- COUNT ----------
-    let countPipeline = [...pipeline];
-    countPipeline.push({ $count: 'total' });
+    // ---------- COUNT (must include sort + lowStock to be accurate) ----------
+    const countPipeline = [...pipeline, { $count: 'total' }];
     const countResult = await Product.aggregate(countPipeline);
-    const total = countResult.length > 0 ? countResult[0].total : 0;
+    const total = countResult[0]?.total || 0;
 
-    // ---------- PAGINATION STAGES ----------
-    const pageNum = parseInt(page);
+    // ---------- PAGINATION ----------
+    const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = limit ? parseInt(limit) : null;
-    const sortStage = { $sort: { createdAt: -1 } };
-    const projectStage = { $project: { __v: 0, activeOffer: 0 } };
-    let fullPipeline = [...pipeline, sortStage];
-    if (limitNum && !isNaN(limitNum)) {
-      fullPipeline.push({ $skip: (pageNum - 1) * limitNum });
-      fullPipeline.push({ $limit: limitNum });
-    }
-    fullPipeline.push(projectStage);
 
-    // ---------- EXECUTE QUERY ----------
-    const products = await Product.aggregate(fullPipeline);
+    let finalPipeline = [...pipeline];
+
+    if (limitNum && !isNaN(limitNum)) {
+      finalPipeline.push({ $skip: (pageNum - 1) * limitNum });
+      finalPipeline.push({ $limit: limitNum });
+    }
+
+    finalPipeline.push(
+      { $project: { __v: 0, activeOffer: 0 } } // Clean output
+    );
+
+    // ---------- EXECUTE ----------
+    const products = await Product.aggregate(finalPipeline);
+
     res.json({
       success: true,
       products,
@@ -587,14 +588,14 @@ exports.getAllProducts = async (req, res) => {
       currentPage: pageNum,
     });
   } catch (err) {
+    console.error('getAllProducts error:', err);
     res.status(500).json({
       success: false,
       msg: 'Server error fetching products',
-      details: err.message || 'Unknown error',
+      details: err.message,
     });
   }
 };
-
 
 
 exports.getProductById = async (req, res) => {
