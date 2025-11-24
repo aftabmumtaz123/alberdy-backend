@@ -12,7 +12,7 @@ const productSchema = new mongoose.Schema({
   thumbnail: { type: String },
   description: { type: String },
   status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
-  variations: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Variant' }], // Array of Variant refs (each "product instance")
+  variations: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Variant' }],
 }, { timestamps: true });
 
 // Indexes (removed stockQuantity index as it's now in Variant)
