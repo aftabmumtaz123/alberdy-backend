@@ -266,8 +266,8 @@ exports.updatePurchase = async (req, res) => {
     }
 
     // Validate status
-    if (status && !['Pending', 'Completed', 'Cancelled'].includes(status)) {
-      return res.status(400).json({ success: false, message: 'Status must be one of: Pending, Completed, Cancelled' });
+    if (status && !['Pending', 'Completed', 'Cancelled', 'Partial'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'Status must be one of: Pending, Completed, Cancelled, Partial' });
     }
 
     let newProducts = [];
