@@ -235,6 +235,12 @@ exports.updatePurchase = async (req, res) => {
 
     // Fetch purchase
     const purchase = await Purchase.findById(id).session(session);
+
+
+    if(purchase.status === 'Completed'){
+      return res.status(400).json({ success: false, message: 'Completed purchases cannot be updated' });
+    };
+
     if (!purchase) {
       return res.status(404).json({ success: false, message: 'Purchase not found' });
     }

@@ -15,7 +15,7 @@ const SalesSchema = new mongoose.Schema({
   customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   status: {
     type: String,
-    enum: ['Pending', 'Completed', 'Cancelled', 'Refunded'],
+    enum: ['Pending', 'Completed', 'Cancelled', 'Refunded', 'Partial'],
     default: 'Pending',
   },
   products: [ProductSaleSchema],
