@@ -326,12 +326,21 @@ exports.createProduct = async (req, res) => {
   } catch (err) {
     await cleanupAllFiles();
 
-    if (err.code === 11000) {
-      return res.status(400).json({
-        success: false,
-        msg: 'Duplicate SKU or product name+brand combination',
-      });
+  if (err.code === 11000) {
+    let field = 'unknown field';
+
+    if (err.message.includes('name_1_brand_1')) {
+      field = 'Product name already exists under this brand';
+    } else if (err.message.includes('sku_1')) {
+      field = 'SKU already exists';
     }
+
+    return res.status(400).json({
+      success: false,
+      msg: `Duplicate value: ${field}`,
+    });
+  }
+    
 
     if (err.name === 'ValidationError') {
       return res.status(400).json({
