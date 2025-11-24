@@ -237,7 +237,7 @@ exports.updatePurchase = async (req, res) => {
     const purchase = await Purchase.findById(id).session(session);
 
 
-    if(purchase.status === 'Completed'){
+    if(purchase.status === 'Completed' && purchase.payment.amountDue === 0){
       return res.status(400).json({ success: false, message: 'Completed purchases cannot be updated' });
     };
 
