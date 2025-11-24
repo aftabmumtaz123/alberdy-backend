@@ -18,7 +18,6 @@ const productSchema = new mongoose.Schema({
 // Indexes (removed stockQuantity index as it's now in Variant)
 productSchema.index({ category: 1, subcategory: 1 });
 productSchema.index({ brand: 1 });
-productSchema.index({ name: 1, brand: 1 }, { unique: true });
 
 module.exports = mongoose.model('Product', productSchema);
 
