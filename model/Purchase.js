@@ -11,7 +11,7 @@ const PurchaseSchema = new mongoose.Schema({
   purchaseCode: { type: String, required: true, unique: true },
   date: { type: Date, default: Date.now },
   supplierId: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', required: true },
-  status: { type: String, enum: ['Pending', 'Completed', 'Cancelled'], default: 'Pending' },
+  status: { type: String, enum: ['Pending', 'Completed', 'Cancelled', 'Refunded', 'Partial'], default: 'Pending' },
   products: [ProductPurchaseSchema],
   payment: {
     amountPaid: { type: Number, default: 0 },
