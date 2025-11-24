@@ -171,7 +171,7 @@ exports.getInventoryDashboard = async (req, res) => {
 
     const pipeline = [
       { $match: baseMatch },
-      { $sort: { createdAt: -1 } },
+      { $sort: { date: -1 } },
 
       // Lookups
       { $lookup: { from: "variants", localField: "variant", foreignField: "_id", as: "variantDoc" } },

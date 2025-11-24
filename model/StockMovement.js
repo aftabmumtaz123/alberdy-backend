@@ -18,6 +18,7 @@ const stockMovementSchema = new mongoose.Schema({
     minlength: 2,
     required: true,
   },
+  date: { type: Date, default: Date.now },
   reason: { type: String, required: true, trim: true },
   referenceId: { type: String, trim: true },
   performedBy: {
