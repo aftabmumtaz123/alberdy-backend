@@ -172,63 +172,70 @@ exports.getSupplierById = async (req, res) => {
 const fs = require("fs");
 
 
-// ==================== UPDATE SUPPLIER (100% WORKING VERSION) ====================
+// ==================== UPDATE SUPPLIER – FINAL VERSION (Single "attachments" field) ====================
 exports.updateSupplier = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // === SAFELY PARSE JSON FIELDS FROM FORM-DATA ===
-    const rawBody = req.body;
+    // Parse regular fields (some may come as stringified JSON from form-data)
+    const {
+      supplierName,
+      supplierCode,
+      contactPerson,
+      email,
+      phone,
+      supplierType,
+      address: addressRaw,
+      status,
+      // attachments comes from both req.body (text URLs) and req.files (uploaded files)
+    } = req.body;
 
-    // Parse attachmentsToKeep (comes as string from form-data)
-    let attachmentsToKeep = rawBody.attachmentsToKeep || '[]';
-    if (typeof attachmentsToKeep === 'string') {
-      try {
-        attachmentsToKeep = JSON.parse(attachmentsToKeep);
-      } catch (e) {
-        console.warn('Failed to parse attachmentsToKeep, defaulting to []');
-        attachmentsToKeep = [];
+    // Safely parse address if sent as JSON string
+    let addressObj = {};
+    if (addressRaw) {
+      if (typeof addressRaw === 'string') {
+        try { addressObj = JSON.parse(addressRaw); } catch (e) { /* ignore */ }
+      } else if (typeof addressRaw === 'object') {
+        addressObj = addressRaw;
       }
     }
-    if (!Array.isArray(attachmentsToKeep)) attachmentsToKeep = [];
 
-    // Parse address if sent as JSON string
-    let address = rawBody.address;
-    if (typeof address === 'string') {
-      try {
-        address = JSON.parse(address);
-      } catch (e) {
-        address = {};
-      }
-    }
-
+    // Find existing supplier
     const supplier = await Supplier.findById(id);
     if (!supplier) {
       return res.status(404).json({ success: false, message: "Supplier not found" });
     }
 
-    // === HANDLE ATTACHMENTS ===
+    // === 1. HANDLE ATTACHMENTS (The Magic Part) ===
     const oldAttachments = supplier.attachments || [];
 
-    // Keep only the ones client wants to retain
-    const keptAttachments = oldAttachments.filter(att =>
-      attachmentsToKeep.includes(att.filePath)
-    );
+    // All values sent under key "attachments" (can be strings OR files)
+    const incomingAttachments = req.body.attachments || [];
 
-    // Delete removed ones from Cloudinary
+    // Normalize to array
+    const incomingList = Array.isArray(incomingAttachments)
+      ? incomingAttachments
+      : [incomingAttachments].filter(Boolean);
+
+    // Extract URLs (old files to keep) – they are plain strings starting with http
+    const urlsToKeep = incomingList
+      .filter(item => typeof item === 'string' && item.trim().startsWith('http'))
+      .map(url => url.trim());
+
+    // New files actually uploaded in this request
+    const newUploadedFiles = req.files || [];
+
+    // Determine which old files were NOT sent back → delete them
     const removedAttachments = oldAttachments.filter(
-      att => !attachmentsToKeep.includes(att.filePath)
+      att => !urlsToKeep.includes(att.filePath)
     );
 
+    // Delete removed files from Cloudinary
     for (const att of removedAttachments) {
       try {
-        // Extract public_id correctly from Cloudinary URL
-        const urlParts = att.filePath.split('/');
-        const publicIdWithExt = urlParts.slice(-2).join('/').split('.')[0]; // Handles folder + filename
-        const publicId = publicIdWithExt.startsWith('Uploads/')
-          ? publicIdWithExt
-          : `Uploads/${publicIdWithExt}`;
-
+        // Extract public_id correctly (handles folder + filename)
+        const urlPath = att.filePath.split('/').slice(7).join('/'); // remove https://res.cloudinary.com/.../v123/
+        const publicId = urlPath.split('.')[0]; // remove extension
         await cloudinary.uploader.destroy(publicId);
         console.log('Deleted from Cloudinary:', publicId);
       } catch (err) {
@@ -236,31 +243,38 @@ exports.updateSupplier = async (req, res) => {
       }
     }
 
-    // New files uploaded now
-    const newAttachments = (req.files || []).map(file => ({
+    // Build new attachment records from uploaded files
+    const newAttachments = newUploadedFiles.map(file => ({
       fileName: file.originalname,
-      filePath: file.path, // Cloudinary full URL
+      filePath: file.path,        // Cloudinary full URL
       uploadedAt: new Date(),
     }));
 
-    const finalAttachments = [...keptAttachments, ...newAttachments];
+    // Final attachments = kept old + newly uploaded
+    const finalAttachments = [
+      ...oldAttachments.filter(att => urlsToKeep.includes(att.filePath)),
+      ...newAttachments,
+    ];
 
-    // === UPDATE OTHER FIELDS ===
+    // === 2. BUILD UPDATE OBJECT ===
     const updateData = {
-      supplierName: rawBody.supplierName?.trim() || supplier.supplierName,
-      contactPerson: rawBody.contactPerson?.trim() ?? supplier.contactPerson,
-      email: rawBody.email?.trim() || supplier.email,
-      phone: rawBody.phone?.trim() ?? supplier.phone,
-      supplierType: rawBody.supplierType?.trim() || supplier.supplierType,
-      address: normalizeAddress(address),
-      status: ['Active', 'Inactive'].includes(rawBody.status) ? rawBody.status : supplier.status,
+      ...(supplierName && { supplierName: supplierName.trim() }),
+      ...(supplierCode && { supplierCode: supplierCode.trim() }),
+      ...(contactPerson !== undefined && { contactPerson: contactPerson?.trim() || '' }),
+      ...(email && { email: email.trim() }),
+      ...(phone !== undefined && { phone: phone?.trim() || '' }),
+      ...(supplierType && { supplierType: supplierType.trim() }),
+      ...(addressObj && { address: normalizeAddress(addressObj) }),
+      ...(status && ['Active', 'Inactive'].includes(status) && { status }),
       attachments: finalAttachments,
     };
 
-    const updatedSupplier = await Supplier.findByIdAndUpdate(id, updateData, {
-      new: true,
-      runValidators: true,
-    });
+    // === 3. UPDATE & RETURN ===
+    const updatedSupplier = await Supplier.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true, runValidators: true }
+    );
 
     return res.json({
       success: true,
@@ -273,11 +287,10 @@ exports.updateSupplier = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error",
-      error: error.message,
+      error: error.message || error.toString(),
     });
   }
 };
-
 // ==================== DELETE SUPPLIER ====================
 exports.deleteSupplier = async (req, res) => {
   try {
