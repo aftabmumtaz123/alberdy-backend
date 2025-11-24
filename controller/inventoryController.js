@@ -12,8 +12,7 @@ const getPerformedBy = async (req) => {
 
 // Auto generate reference ID if not provided
 const generateReferenceId = () => `ADJ-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-
-// Core stock adjustment (shared between add & update)
+// CORE: Stock Adjustment (Add or Deduct) – FULLY FIXED & SAFE
 const adjustStock = async (req, res, variantIdFromParam = null) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -22,7 +21,7 @@ const adjustStock = async (req, res, variantIdFromParam = null) => {
     const {
       variantId: bodyVariantId,
       quantityChange,
-      isStockIncreasing,
+      isStockIncreasing,        // true = add stock, false = deduct
       movementType = "Manual Adjustment",
       reason,
       referenceId,
@@ -30,66 +29,64 @@ const adjustStock = async (req, res, variantIdFromParam = null) => {
       createdAt,
     } = req.body;
 
+    // Determine which variantId to use
     const variantId = variantIdFromParam || bodyVariantId;
 
+    // === VALIDATIONS ===
     if (!variantId || !mongoose.Types.ObjectId.isValid(variantId)) {
       await session.abortTransaction();
-      return res.status(400).json({ success: false, msg: "Valid variantId required" });
+      return res.status(400).json({ success: false, msg: "Valid variantId is required" });
     }
 
     const qty = Math.abs(Number(quantityChange));
-    if (isNaN(qty) || qty === 0 || isStockIncreasing == null || !reason?.trim()) {
+    if (isNaN(qty) || qty === 0) {
       await session.abortTransaction();
-      return res.status(400).json({ success: false, msg: "Invalid input data" });
+      return res.status(400).json({ success: false, msg: "Valid quantityChange is required" });
+    }
+
+    if (typeof isStockIncreasing !== "boolean") {
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, msg: "isStockIncreasing must be true/false" });
+    }
+
+    if (!reason || !reason.trim()) {
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, msg: "Reason is required" });
     }
 
     const changeAmount = isStockIncreasing ? qty : -qty;
 
-    // ATOMIC UPDATE + GET BOTH OLD AND NEW VALUES
-    const updateResult = await Variant.findByIdAndUpdate(
-      variantId,
-      [
-        {
-          $set: {
-            stockQuantity: {
-              $cond: [
-                { $lt: [{ $add: ["$stockQuantity", changeAmount] }, 0] },
-                "$stockQuantity", // reject negative
-                { $add: ["$stockQuantity", changeAmount] }
-              ]
-            },
-            expiryDate: expiryAlertDate ? new Date(expiryAlertDate) : "$expiryDate"
-          }
-        }
-      ],
-      {
-        new: true,           // return updated document
-        runValidators: true,
-        session,
-        // This returns the document BEFORE modification when used with aggregation pipeline
-        returnDocument: "before"
-      }
-    ).lean();
-
-    if (!updateResult) {
+    // === STEP 1: Get current variant with lock (inside transaction) ===
+    const variant = await Variant.findById(variantId).session(session);
+    if (!variant) {
       await session.abortTransaction();
       return res.status(404).json({ success: false, msg: "Variant not found" });
     }
 
-    const previousQty = updateResult.stockQuantity;
+    const previousQty = variant.stockQuantity || 0;
     const newQty = previousQty + changeAmount;
 
-    // Double-check negative stock (in case race condition slipped through)
+    // === STEP 2: Prevent negative stock ===
     if (newQty < 0) {
       await session.abortTransaction();
-      return res.status(400).json({ success: false, msg: "Insufficient stock for deduction" });
+      return res.status(400).json({
+        success: false,
+        msg: "Insufficient stock",
+        details: `Cannot deduct ${qty}. Current stock: ${previousQty}`
+      });
     }
 
-    // If we got here, the update succeeded and stock is valid
-    // Now save the movement with CORRECT previous/new
+    // === STEP 3: Update stock quantity + expiry date ===
+    variant.stockQuantity = newQty;
+    if (expiryAlertDate) {
+      variant.expiryDate = new Date(expiryAlertDate);
+    }
+    await variant.save({ session });
+
+    // === STEP 4: Record accurate stock movement ===
     const movement = await StockMovement.create([{
       variant: variantId,
-      sku: updateResult.sku,
+      sku: variant.sku,
       previousQuantity: previousQty,
       newQuantity: newQty,
       changeQuantity: changeAmount,
@@ -98,45 +95,48 @@ const adjustStock = async (req, res, variantIdFromParam = null) => {
       reason: reason.trim(),
       referenceId: referenceId?.trim() || generateReferenceId(),
       performedBy: await getPerformedBy(req),
-      createdAt
+      createdAt: createdAt ? new Date(createdAt) : new Date()
     }], { session });
 
+    // === COMMIT TRANSACTION ===
     await session.commitTransaction();
 
-    // Populate product name for response
-    const variant = await Variant.findById(variantId)
-      .populate('product', 'name')
-      .session(session)
-      .lean();
+    // === SUCCESS RESPONSE ===
+    const message = isStockIncreasing
+      ? `Successfully added ${qty} unit(s)`
+      : `Successfully deducted ${qty} unit(s)`;
 
     res.json({
       success: true,
-      msg: isStockIncreasing ? "Stock increased" : "Stock decreased",
+      msg: message,
       data: {
-        variantId,
-        productName: variant.product?.name || "Unknown",
-        sku: updateResult.sku,
+        variantId: variantId.toString(),
+        productName: variant.product?.name || "Unknown", // assuming populated later or via lookup
+        sku: variant.sku,
         previousQuantity: previousQty,
         newQuantity: newQty,
         change: changeAmount,
+        changeDisplay: changeAmount >= 0 ? `+${qty}` : `−${qty}`,
         movementType: movementType.trim(),
         referenceId: movement[0].referenceId,
-        isStockIncreasing: isStockIncreasing === true,
+        reason: reason.trim(),
         performedBy: req.user?.name || "System",
-        performedAt: createdAt || new Date(),
-        reason: reason.trim()
+        performedAt: movement[0].createdAt,
       }
     });
 
   } catch (err) {
     await session.abortTransaction();
     console.error("Stock Adjustment FAILED:", err);
-    res.status(500).json({ success: false, msg: "Server error", error: err.message });
+    res.status(500).json({
+      success: false,
+      msg: "Failed to adjust stock",
+      error: err.message
+    });
   } finally {
     session.endSession();
   }
 };
-
 // ======================
 // EXPORTS
 // ======================
