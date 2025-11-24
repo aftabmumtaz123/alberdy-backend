@@ -404,6 +404,12 @@ exports.updateSale = async (req, res) => {
 
     // Fetch sale
     const sale = await Sale.findById(id).session(session);
+
+    if (sale.status === 'Completed' && sale.payment.amountDue === 0) {
+      return res.status(400).json({ status: false, message: 'Completed sales cannot be updated' });
+    };
+
+
     if (!sale || sale.isDeleted) {
       return res.status(404).json({ status: false, message: 'Sale not found or deleted' });
     }
