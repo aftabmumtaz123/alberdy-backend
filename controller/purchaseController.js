@@ -241,6 +241,10 @@ exports.updatePurchase = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Completed purchases cannot be updated' });
     };
 
+    if(purchase.status === 'Cancelled' && purchase.payment.amountDue === 0){
+      return res.status(400).json({ success: false, message: 'Cancelled purchases cannot be updated' });
+    };
+
     if (!purchase) {
       return res.status(404).json({ success: false, message: 'Purchase not found' });
     }
