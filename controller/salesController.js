@@ -423,8 +423,8 @@ exports.updateSale = async (req, res) => {
     }
 
     // Validate status
-    if (status && !['Pending', 'Completed', 'Cancelled', 'Refunded'].includes(status)) {
-      return res.status(400).json({ status: false, message: 'Status must be one of: Pending, Completed, Cancelled, Refunded' });
+    if (status && !['Pending', 'Completed', 'Cancelled', 'Refunded', 'Partial'].includes(status)) {
+      return res.status(400).json({ status: false, message: 'Status must be one of: Pending, Completed, Cancelled, Refunded, Partial' });
     }
 
     // Validate customer
