@@ -3,140 +3,168 @@ const Variant = require('../model/variantProduct');
 const Supplier = require('../model/Supplier');
 const mongoose = require('mongoose');
 
+
+
 exports.createPurchase = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { supplierId, products, summary, payment, notes, status } = req.body;
 
-    // Validate summary object
+    // === 1. Validate Required Fields ===
+    if (!supplierId || !products || !Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({ success: false, message: 'Supplier and products are required' });
+    }
+
     if (!summary || typeof summary !== 'object') {
       return res.status(400).json({ success: false, message: 'Summary object is required' });
     }
+
     const { otherCharges = 0, discount = 0 } = summary;
 
-    // Validate otherCharges and discount
-    if (typeof otherCharges !== 'number' || otherCharges < 0) {
-      return res.status(400).json({ success: false, message: 'otherCharges must be a non-negative number' });
-    }
-    if (typeof discount !== 'number' || discount < 0) {
-      return res.status(400).json({ success: false, message: 'discount must be a non-negative number' });
+    if (otherCharges < 0 || discount < 0) {
+      return res.status(400).json({ success: false, message: 'otherCharges and discount cannot be negative' });
     }
 
- if (status === 'Completed' && (payment?.amountPaid ?? 0) < grandTotal) {
-  return res.status(400).json({ 
-    success: false, 
-    message: 'Amount paid must cover the full grand total for Completed status' 
-  });
-}
-
-    // Validate supplier
+    // === 2. Validate Supplier ===
     const supplier = await Supplier.findById(supplierId);
     if (!supplier) {
       return res.status(400).json({ success: false, message: 'Invalid supplier' });
     }
 
-    // Validate products array
-    if (!Array.isArray(products) || products.length === 0) {
-      return res.status(400).json({ success: false, message: 'Products array is required and cannot be empty' });
-    }
-
+    // === 3. Validate & Calculate Products + Subtotal ===
     let subtotal = 0;
     const validatedProducts = [];
-    for (let prod of products) {
-      // Validate product fields based on ProductPurchaseSchema
-      if (!prod.variantId || !prod.quantity || !prod.unitPrice) {
-        return res.status(400).json({ success: false, message: 'Each product must have variantId, quantity, and unitPrice' });
-      }
-      if (prod.quantity < 1 || prod.unitPrice < 0 || (prod.taxPercent && prod.taxPercent < 0)) {
-        return res.status(400).json({ success: false, message: 'Invalid product data: quantity, unitPrice, or taxPercent' });
+
+    for (const item of products) {
+      const { variantId, quantity, unitPrice, taxPercent = 0 } = item;
+
+      if (!variantId || !quantity || !unitPrice) {
+        return res.status(400).json({ success: false, message: 'variantId, quantity, and unitPrice are required' });
       }
 
-      const variant = await Variant.findById(prod.variantId);
+      if (quantity < 1 || unitPrice < 0 || taxPercent < 0) {
+        return res.status(400).json({ success: false, message: 'Invalid quantity, price, or tax' });
+      }
+
+      const variant = await Variant.findById(variantId).session(session);
       if (!variant || variant.status === 'Inactive') {
-        return res.status(400).json({ success: false, message: `Invalid or inactive variant: ${prod.variantId}` });
+        return res.status(400).json({ success: false, message: `Variant not found or inactive: ${variantId}` });
       }
 
-      const taxAmount = (prod.unitPrice * prod.quantity * (prod.taxPercent || 0)) / 100;
-      const productTotal = prod.unitPrice * prod.quantity + taxAmount;
-      subtotal += productTotal;
+      const taxAmount = (unitPrice * quantity * taxPercent) / 100;
+      const lineTotal = unitPrice * quantity + taxAmount;
+
+      subtotal += lineTotal;
+
       validatedProducts.push({
-        variantId: prod.variantId,
-        quantity: prod.quantity,
-        unitPrice: prod.unitPrice,
+        variantId,
+        quantity,
+        unitPrice,
+        taxPercent,
         taxAmount,
-        taxPercent: prod.taxPercent || 0,
       });
     }
 
+    // === 4. Calculate Final Totals ===
     const grandTotal = subtotal + otherCharges - discount;
+
     if (grandTotal < 0) {
       return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
     }
 
-    // Validate grandTotal if provided
-    if (summary.grandTotal && summary.grandTotal !== grandTotal) {
-      return res.status(400).json({ success: false, message: 'Provided grandTotal does not match calculated grandTotal' });
-    }
-
-    // Validate payment fields
-    if (payment && (typeof payment.amountPaid !== 'number' || payment.amountPaid < 0)) {
-      return res.status(400).json({ success: false, message: 'amountPaid must be a non-negative number' });
-    }
-    if (payment?.type && !['Cash', 'Card', 'Online', 'BankTransfer'].includes(payment.type)) {
-      return res.status(400).json({ success: false, message: 'Invalid payment type' });
-    }
-
-    const amountPaid = payment?.amountPaid ?? 0;
+    // === 5. Payment & Status Logic ===
+    const amountPaid = payment?.amountPaid >= 0 ? payment.amountPaid : 0;
     const amountDue = grandTotal - amountPaid;
 
-    // Prevent overpayment
     if (amountDue < 0) {
       return res.status(400).json({ success: false, message: 'Amount paid cannot exceed grand total' });
     }
 
-    // Generate unique purchase code
-    let purchaseCode = `PUR-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    // Auto-determine status unless explicitly provided
+    let finalStatus = status;
+    if (!finalStatus || finalStatus === 'Pending') {
+      if (amountDue === 0) finalStatus = 'Completed';
+      else if (amountPaid > 0) finalStatus = 'Partial';
+      else finalStatus = 'Pending';
+    }
+
+    // But if user forces "Completed", validate full payment
+    if (finalStatus === 'Completed' && amountDue > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Full payment required for Completed status',
+      });
+    }
+
+    // === 6. Generate Purchase Code ===
+    let purchaseCode = `PUR-${Date.now().toString(36).toUpperCase()}`;
     while (await Purchase.findOne({ purchaseCode })) {
-      purchaseCode = `PUR-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+      purchaseCode = `PUR-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substr(2, 3).toUpperCase()}`;
     }
 
-    // Set status to 'Completed' if fully paid
-    if (amountDue === 0) {
-      req.body.status = 'Completed';
-    }
-
-    // Create purchase
+    // === 7. Create Purchase ===
     const purchase = new Purchase({
       purchaseCode,
       supplierId,
       products: validatedProducts,
-      payment: {
-        amountPaid,
-        amountDue,
-        type: payment?.type ?? null,
-      },
       summary: {
         subtotal,
         otherCharges,
         discount,
         grandTotal,
       },
-      notes: notes ?? '',
+      payment: {
+        amountPaid,
+        amountDue,
+        type: payment?.type || null,
+      },
+      notes: notes || '',
+      status: finalStatus,
     });
 
-    await purchase.save();
+    await purchase.save({ session });
 
-    // Update stock and purchase price
-    for (let prod of validatedProducts) {
-      const updateData = { $inc: { stockQuantity: prod.quantity } };
-      if (prod.unitPrice !== (await Variant.findById(prod.variantId)).purchasePrice) {
-        updateData.$set = { ...updateData.$set, purchasePrice: prod.unitPrice };
+    // === 8. Update Stock & Purchase Price ===
+    for (const item of validatedProducts) {
+      const updateFields = {
+        $inc: { stockQuantity: item.quantity },
+      };
+
+      // Update purchasePrice only if different
+      const variant = await Variant.findById(item.variantId);
+      if (variant.purchasePrice !== item.unitPrice) {
+        updateFields.$set = { purchasePrice: item.unitPrice };
       }
-      await Variant.findByIdAndUpdate(prod.variantId, updateData);
+
+      await Variant.findByIdAndUpdate(item.variantId, updateFields, { session });
     }
 
-    res.status(201).json({ success: true, message: 'Purchase created', data: purchase });
+    await session.commitTransaction();
+
+    const populatedPurchase = await Purchase.findById(purchase._id)
+      .populate('supplierId', 'supplierName')
+      .populate({
+        path: 'products.variantId',
+        populate: [
+          { path: 'product', select: 'name' },
+          { path: 'unit', select: 'short_name' },
+        ],
+      });
+
+    res.status(201).json({
+      success: true,
+      message: 'Purchase created successfully',
+      data: populatedPurchase,
+    });
+
   } catch (error) {
+    await session.abortTransaction();
+    console.error('Create Purchase Error:', error);
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  } finally {
+    session.endSession();
   }
 };
 
@@ -226,261 +254,176 @@ exports.getPurchaseById = async (req, res) => {
   }
 };
 
-
-
 exports.updatePurchase = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
+
   try {
     const { id } = req.params;
-    const { supplierId, products, summary, status, payment, notes } = req.body;
+    const { supplierId, products, summary, payment, notes, status } = req.body;
 
-    // Validate purchase ID
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: 'Invalid purchase ID' });
-    }
-
-    // Fetch purchase
-    const purchase = await Purchase.findById(id).session(session);
-
-
-if(status === 'Completed' && payment?.amountPaid < (summary.subTotal + (summary.otherCharges || 0) - (summary.discount || 0))){
-  return res.status(400).json({ success: false, message: 'Amount paid is insufficient for a Completed purchase' });
-}
-
-
-    if(purchase.status === 'Completed' && purchase.payment.amountDue === 0){
-      return res.status(400).json({ success: false, message: 'Completed purchases cannot be updated' });
-    };
-
-    if(purchase.status === 'Cancelled' && purchase.payment.amountDue === 0){
-      return res.status(400).json({ success: false, message: 'Cancelled purchases cannot be updated' });
-    };
-
+    const purchase = await Purchase.findById(id);
     if (!purchase) {
+      await session.abortTransaction();
       return res.status(404).json({ success: false, message: 'Purchase not found' });
     }
 
-    // Validate summary object
-    if (!summary || typeof summary !== 'object') {
-      return res.status(400).json({ success: false, message: 'Summary object is required' });
-    }
-    const { otherCharges = 0, discount = 0 } = summary;
-    if (typeof otherCharges !== 'number' || otherCharges < 0) {
-      return res.status(400).json({ success: false, message: 'otherCharges must be a non-negative number' });
-    }
-    if (typeof discount !== 'number' || discount < 0) {
-      return res.status(400).json({ success: false, message: 'discount must be a non-negative number' });
+    // Prevent editing Completed or Cancelled
+    if (purchase.status === 'Completed') {
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, message: 'Cannot modify a Completed purchase' });
     }
 
-    // Validate supplier
-    if (supplierId) {
-      const supplier = await Supplier.findById(supplierId).session(session);
-      if (!supplier) {
-        return res.status(400).json({ success: false, message: 'Invalid supplier' });
-      }
+    if (purchase.status === 'Cancelled') {
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, message: 'Cannot modify a Cancelled purchase' });
     }
 
-    // Validate status
-    if (status && !['Pending', 'Completed', 'Cancelled', 'Partial'].includes(status)) {
-      return res.status(400).json({ success: false, message: 'Status must be one of: Pending, Completed, Cancelled, Partial' });
-    }
-
-    let newProducts = [];
-    let subtotal = 0;
-
-    // Handle cancellation
+    // === Handle Cancellation ===
     if (status === 'Cancelled' && purchase.status !== 'Cancelled') {
-      // Remove stock added by this purchase
-      for (const product of purchase.products) {
-        if (product.variantId && mongoose.Types.ObjectId.isValid(product.variantId)) {
-          const variant = await Variant.findById(product.variantId).session(session);
-          if (!variant) {
-            await session.abortTransaction();
-            return res.status(400).json({ success: false, message: `Invalid variant: ${product.variantId}` });
-          }
-          if (variant.stockQuantity < product.quantity) {
-            await session.abortTransaction();
-            return res.status(400).json({ success: false, message: `Insufficient stock to cancel for variant ${product.variantId}` });
-          }
-          await Variant.findByIdAndUpdate(
-            product.variantId,
-            { $inc: { stockQuantity: -product.quantity } },
-            { runValidators: true, session }
-          );
-          console.log(`Removed ${product.quantity} units from variant ${product.variantId} for purchase ${purchase.purchaseCode}`);
-        }
+      for (const item of purchase.products) {
+        await Variant.findByIdAndUpdate(
+          item.variantId,
+          { $inc: { stockQuantity: -item.quantity } },
+          { session }
+        );
       }
-      newProducts = purchase.products; // Preserve existing products
-      // Reset financials
-      purchase.payment.amountDue = 0;
+
+      purchase.status = 'Cancelled';
       purchase.payment.amountPaid = 0;
-      purchase.summary.subtotal = 0;
+      purchase.payment.amountDue = 0;
       purchase.summary.grandTotal = 0;
+      purchase.summary.subtotal = 0;
       purchase.summary.otherCharges = 0;
       purchase.summary.discount = 0;
-    } else {
-      // Validate products for non-cancelled purchases
-      if (!Array.isArray(products) || products.length === 0) {
-        return res.status(400).json({ success: false, message: 'Products array is required and cannot be empty for non-cancelled purchases' });
-      }
 
-      for (const prod of products) {
-        if (!prod.variantId || !prod.quantity || !prod.unitPrice) {
-          return res.status(400).json({ success: false, message: 'Each product must have variantId, quantity, and unitPrice' });
-        }
-        if (prod.quantity < 1 || prod.unitPrice < 0 || (prod.taxPercent && prod.taxPercent < 0)) {
-          return res.status(400).json({ success: false, message: 'Invalid product data: quantity, unitPrice, or taxPercent' });
-        }
+      await purchase.save({ session });
+      await session.commitTransaction();
 
-        const variant = await Variant.findById(prod.variantId).session(session);
-        if (!variant || variant.status === 'Inactive') {
-          await session.abortTransaction();
-          return res.status(400).json({ success: false, message: `Invalid or inactive variant: ${prod.variantId}` });
-        }
-
-        const oldProduct = purchase.products.find(p => p.variantId.toString() === prod.variantId.toString());
-        const stockChange = oldProduct ? prod.quantity - oldProduct.quantity : prod.quantity;
-        if (stockChange < 0 && variant.stockQuantity < -stockChange) {
-          await session.abortTransaction();
-          return res.status(400).json({ success: false, message: `Insufficient stock to reduce for variant ${prod.variantId}` });
-        }
-
-        const taxAmount = (prod.unitPrice * prod.quantity * (prod.taxPercent || 0)) / 100;
-        const productTotal = prod.unitPrice * prod.quantity + taxAmount;
-        subtotal += productTotal;
-        newProducts.push({
-          variantId: prod.variantId,
-          quantity: prod.quantity,
-          unitPrice: prod.unitPrice,
-          taxAmount,
-          taxPercent: prod.taxPercent || 0,
-        });
-      }
-
-      // Adjust stock for all products in newProducts
-      for (const newProd of newProducts) {
-        const oldProd = purchase.products.find(p => p.variantId.toString() === newProd.variantId.toString());
-        const diff = oldProd ? newProd.quantity - oldProd.quantity : newProd.quantity; // New product: use full quantity
-        if (diff !== 0 && newProd.variantId && mongoose.Types.ObjectId.isValid(newProd.variantId)) {
-          const variant = await Variant.findById(newProd.variantId).session(session);
-          if (!variant) {
-            await session.abortTransaction();
-            return res.status(400).json({ success: false, message: `Invalid variant: ${newProd.variantId}` });
-          }
-          if (diff < 0 && variant.stockQuantity < -diff) {
-            await session.abortTransaction();
-            return res.status(400).json({ success: false, message: `Insufficient stock to reduce for variant ${newProd.variantId}` });
-          }
-          await Variant.findByIdAndUpdate(
-            newProd.variantId,
-            {
-              $inc: { stockQuantity: diff },
-              $set: { purchasePrice: newProd.unitPrice },
-            },
-            { runValidators: true, session }
-          );
-          console.log(`Adjusted ${diff} units for variant ${newProd.variantId} for purchase ${purchase.purchaseCode}`);
-        }
-      }
-
-      // Handle removed products (those in purchase.products but not in newProducts)
-      for (const oldProd of purchase.products) {
-        if (!newProducts.find(p => p.variantId.toString() === oldProd.variantId.toString())) {
-          const diff = -oldProd.quantity; // Remove all stock for this product
-          if (diff !== 0 && oldProd.variantId && mongoose.Types.ObjectId.isValid(oldProd.variantId)) {
-            const variant = await Variant.findById(oldProd.variantId).session(session);
-            if (!variant) {
-              await session.abortTransaction();
-              return res.status(400).json({ success: false, message: `Invalid variant: ${oldProd.variantId}` });
-            }
-            if (variant.stockQuantity < -diff) {
-              await session.abortTransaction();
-              return res.status(400).json({ success: false, message: `Insufficient stock to reduce for variant ${oldProd.variantId}` });
-            }
-            await Variant.findByIdAndUpdate(
-              oldProd.variantId,
-              { $inc: { stockQuantity: diff } },
-              { runValidators: true, session }
-            );
-            console.log(`Removed ${-diff} units for variant ${oldProd.variantId} for purchase ${purchase.purchaseCode}`);
-          }
-        }
-      }
+      return res.json({ success: true, message: 'Purchase cancelled and stock reverted' });
     }
 
-    // Validate summary
+    // === Normal Update (Pending/Partial) ===
+    if (!summary || !products || !Array.isArray(products) || products.length === 0) {
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, message: 'Products and summary required' });
+    }
+
+    const { otherCharges = 0, discount = 0 } = summary;
+
+    let subtotal = 0;
+    const newProducts = [];
+
+    // Validate and calculate new products
+    for (const item of products) {
+      const { variantId, quantity, unitPrice, taxPercent = 0 } = item;
+      const variant = await Variant.findById(variantId).session(session);
+      if (!variant || variant.status === 'Inactive') {
+        await session.abortTransaction();
+        return res.status(400).json({ success: false, message: `Invalid variant: ${variantId}` });
+      }
+
+      const oldItem = purchase.products.find(p => p.variantId.toString() === variantId);
+      const qtyDiff = oldItem ? quantity - oldItem.quantity : quantity;
+
+      if (qtyDiff < 0 && variant.stockQuantity < -qtyDiff) {
+        await session.abortTransaction();
+        return res.status(400).json({ success: false, message: `Not enough stock to reduce: ${variant.sku}` });
+      }
+
+      const taxAmount = (unitPrice * quantity * taxPercent) / 100;
+      const lineTotal = unitPrice * quantity + taxAmount;
+      subtotal += lineTotal;
+
+      newProducts.push({ variantId, quantity, unitPrice, taxPercent, taxAmount });
+    }
+
     const grandTotal = subtotal + otherCharges - discount;
     if (grandTotal < 0) {
+      await session.abortTransaction();
       return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
     }
 
-    // Validate payment
     const amountPaid = payment?.amountPaid ?? purchase.payment.amountPaid;
     const amountDue = grandTotal - amountPaid;
-    if (payment && (typeof payment.amountPaid !== 'number' || payment.amountPaid < 0)) {
-      return res.status(400).json({ success: false, message: 'amountPaid must be a non-negative number' });
-    }
-    if (payment?.type && !['Cash', 'Card', 'Online', 'BankTransfer'].includes(payment.type)) {
-      return res.status(400).json({ success: false, message: 'Invalid payment type' });
-    }
+
     if (amountDue < 0) {
-      return res.status(400).json({ success: false, message: 'Amount paid cannot exceed grand total' });
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, message: 'Overpayment not allowed' });
     }
 
-    // Set status: prioritize provided status, only set 'Completed' if not 'Cancelled' and fully paid
-    const newStatus = status === 'Cancelled' ? 'Cancelled' : (amountDue === 0 && purchase.status !== 'Cancelled' ? 'Completed' : (status ?? purchase.status));
+    // Final status logic
+    let finalStatus = status;
+    if (!finalStatus) {
+      finalStatus = amountDue === 0 ? 'Completed' : amountPaid > 0 ? 'Partial' : 'Pending';
+    }
 
-    // Update purchase
+    if (finalStatus === 'Completed' && amountDue > 0) {
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, message: 'Full payment required for Completed status' });
+    }
+
+    // === Update Stock ===
+    for (const item of newProducts) {
+      const oldItem = purchase.products.find(p => p.variantId.toString() === item.variantId);
+      const diff = oldItem ? item.quantity - oldItem.quantity : item.quantity;
+
+      const update = { $inc: { stockQuantity: diff } };
+      if (!oldItem || oldItem.unitPrice !== item.unitPrice) {
+        update.$set = { purchasePrice: item.unitPrice };
+      }
+
+      await Variant.findByIdAndUpdate(item.variantId, update, { session });
+    }
+
+    // Handle removed products
+    for (const old of purchase.products) {
+      if (!newProducts.find(p => p.variantId === old.variantId.toString())) {
+        await Variant.findByIdAndUpdate(
+          old.variantId,
+          { $inc: { stockQuantity: -old.quantity } },
+          { session }
+        );
+      }
+    }
+
+    // === Save Purchase ===
     purchase.set({
-      supplierId: supplierId ?? purchase.supplierId,
+      supplierId: supplierId || purchase.supplierId,
       products: newProducts,
-      payment: {
-        amountPaid,
-        amountDue,
-        type: payment?.type ?? purchase.payment.type,
-      },
-      summary: {
-        subtotal,
-        otherCharges,
-        discount,
-        grandTotal,
-      },
-      notes: notes ?? purchase.notes,
-      status: newStatus,
+      summary: { subtotal, otherCharges, discount, grandTotal },
+      payment: { amountPaid, amountDue, type: payment?.type || purchase.payment.type },
+      notes: notes || purchase.notes,
+      status: finalStatus,
     });
 
     await purchase.save({ session });
+    await session.commitTransaction();
 
-    // Populate response
-    const updatedPurchase = await Purchase.findById(id)
+    const updated = await Purchase.findById(id)
       .populate('supplierId', 'supplierName')
       .populate({
         path: 'products.variantId',
-        select: 'sku attribute value unit purchasePrice price discountPrice stockQuantity expiryDate weightQuantity image',
         populate: [
-          { path: 'product', select: 'name images thumbnail description' },
+          { path: 'product', select: 'name' },
           { path: 'unit', select: 'short_name' },
         ],
-      })
-      .session(session);
+      });
 
-    await session.commitTransaction();
-    res.status(200).json({
+    res.json({
       success: true,
       message: 'Purchase updated successfully',
-      data: updatedPurchase,
+      data: updated,
     });
+
   } catch (error) {
     await session.abortTransaction();
-    console.error('Error updating purchase:', error);
+    console.error('Update Purchase Error:', error);
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
   } finally {
     session.endSession();
   }
 };
-
-
 
 exports.deletePurchase = async (req, res) => {
   try {
