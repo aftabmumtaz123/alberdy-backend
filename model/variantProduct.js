@@ -14,7 +14,7 @@ const variantSchema = new mongoose.Schema({
 sku: {
   type: String,
   trim: true,
-  uppercase: true, // allows unique only when value exists
+  uppercase: true, 
   default: null,
   set: function (v) {
     // If user sends empty string, convert it to null

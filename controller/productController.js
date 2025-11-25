@@ -1110,41 +1110,51 @@ exports.updateProduct = async (req, res) => {
   }
 };
 
-
 exports.deleteProduct = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const product = await Product.findById(req.params.id).populate('variations');
-    if (!product) {
-      return res.status(404).json({ success: false, msg: 'Product not found' });
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ success: false, msg: 'Product not found' });
+
+    // Load full variants only to delete images
+    const variants = await Variant.find({ product: product._id });
+
+    // Delete variant images
+    for (const v of variants) {
+      if (v.image) {
+        try { await fs.unlink(v.image); } catch {}
+      }
     }
 
-    if (product.images && product.images.length > 0) {
+    // Delete product images
+    if (product.images?.length) {
       for (const img of product.images) {
-        try { await fs.unlink(img); } catch { }
+        try { await fs.unlink(img); } catch {}
       }
     }
     if (product.thumbnail) {
-      try { await fs.unlink(product.thumbnail); } catch { }
+      try { await fs.unlink(product.thumbnail); } catch {}
     }
 
-    if (product.variations && product.variations.length > 0) {
-      for (const variation of product.variations) {
-        if (variation.image) {
-          try { await fs.unlink(variation.image); } catch { }
-        }
-        await Variant.findByIdAndDelete(variation._id);
-      }
-    }
+    // Delete everything in one go
+    await Promise.all([
+      Variant.deleteMany({ product: product._id }, { session }),
+      Product.findByIdAndDelete(product._id, { session }),
+    ]);
 
-    await Product.findByIdAndDelete(req.params.id);
+    await session.commitTransaction();
 
-    res.json({ success: true, msg: 'Product deleted successfully' });
+    res.json({ success: true, msg: 'Product deleted completely' });
   } catch (err) {
-    res.status(500).json({ success: false, msg: 'Server error deleting product', details: err.message || 'Unknown error' });
+    await session.abortTransaction();
+    console.error(err);
+    res.status(500).json({ success: false, msg: 'Delete failed', error: err.message });
+  } finally {
+    session.endSession();
   }
 };
-
-
 
 
 
