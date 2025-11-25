@@ -21,9 +21,12 @@ exports.createPurchase = async (req, res) => {
       return res.status(400).json({ success: false, message: 'discount must be a non-negative number' });
     }
 
-    if(status === "Completed" && payment?.amountPaid < (summary.subTotal + otherCharges - discount)){
-      return res.status(400).json({ success: false, message: 'Amount paid is insufficient for a Completed purchase' });
-    }
+ if (status === 'Completed' && (payment?.amountPaid ?? 0) < grandTotal) {
+  return res.status(400).json({ 
+    success: false, 
+    message: 'Amount paid must cover the full grand total for Completed status' 
+  });
+}
 
     // Validate supplier
     const supplier = await Supplier.findById(supplierId);
@@ -241,11 +244,9 @@ exports.updatePurchase = async (req, res) => {
     const purchase = await Purchase.findById(id).session(session);
 
 
-
-    if(status === 'Completed' && payment?.amountPaid < (summary.subTotal + (summary.otherCharges || 0) - (summary.discount || 0))){
-      return res.status(400).json({ success: false, message: 'Amount paid is insufficient for a Completed purchase' });
-    }
-
+if(status === 'Completed' && payment?.amountPaid < (summary.subTotal + (summary.otherCharges || 0) - (summary.discount || 0))){
+  return res.status(400).json({ success: false, message: 'Amount paid is insufficient for a Completed purchase' });
+}
 
 
     if(purchase.status === 'Completed' && purchase.payment.amountDue === 0){
