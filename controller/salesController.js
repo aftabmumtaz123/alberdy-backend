@@ -12,6 +12,11 @@ exports.createSale = async (req, res) => {
       return res.status(400).json({ status: false, message: 'Customer ID, products, and summary are required' });
     }
 
+
+    if(status === "Completed" && payment?.amountPaid < (summary.subTotal + (summary.otherCharges || 0) - (summary.discount || 0))){
+      return res.status(400).json({ status: false, message: 'Amount paid is insufficient for a Completed sale' });
+    }
+
     // Validate summary fields
     const { otherCharges = 0, discount = 0 } = summary;
     if (typeof otherCharges !== 'number' || otherCharges < 0) {
@@ -404,6 +409,7 @@ exports.updateSale = async (req, res) => {
 
     // Fetch sale
     const sale = await Sale.findById(id).session(session);
+
 
     if (sale.status === 'Completed' && sale.payment.amountDue === 0 ) {
       return res.status(400).json({ status: false, message: 'Completed sales cannot be updated' });
