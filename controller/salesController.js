@@ -411,6 +411,12 @@ exports.updateSale = async (req, res) => {
     const sale = await Sale.findById(id).session(session);
 
 
+  if(status === "Completed" && payment?.amountPaid < (summary.subTotal + (summary.otherCharges || 0) - (summary.discount || 0))){
+      return res.status(400).json({ status: false, message: 'Amount paid is insufficient for a Completed sale' });
+    }
+
+
+
     if (sale.status === 'Completed' && sale.payment.amountDue === 0 ) {
       return res.status(400).json({ status: false, message: 'Completed sales cannot be updated' });
     };

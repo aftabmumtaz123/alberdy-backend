@@ -5,7 +5,7 @@ const mongoose = require('mongoose');
 
 exports.createPurchase = async (req, res) => {
   try {
-    const { supplierId, products, summary, payment, notes } = req.body;
+    const { supplierId, products, summary, payment, notes, status } = req.body;
 
     // Validate summary object
     if (!summary || typeof summary !== 'object') {
@@ -19,6 +19,10 @@ exports.createPurchase = async (req, res) => {
     }
     if (typeof discount !== 'number' || discount < 0) {
       return res.status(400).json({ success: false, message: 'discount must be a non-negative number' });
+    }
+
+    if(status === "Completed" && payment?.amountPaid < (summary.subTotal + otherCharges - discount)){
+      return res.status(400).json({ success: false, message: 'Amount paid is insufficient for a Completed purchase' });
     }
 
     // Validate supplier
@@ -235,6 +239,13 @@ exports.updatePurchase = async (req, res) => {
 
     // Fetch purchase
     const purchase = await Purchase.findById(id).session(session);
+
+
+
+    if(status === 'Completed' && payment?.amountPaid < (summary.subTotal + (summary.otherCharges || 0) - (summary.discount || 0))){
+      return res.status(400).json({ success: false, message: 'Amount paid is insufficient for a Completed purchase' });
+    }
+
 
 
     if(purchase.status === 'Completed' && purchase.payment.amountDue === 0){
