@@ -28,21 +28,21 @@ productSchema.index({ brand: 1 });
 
 
 
-// // Auto exclude soft-deleted documents in all queries
-// productSchema.pre(/^find/, function(next) {
-//   this.where({ isDeleted: { $ne: true } });
-//   next();
-// });
+// Auto exclude soft-deleted documents in all queries
+productSchema.pre(/^find/, function(next) {
+  this.where({ isDeleted: { $ne: true } });
+  next();
+});
 
-// productSchema.pre('findOne', function(next) {
-//   this.where({ isDeleted: { $ne: true } });
-//   next();
-// });
+productSchema.pre('findOne', function(next) {
+  this.where({ isDeleted: { $ne: true } });
+  next();
+});
 
-// productSchema.pre('aggregate', function(next) {
-//   this.pipeline().unshift({ $match: { isDeleted: { $ne: true } } });
-//   next();
-// });
+productSchema.pre('aggregate', function(next) {
+  this.pipeline().unshift({ $match: { isDeleted: { $ne: true } } });
+  next();
+});
 
 
 
