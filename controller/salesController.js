@@ -89,8 +89,8 @@ exports.createSale = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
     }
 
-    // === PAYMENT ===
-    const amountPaid = payment?.amountPaid ?? 0;
+        // === 4. PAYMENT ===
+    const amountPaid = payment?.amountPaid >= 0 ? payment.amountPaid : 0;
     const amountDue = grandTotal - amountPaid;
 
     if (amountDue < 0) {
@@ -102,17 +102,17 @@ exports.createSale = async (req, res) => {
     let finalStatus;
 
 if (status === 'Completed') {
-  if (payment.amountDue > 0) {
+  if (amountDue > 0) {
     await session.abortTransaction();
     return res.status(400).json({ success: false, message: 'Full payment required to create sale as Completed' });
   }
   finalStatus = 'Completed';
 }
-else if (status === 'Pending' && payment.amountPaid > 0) {
+else if (status === 'Pending' && amountPaid > 0) {
   await session.abortTransaction();
   return res.status(400).json({ success: false, message: 'Cannot create sale as Pending when payment is received' });
 }
-else if (status === 'Partial' && payment.amountDue === 0) {
+else if (status === 'Partial' && amountDue === 0) {
   finalStatus = 'Completed'; // Auto-upgrade to Completed
 }
 else if (status && ['Pending', 'Partial'].includes(status)) {
@@ -120,9 +120,9 @@ else if (status && ['Pending', 'Partial'].includes(status)) {
 }
 else {
   // Auto-determine status — CORRECT LOGIC
-  finalStatus = payment.amountDue === 0
+  finalStatus = amountDue === 0
     ? 'Completed'
-    : payment.amountPaid > 0
+    : amountPaid > 0
       ? 'Partial'   // ← This fixes your bug
       : 'Pending';
 }
