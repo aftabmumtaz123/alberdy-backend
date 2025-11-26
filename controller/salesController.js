@@ -519,9 +519,17 @@ exports.updateSale = async (req, res) => {
     for (const prod of products) {
       const { variantId, quantity, price, unitCost, taxPercent = 0, taxType = 'Exclusive' } = prod;
 
-      if (!variantId || !quantity || !price || !unitCost) {
-         
-        return res.status(400).json({ success: false, message: 'variantId, quantity, price, unitCost required' });
+      if(!mongoose.Types.ObjectId.isValid(variantId)) {
+        return res.status(400).json({ success: false, message: `Invalid variant ID: ${variantId}` });
+      }
+      if(!quantity){
+        return res.status(400).json({ success: false, message: 'Quantity is required' });
+      }
+      if(!price){
+        return res.status(400).json({ success: false, message: 'Price is required' });
+      }
+      if(!unitCost){
+        return res.status(400).json({ success: false, message: 'Unit cost is required' });
       }
 
       if (quantity < 1 || price < 0 || unitCost < 0) {
