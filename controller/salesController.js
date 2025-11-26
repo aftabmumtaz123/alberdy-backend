@@ -98,34 +98,34 @@ exports.createSale = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Overpayment not allowed' });
     }
 
-    // === FINAL STATUS LOGIC — EXACT SAME AS updateSale ===
+    
     let finalStatus;
 
-    if (status === 'Completed') {
-      if (amountDue > 0) {
-        await session.abortTransaction();
-        return res.status(400).json({ success: false, message: 'Full payment required to create as Completed' });
-      }
-      finalStatus = 'Completed';
-    }
-    else if (status === 'Pending' && amountPaid > 0) {
-      await session.abortTransaction();
-      return res.status(400).json({ success: false, message: 'Cannot create as Pending when payment is received' });
-    }
-    else if (status === 'Partial' && amountDue === 0) {
-      finalStatus = 'Completed'; // Auto-upgrade
-    }
-    else if (status && ['Pending', 'Partial'].includes(status)) {
-      finalStatus = status;
-    }
-    else {
-      // AUTO-DETERMINE — This is the correct logic
-      finalStatus = amountDue === 0
-        ? 'Completed'
-        : amountPaid > 0
-          ? 'Partial'
-          : 'Pending';
-    }
+if (status === 'Completed') {
+  if (payment.amountDue > 0) {
+    await session.abortTransaction();
+    return res.status(400).json({ success: false, message: 'Full payment required to create sale as Completed' });
+  }
+  finalStatus = 'Completed';
+}
+else if (status === 'Pending' && payment.amountPaid > 0) {
+  await session.abortTransaction();
+  return res.status(400).json({ success: false, message: 'Cannot create sale as Pending when payment is received' });
+}
+else if (status === 'Partial' && payment.amountDue === 0) {
+  finalStatus = 'Completed'; // Auto-upgrade to Completed
+}
+else if (status && ['Pending', 'Partial'].includes(status)) {
+  finalStatus = status;
+}
+else {
+  // Auto-determine status — CORRECT LOGIC
+  finalStatus = payment.amountDue === 0
+    ? 'Completed'
+    : payment.amountPaid > 0
+      ? 'Partial'   // ← This fixes your bug
+      : 'Pending';
+}
 
     // === GENERATE SALE CODE ===
     const lastSale = await Sale.findOne().sort({ createdAt: -1 }).select('saleCode').session(session);
@@ -200,7 +200,7 @@ exports.createSale = async (req, res) => {
         _id: populatedSale._id,
         saleCode: populatedSale.saleCode,
         date: populatedSale.date,
-        status: populatedSale.status,
+        status: finalStatus,
         customer: {
           id: populatedSale.customerId?._id,
           name: populatedSale.customerId?.name || 'Walk-in',
