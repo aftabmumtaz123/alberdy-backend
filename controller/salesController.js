@@ -13,12 +13,12 @@ exports.createSale = async (req, res) => {
 
     // === BASIC VALIDATION ===
     if (!customerId || !products || !summary) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Customer ID, products, and summary are required' });
     }
 
     if (!Array.isArray(products) || products.length === 0) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Products array cannot be empty' });
     }
 
@@ -27,7 +27,7 @@ exports.createSale = async (req, res) => {
     // Validate customer
     const customer = await User.findById(customerId).session(session);
     if (!customer) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Invalid customer' });
     }
 
@@ -41,23 +41,23 @@ exports.createSale = async (req, res) => {
       const { variantId, quantity, price, unitCost, taxPercent = 0, taxType = 'Exclusive' } = prod;
 
       if (!variantId || !quantity || !price || !unitCost) {
-        await session.abortTransaction();
+         
         return res.status(400).json({ success: false, message: 'variantId, quantity, price, unitCost required' });
       }
 
       if (quantity < 1 || price < 0 || unitCost < 0) {
-        await session.abortTransaction();
+         
         return res.status(400).json({ success: false, message: 'Invalid quantity or price' });
       }
 
       const variant = await Variant.findById(variantId).session(session);
       if (!variant || variant.status === 'Inactive') {
-        await session.abortTransaction();
+         
         return res.status(400).json({ success: false, message: `Invalid or inactive variant: ${variantId}` });
       }
 
       if (variant.stockQuantity < quantity) {
-        await session.abortTransaction();
+         
         return res.status(400).json({
           success: false,
           message: `Insufficient stock for ${variant.sku || variantId}. Available: ${variant.stockQuantity}, Required: ${quantity}`,
@@ -85,7 +85,7 @@ exports.createSale = async (req, res) => {
 
     const grandTotal = subtotal + otherCharges - discount;
     if (grandTotal < 0) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
     }
 
@@ -94,7 +94,7 @@ exports.createSale = async (req, res) => {
     const amountDue = grandTotal - amountPaid;
 
     if (amountDue < 0) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Overpayment not allowed' });
     }
 
@@ -103,13 +103,13 @@ exports.createSale = async (req, res) => {
 
 if (status === 'Completed') {
   if (amountDue > 0) {
-    await session.abortTransaction();
+     
     return res.status(400).json({ success: false, message: 'Full payment required to create sale as Completed' });
   }
   finalStatus = 'Completed';
 }
 else if (status === 'Pending' && amountPaid > 0) {
-  await session.abortTransaction();
+   
   return res.status(400).json({ success: false, message: 'Cannot create sale as Pending when payment is received' });
 }
 else if (status === 'Partial' && amountDue === 0) {
@@ -234,7 +234,7 @@ else {
     });
 
   } catch (error) {
-    await session.abortTransaction();
+     
     console.error('Create Sale Error:', error);
     return res.status(500).json({
       success: false,
@@ -393,7 +393,7 @@ exports.deleteSale = async (req, res) => {
       if (product.variantId && mongoose.Types.ObjectId.isValid(product.variantId)) {
         const variant = await Variant.findById(product.variantId).session(session);
         if (!variant) {
-          await session.abortTransaction();
+           
           return res.status(400).json({ status: false, message: `Invalid variant: ${product.variantId}` });
         }
         await Variant.findByIdAndUpdate(
@@ -418,7 +418,7 @@ exports.deleteSale = async (req, res) => {
     await session.commitTransaction();
     res.status(200).json({ status: true, message: `Sale ${sale.saleCode} soft deleted successfully` });
   } catch (error) {
-    await session.abortTransaction();
+     
     console.error('Error deleting sale:', error);
     res.status(500).json({ status: false, message: 'Server error', error: error.message });
   } finally {
@@ -439,24 +439,24 @@ exports.updateSale = async (req, res) => {
 
     // Validate ID
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Invalid sale ID' });
     }
 
     // Fetch sale
     const sale = await Sale.findById(id).session(session);
     if (!sale || sale.isDeleted) {
-      await session.abortTransaction();
+       
       return res.status(404).json({ success: false, message: 'Sale not found or deleted' });
     }
 
     // Block editing of Completed or Cancelled sales (except for cancellation)
     if (sale.status === 'Completed') {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Cannot modify a Completed sale' });
     }
     if (sale.status === 'Cancelled') {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Cannot modify a Cancelled sale' });
     }
 
@@ -495,7 +495,7 @@ exports.updateSale = async (req, res) => {
     // 2. NORMAL UPDATE VALIDATION
     // ==================================================================
     if (!customerId || !products || !Array.isArray(products) || products.length === 0 || !summary) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Customer, products, and summary are required' });
     }
 
@@ -504,7 +504,7 @@ exports.updateSale = async (req, res) => {
     // Validate customer
     const customer = await User.findById(customerId).session(session);
     if (!customer) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Invalid customer' });
     }
 
@@ -520,18 +520,18 @@ exports.updateSale = async (req, res) => {
       const { variantId, quantity, price, unitCost, taxPercent = 0, taxType = 'Exclusive' } = prod;
 
       if (!variantId || !quantity || !price || !unitCost) {
-        await session.abortTransaction();
+         
         return res.status(400).json({ success: false, message: 'variantId, quantity, price, unitCost required' });
       }
 
       if (quantity < 1 || price < 0 || unitCost < 0) {
-        await session.abortTransaction();
+         
         return res.status(400).json({ success: false, message: 'Invalid quantity or price' });
       }
 
       const variant = await Variant.findById(variantId).session(session);
       if (!variant || variant.status === 'Inactive') {
-        await session.abortTransaction();
+         
         return res.status(400).json({ success: false, message: `Invalid or inactive variant: ${variantId}` });
       }
 
@@ -541,7 +541,7 @@ exports.updateSale = async (req, res) => {
       const availableStock = variant.stockQuantity + oldQty;
 
       if (availableStock < quantity) {
-        await session.abortTransaction();
+         
         return res.status(400).json({
           success: false,
           message: `Insufficient stock for ${variant.sku || variantId}. Available: ${availableStock}, Requested: ${quantity}`,
@@ -571,7 +571,7 @@ exports.updateSale = async (req, res) => {
 
     const grandTotal = subtotal + otherCharges - discount;
     if (grandTotal < 0) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
     }
 
@@ -582,7 +582,7 @@ exports.updateSale = async (req, res) => {
     const amountDue = grandTotal - amountPaid;
 
     if (amountDue < 0) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Overpayment not allowed' });
     }
 
@@ -593,13 +593,13 @@ exports.updateSale = async (req, res) => {
 
     if (status === 'Completed') {
       if (amountDue > 0) {
-        await session.abortTransaction();
+         
         return res.status(400).json({ success: false, message: 'Full payment required to mark as Completed' });
       }
       finalStatus = 'Completed';
     }
     else if (status === 'Pending' && amountPaid > 0) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Cannot set Pending after receiving payment' });
     }
     else if (status === 'Partial' && amountDue === 0) {
@@ -619,7 +619,7 @@ exports.updateSale = async (req, res) => {
 
     // Prevent downgrading from Completed
     if (sale.status === 'Completed' && finalStatus !== 'Completed') {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Cannot downgrade status from Completed' });
     }
 
@@ -748,7 +748,7 @@ exports.updateSale = async (req, res) => {
     });
 
   } catch (error) {
-    await session.abortTransaction();
+     
     console.error('Update Sale Error:', error);
     return res.status(500).json({
       success: false,
