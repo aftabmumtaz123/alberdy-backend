@@ -81,17 +81,16 @@ app.use('/api/inventory', require('./router/inventoryRoutes'));
 
 
 
+app.use('/api/push', require('./router/push')); 
+
+
 app.get("/",(req,res)=>{
   res.json({Message: "API's are running well bro!!"})
 })
 
 
 
-// generate-vapid.js
-const webPush = require('web-push');
 
-const vapidKeys = webPush.generateVAPIDKeys();
-console.log(vapidKeys);
 
 
 
