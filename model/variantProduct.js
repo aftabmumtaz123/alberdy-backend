@@ -125,4 +125,22 @@ variantSchema.index({ isDeleted: 1 });
 
 
 
+variantSchema.pre(/^find/, function(next) {
+  this.where({ isDeleted: { $ne: true } });
+  next();
+});
+
+variantSchema.pre('findOne', function(next) {
+  this.where({ isDeleted: { $ne: true } });
+  next();
+});
+
+variantSchema.pre('aggregate', function(next) {
+  this.pipeline().unshift({ $match: { isDeleted: { $ne: true } } });
+  next();
+});
+
+
+
+
 module.exports = mongoose.model('Variant', variantSchema);

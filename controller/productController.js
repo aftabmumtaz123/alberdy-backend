@@ -232,7 +232,7 @@ exports.createProduct = async (req, res) => {
     }
 
     // Prevent duplicate product name + brand
-    const existingProduct = await Product.findOne({ name: name.trim(), brand: brand._id });
+    const existingProduct = await Product.findOne({ name: name.trim(), brand: brand._id, isDeleted: false });
     if (existingProduct) {
       await cleanupAllFiles();
       return res.status(400).json({ success: false, msg: 'Product with this name already exists under this brand' });
@@ -1110,51 +1110,79 @@ exports.updateProduct = async (req, res) => {
   }
 };
 
+
+
+
 exports.deleteProduct = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const product = await Product.findById(req.params.id);
-    if (!product) return res.status(404).json({ success: false, msg: 'Product not found' });
+    const { id } = req.params;
 
-    // Load full variants only to delete images
-    const variants = await Variant.find({ product: product._id });
-
-    // Delete variant images
-    for (const v of variants) {
-      if (v.image) {
-        try { await fs.unlink(v.image); } catch {}
-      }
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, msg: 'Invalid product ID' });
     }
 
-    // Delete product images
-    if (product.images?.length) {
-      for (const img of product.images) {
-        try { await fs.unlink(img); } catch {}
-      }
-    }
-    if (product.thumbnail) {
-      try { await fs.unlink(product.thumbnail); } catch {}
+    // Find product (middleware already excludes deleted ones)
+    const product = await Product.findById(id);
+    if (!product) {
+      return res.status(404).json({ success: false, msg: 'Product not found' });
     }
 
-    // Delete everything in one go
-    await Promise.all([
-      Variant.deleteMany({ product: product._id }, { session }),
-      Product.findByIdAndDelete(product._id, { session }),
-    ]);
+    const now = new Date();
+
+    // Soft delete product
+    await Product.findByIdAndUpdate(
+      id,
+      { isDeleted: true, deletedAt: now, status: 'Inactive' },
+      { session }
+    );
+
+    // Soft delete all variants
+    await Variant.updateMany(
+      { product: id },
+      { isDeleted: true, deletedAt: now, status: 'Inactive' },
+      { session }
+    );
 
     await session.commitTransaction();
 
-    res.json({ success: true, msg: 'Product deleted completely' });
+    return res.json({
+      success: true,
+      msg: 'Product and variants moved to trash (soft deleted)',
+    });
+
   } catch (err) {
     await session.abortTransaction();
-    console.error(err);
-    res.status(500).json({ success: false, msg: 'Delete failed', error: err.message });
+    console.error('Soft delete failed:', err);
+    return res.status(500).json({
+      success: false,
+      msg: 'Failed to delete product',
+      error: err.message,
+    });
   } finally {
     session.endSession();
   }
 };
 
+exports.restoreProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
 
+    await Product.findByIdAndUpdate(id, {
+      isDeleted: false,
+      deletedAt: null,
+      status: 'Active'
+    });
 
+    await Variant.updateMany(
+      { product: id },
+      { isDeleted: false, deletedAt: null, status: 'Active' }
+    );
+
+    res.json({ success: true, msg: 'Product restored successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, msg: 'Restore failed' });
+  }
+};

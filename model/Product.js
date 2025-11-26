@@ -12,17 +12,45 @@ const productSchema = new mongoose.Schema({
   thumbnail: { type: String },
   description: { type: String },
   status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
+
+  // Soft Delete Fields
+  isDeleted: { type: Boolean, default: false },
+  deletedAt: { type: Date, default: null },
+
   variations: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Variant' }],
+  
 }, { timestamps: true });
 
 // Indexes (removed stockQuantity index as it's now in Variant)
 productSchema.index({ category: 1, subcategory: 1 });
 productSchema.index({ brand: 1 });
 
+
+
+
+// Auto exclude soft-deleted documents in all queries
+productSchema.pre(/^find/, function(next) {
+  this.where({ isDeleted: { $ne: true } });
+  next();
+});
+
+productSchema.pre('findOne', function(next) {
+  this.where({ isDeleted: { $ne: true } });
+  next();
+});
+
+productSchema.pre('aggregate', function(next) {
+  this.pipeline().unshift({ $match: { isDeleted: { $ne: true } } });
+  next();
+});
+
+
+
+
+
+
+
+
 module.exports = mongoose.model('Product', productSchema);
-
-
-
-
 
 
