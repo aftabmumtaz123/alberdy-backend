@@ -255,7 +255,6 @@ exports.getPurchaseById = async (req, res) => {
 };
 
 
-
 exports.updatePurchase = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -264,14 +263,20 @@ exports.updatePurchase = async (req, res) => {
     const { id } = req.params;
     const { supplierId, products, summary, payment, notes, status } = req.body;
 
-    // Find existing purchase
-    const purchase = await Purchase.findById(id).session(session);
-    if (!purchase) {
+    // Validate ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       await session.abortTransaction();
-      return res.status(404).json({ success: false, message: 'Purchase not found' });
+      return res.status(400).json({ success: false, message: 'Invalid purchase ID' });
     }
 
-    // Block editing of Completed or Cancelled purchases (except for cancellation flow)
+    // Fetch purchase
+    const purchase = await Purchase.findById(id).session(session);
+    if (!purchase || purchase.isDeleted) {
+      await session.abortTransaction();
+      return res.status(404).json({ success: false, message: 'Purchase not found or deleted' });
+    }
+
+    // Block editing of Completed or Cancelled purchases (except cancellation flow)
     if (purchase.status === 'Completed') {
       await session.abortTransaction();
       return res.status(400).json({ success: false, message: 'Cannot modify a Completed purchase' });
@@ -282,45 +287,48 @@ exports.updatePurchase = async (req, res) => {
     }
 
     // ==================================================================
-    // 1. HANDLE CANCELLATION (Special Case)
+    // 1. HANDLE CANCELLATION — KEEP ALL DATA, JUST MARK + RESTORE STOCK
     // ==================================================================
     if (status === 'Cancelled' && purchase.status !== 'Cancelled') {
-      // Revert stock: remove purchased quantities
+      // Restore stock for all purchased items
       for (const item of purchase.products) {
         await Variant.findByIdAndUpdate(
           item.variantId,
-          { $inc: { stockQuantity: -item.quantity } },
+          { $inc: { stockQuantity: -item.quantity } }, // return stock
           { session }
         );
       }
 
+      // Keep everything: products, prices, summary — only update status & payment
       purchase.status = 'Cancelled';
       purchase.payment.amountPaid = 0;
       purchase.payment.amountDue = 0;
-      purchase.summary = { subtotal: 0, otherCharges: 0, discount: 0, grandTotal: 0 };
-      purchase.notes = notes ? `${purchase.notes || ''}\n[Cancelled] ${notes}`.trim() : `${purchase.notes || ''} [Cancelled]`.trim();
+
+      // Optional: append cancellation note
+      const cancelNote = notes ? `[CANCELLED] ${notes}` : '[CANCELLED]';
+      purchase.notes = purchase.notes ? `${purchase.notes}\n${cancelNote}`.trim() : cancelNote;
 
       await purchase.save({ session });
       await session.commitTransaction();
 
       return res.json({
         success: true,
-        message: 'Purchase cancelled successfully and stock reverted',
+        message: 'Purchase cancelled successfully. Stock restored.',
         data: purchase,
       });
     }
 
     // ==================================================================
-    // 2. VALIDATE INPUT FOR NORMAL UPDATE
+    // 2. NORMAL UPDATE (Pending / Partial → Edit)
     // ==================================================================
-    if (!products || !Array.isArray(products) || products.length === 0) {
+    if (!supplierId && !purchase.supplierId) {
       await session.abortTransaction();
-      return res.status(400).json({ success: false, message: 'Products array is required and cannot be empty' });
+      return res.status(400).json({ success: false, message: 'Supplier is required' });
     }
 
-    if (!summary || typeof summary !== 'object') {
+    if (!products || !Array.isArray(products) || products.length === 0 || !summary) {
       await session.abortTransaction();
-      return res.status(400).json({ success: false, message: 'Summary object is required' });
+      return res.status(400).json({ success: false, message: 'Products and summary are required' });
     }
 
     const { otherCharges = 0, discount = 0 } = summary;
@@ -329,19 +337,19 @@ exports.updatePurchase = async (req, res) => {
     const newProductItems = [];
 
     // ==================================================================
-    // 3. PROCESS EACH PRODUCT LINE + VALIDATE STOCK
+    // 3. PROCESS PRODUCTS + VALIDATE STOCK
     // ==================================================================
     for (const item of products) {
       const { variantId, quantity, unitPrice, taxPercent = 0 } = item;
 
-      if (!variantId || !quantity || !unitPrice) {
+      if (!variantId || !quantity || unitPrice === undefined) {
         await session.abortTransaction();
-        return res.status(400).json({ success: false, message: 'variantId, quantity, and unitPrice are required' });
+        return res.status(400).json({ success: false, message: 'variantId, quantity, and unitPrice required' });
       }
 
       if (quantity <= 0 || unitPrice < 0) {
         await session.abortTransaction();
-        return res.status(400).json({ success: false, message: 'Quantity must be > 0 and unitPrice >= 0' });
+        return res.status(400).json({ success: false, message: 'Invalid quantity or price' });
       }
 
       const variant = await Variant.findById(variantId).session(session);
@@ -350,17 +358,16 @@ exports.updatePurchase = async (req, res) => {
         return res.status(400).json({ success: false, message: `Invalid or inactive variant: ${variantId}` });
       }
 
-      // Find old quantity (if exists)
       const oldItem = purchase.products.find(p => p.variantId.toString() === variantId.toString());
       const oldQty = oldItem ? oldItem.quantity : 0;
-      const qtyDiff = quantity - oldQty; // positive = increase, negative = decrease
+      const qtyDiff = quantity - oldQty;
 
-      // If reducing quantity, check available stock
+      // If reducing quantity → check stock availability
       if (qtyDiff < 0 && variant.stockQuantity < Math.abs(qtyDiff)) {
         await session.abortTransaction();
         return res.status(400).json({
           success: false,
-          message: `Not enough stock to reduce quantity for ${variant.sku || variantId}. Required: ${Math.abs(qtyDiff)}, Available: ${variant.stockQuantity}`,
+          message: `Not enough stock to reduce quantity for ${variant.sku || variantId}`,
         });
       }
 
@@ -378,25 +385,25 @@ exports.updatePurchase = async (req, res) => {
       });
     }
 
-    const grandTotal = subtotal + (otherCharges || 0) - (discount || 0);
+    const grandTotal = subtotal + otherCharges - discount;
     if (grandTotal < 0) {
       await session.abortTransaction();
       return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
     }
 
     // ==================================================================
-    // 4. PAYMENT CALCULATION
+    // 4. PAYMENT HANDLING
     // ==================================================================
     const amountPaid = payment?.amountPaid !== undefined ? payment.amountPaid : purchase.payment.amountPaid;
     const amountDue = grandTotal - amountPaid;
 
     if (amountDue < 0) {
       await session.abortTransaction();
-      return res.status(400).json({ success: false, message: 'Overpayment is not allowed' });
+      return res.status(400).json({ success: false, message: 'Overpayment not allowed' });
     }
 
     // ==================================================================
-    // 5. FINAL STATUS DETERMINATION (SECURE & ACCURATE)
+    // 5. FINAL STATUS LOGIC — SAME AS SALE (Secure & Smart)
     // ==================================================================
     let finalStatus;
 
@@ -409,7 +416,7 @@ exports.updatePurchase = async (req, res) => {
     }
     else if (status === 'Pending' && amountPaid > 0) {
       await session.abortTransaction();
-      return res.status(400).json({ success: false, message: 'Cannot set status to Pending after receiving payment' });
+      return res.status(400).json({ success: false, message: 'Cannot set Pending after receiving payment' });
     }
     else if (status === 'Partial' && amountDue === 0) {
       finalStatus = 'Completed'; // Auto-upgrade
@@ -418,7 +425,6 @@ exports.updatePurchase = async (req, res) => {
       finalStatus = status;
     }
     else {
-      // Auto-determine status (recommended)
       finalStatus = amountDue === 0
         ? 'Completed'
         : amountPaid > 0
@@ -426,41 +432,42 @@ exports.updatePurchase = async (req, res) => {
           : 'Pending';
     }
 
-    // Prevent downgrading from Completed (safety net)
+    // Prevent downgrading from Completed
     if (purchase.status === 'Completed' && finalStatus !== 'Completed') {
       await session.abortTransaction();
       return res.status(400).json({ success: false, message: 'Cannot downgrade status from Completed' });
     }
 
     // ==================================================================
-    // 6. UPDATE STOCK QUANTITIES
+    // 6. RESTORE OLD STOCK FIRST
+    // ==================================================================
+    for (const old of purchase.products) {
+      const stillExists = newProductItems.some(p => p.variantId.toString() === old.variantId.toString());
+      const oldQty = old.quantity;
+
+      if (!stillExists) {
+        // Fully removed → return stock
+        await Variant.findByIdAndUpdate(old.variantId, { $inc: { stockQuantity: -oldQty } }, { session });
+      }
+    }
+
+    // ==================================================================
+    // 7. APPLY NEW STOCK CHANGES
     // ==================================================================
     for (const item of newProductItems) {
       const oldItem = purchase.products.find(p => p.variantId.toString() === item.variantId.toString());
       const qtyDiff = oldItem ? item.quantity - oldItem.quantity : item.quantity;
 
-      const updateStock = { $inc: { stockQuantity: qtyDiff } };
+      const stockUpdate = { $inc: { stockQuantity: qtyDiff } };
       if (!oldItem || oldItem.unitPrice !== item.unitPrice) {
-        updateStock.$set = { purchasePrice: item.unitPrice };
+        stockUpdate.$set = { purchasePrice: item.unitPrice };
       }
 
-      await Variant.findByIdAndUpdate(item.variantId, updateStock, { session });
-    }
-
-    // Handle removed products: return their stock
-    for (const old of purchase.products) {
-      const stillExists = newProductItems.some(p => p.variantId.toString() === old.variantId.toString());
-      if (!stillExists) {
-        await Variant.findByIdAndUpdate(
-          old.variantId,
-          { $inc: { stockQuantity: -old.quantity } },
-          { session }
-        );
-      }
+      await Variant.findByIdAndUpdate(item.variantId, stockUpdate, { session });
     }
 
     // ==================================================================
-    // 7. SAVE PURCHASE WITH FINAL VALUES
+    // 8. SAVE PURCHASE
     // ==================================================================
     purchase.set({
       supplierId: supplierId || purchase.supplierId,
@@ -481,7 +488,7 @@ exports.updatePurchase = async (req, res) => {
       payment: {
         amountPaid,
         amountDue,
-        type: payment?.type || purchase.payment.type || 'Cash',
+        type: payment?.type || purchase.payment.type,
       },
       notes: notes !== undefined ? notes : purchase.notes,
       status: finalStatus,
@@ -492,7 +499,7 @@ exports.updatePurchase = async (req, res) => {
     await session.commitTransaction();
 
     // ==================================================================
-    // 8. RETURN POPULATED RESPONSE
+    // 9. RETURN POPULATED RESPONSE
     // ==================================================================
     const updatedPurchase = await Purchase.findById(id)
       .populate('supplierId', 'supplierName contact phone')
