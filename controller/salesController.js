@@ -3,218 +3,249 @@ const Variant = require('../model/variantProduct');
 const User = require('../model/User');
 const mongoose = require('mongoose');
 
+
 exports.createSale = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { date, customerId, products, summary, payment, notes, status } = req.body;
 
-    // Validate required fields
+    // === BASIC VALIDATION ===
     if (!customerId || !products || !summary) {
-      return res.status(400).json({ status: false, message: 'Customer ID, products, and summary are required' });
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, message: 'Customer ID, products, and summary are required' });
     }
 
-
-    if(status === "Completed" && payment?.amountPaid < (summary.subTotal + (summary.otherCharges || 0) - (summary.discount || 0))){
-      return res.status(400).json({ status: false, message: 'Amount paid is insufficient for a Completed sale' });
+    if (!Array.isArray(products) || products.length === 0) {
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, message: 'Products array cannot be empty' });
     }
 
-    // Validate summary fields
     const { otherCharges = 0, discount = 0 } = summary;
-    if (typeof otherCharges !== 'number' || otherCharges < 0) {
-      return res.status(400).json({ status: false, message: 'otherCharges must be a non-negative number' });
-    }
-    if (typeof discount !== 'number' || discount < 0) {
-      return res.status(400).json({ status: false, message: 'discount must be a non-negative number' });
-    }
 
     // Validate customer
-    const customer = await User.findById(customerId);
-    if (!customer) return res.status(400).json({ status: false, message: 'Invalid customer' });
-
-    // Validate products
-    if (!Array.isArray(products) || products.length === 0) {
-      return res.status(400).json({ status: false, message: 'Products array is required and cannot be empty' });
+    const customer = await User.findById(customerId).session(session);
+    if (!customer) {
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, message: 'Invalid customer' });
     }
 
-    let subTotal = 0;
-    let totalQuantity = 0;
+    // === PROCESS PRODUCTS ===
+    let subtotal = 0;
     let taxTotal = 0;
+    let totalQuantity = 0;
     const validatedProducts = [];
-    for (let prod of products) {
-      if (!prod.variantId || !prod.quantity || !prod.price || !prod.unitCost) {
-        return res.status(400).json({ status: false, message: 'Each product must have variantId, quantity, price, and unitCost' });
+
+    for (const prod of products) {
+      const { variantId, quantity, price, unitCost, taxPercent = 0, taxType = 'Exclusive' } = prod;
+
+      if (!variantId || !quantity || !price || !unitCost) {
+        await session.abortTransaction();
+        return res.status(400).json({ success: false, message: 'variantId, quantity, price, unitCost required' });
       }
-      if (prod.quantity < 1 || prod.price < 0 || prod.unitCost < 0 || (prod.taxPercent && prod.taxPercent < 0)) {
-        return res.status(400).json({ status: false, message: 'Quantity, price, unitCost, and taxPercent must be valid' });
+
+      if (quantity < 1 || price < 0 || unitCost < 0) {
+        await session.abortTransaction();
+        return res.status(400).json({ success: false, message: 'Invalid quantity or price' });
       }
-      if (prod.taxType && !['Inclusive', 'Exclusive'].includes(prod.taxType)) {
-        return res.status(400).json({ status: false, message: 'taxType must be Inclusive or Exclusive' });
-      }
-      const variant = await Variant.findById(prod.variantId);
+
+      const variant = await Variant.findById(variantId).session(session);
       if (!variant || variant.status === 'Inactive') {
-        return res.status(400).json({ status: false, message: `Invalid or inactive variant: ${prod.variantId}` });
+        await session.abortTransaction();
+        return res.status(400).json({ success: false, message: `Invalid or inactive variant: ${variantId}` });
       }
-      if (variant.stockQuantity < prod.quantity) {
-        return res.status(400).json({ status: false, message: `Insufficient stock for variant ${prod.variantId}` });
+
+      if (variant.stockQuantity < quantity) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient stock for ${variant.sku || variantId}. Available: ${variant.stockQuantity}, Required: ${quantity}`,
+        });
       }
-      const taxAmount = (prod.price * prod.quantity * (prod.taxPercent || 0)) / 100 * (prod.taxType === 'Exclusive' ? 1 : 0);
-      const productTotal = prod.price * prod.quantity + taxAmount;
-      subTotal += productTotal;
+
+      const taxAmount = taxType === 'Exclusive' ? (price * quantity * taxPercent) / 100 : 0;
+      const lineTotal = price * quantity + taxAmount;
+
+      subtotal += lineTotal;
       taxTotal += taxAmount;
-      totalQuantity += prod.quantity;
-      validatedProducts.push({ 
-        variantId: prod.variantId, 
-        quantity: prod.quantity, 
-        price: prod.price, 
-        taxPercent: prod.taxPercent || 0, 
-        taxType: prod.taxType || 'Exclusive', 
-        unitCost: prod.unitCost 
+      totalQuantity += quantity;
+
+      validatedProducts.push({
+        variantId,
+        quantity,
+        price,
+        unitCost,
+        taxPercent,
+        taxType,
+        taxAmount,
+        lineTotal,
       });
     }
 
-    // Validate summary calculations
-    const grandTotal = subTotal + otherCharges - discount;
-    if (grandTotal < 0) return res.status(400).json({ status: false, message: 'Grand total cannot be negative' });
-
-    // Validate payment
-    if (payment) {
-      if (typeof payment.amountPaid !== 'number' || payment.amountPaid < 0) {
-        return res.status(400).json({ status: false, message: 'payment.amountPaid must be a non-negative number' });
-      }
-      if (payment.type && !['Cash', 'Card', 'Online', 'BankTransfer'].includes(payment.type)) {
-        return res.status(400).json({ status: false, message: 'Invalid payment type' });
-      }
+    const grandTotal = subtotal + otherCharges - discount;
+    if (grandTotal < 0) {
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
     }
 
-    const amountPaid = payment?.amountPaid || 0;
+    // === PAYMENT ===
+    const amountPaid = payment?.amountPaid ?? 0;
     const amountDue = grandTotal - amountPaid;
+
     if (amountDue < 0) {
-      return res.status(400).json({ status: false, message: 'Amount paid cannot exceed grand total' });
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, message: 'Overpayment not allowed' });
     }
 
-    // Generate unique saleCode
-    let saleCode = `SALE-000001`;
-    let existing = await Sale.findOne().sort({ saleCode: -1 });
-    if (existing) {
-      let num = parseInt(existing.saleCode.split('-')[1]) + 1;
+    // === FINAL STATUS LOGIC — EXACT SAME AS updateSale ===
+    let finalStatus;
+
+    if (status === 'Completed') {
+      if (amountDue > 0) {
+        await session.abortTransaction();
+        return res.status(400).json({ success: false, message: 'Full payment required to create as Completed' });
+      }
+      finalStatus = 'Completed';
+    }
+    else if (status === 'Pending' && amountPaid > 0) {
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, message: 'Cannot create as Pending when payment is received' });
+    }
+    else if (status === 'Partial' && amountDue === 0) {
+      finalStatus = 'Completed'; // Auto-upgrade
+    }
+    else if (status && ['Pending', 'Partial'].includes(status)) {
+      finalStatus = status;
+    }
+    else {
+      // AUTO-DETERMINE — This is the correct logic
+      finalStatus = amountDue === 0
+        ? 'Completed'
+        : amountPaid > 0
+          ? 'Partial'
+          : 'Pending';
+    }
+
+    // === GENERATE SALE CODE ===
+    const lastSale = await Sale.findOne().sort({ createdAt: -1 }).select('saleCode').session(session);
+    let saleCode = 'SALE-000001';
+    if (lastSale && lastSale.saleCode) {
+      const num = parseInt(lastSale.saleCode.split('-')[1]) + 1;
       saleCode = `SALE-${String(num).padStart(6, '0')}`;
     }
-    while (await Sale.findOne({ saleCode })) {
-      let num = parseInt(saleCode.split('-')[1]) + 1;
-      saleCode = `SALE-${String(num).padStart(6, '0')}`;
-    }
 
-
-    let finalStatus = status;
-    if(!finalStatus){
-      finalStatus = amountPaid >= grandTotal ? 'Completed' : 'Pending';
-    }
-
-    // Create sale
+    // === CREATE SALE ===
     const sale = new Sale({
       saleCode,
-      date: date && new Date(date) <= new Date() ? date : Date.now(),
+      date: date ? new Date(date) : new Date(),
       customerId,
-      products: validatedProducts,
-      status,
-      payment: { 
-        type: payment?.type || null, 
-        amountPaid, 
-        amountDue, 
-        notes: payment?.notes || '' 
-      },
-      summary: { 
-        totalQuantity, 
-        subTotal, 
+      products: validatedProducts.map(p => ({
+        variantId: p.variantId,
+        quantity: p.quantity,
+        price: p.price,
+        unitCost: p.unitCost,
+        taxPercent: p.taxPercent,
+        taxType: p.taxType,
+        taxAmount: p.taxAmount,
+        lineTotal: p.lineTotal,
+      })),
+      summary: {
+        totalQuantity,
+        subTotal: subtotal,
         taxTotal,
-        discount, 
-        otherCharges, 
-        grandTotal 
+        discount: discount || 0,
+        otherCharges: otherCharges || 0,
+        grandTotal,
+      },
+      payment: {
+        type: payment?.type || 'Cash',
+        amountPaid,
+        amountDue,
+        notes: payment?.notes || '',
       },
       notes: notes || '',
+      status: finalStatus,
     });
 
-    await sale.save();
+    await sale.save({ session });
 
-    // Update inventory (skip if Cancelled)
-    if (status !== 'Cancelled') {
-      for (let prod of validatedProducts) {
-        await Variant.findByIdAndUpdate(prod.variantId, { $inc: { stockQuantity: -prod.quantity } });
-      }
+    // === DEDUCT STOCK ===
+    for (const item of validatedProducts) {
+      await Variant.findByIdAndUpdate(
+        item.variantId,
+        { $inc: { stockQuantity: -item.quantity } },
+        { session }
+      );
     }
 
-    // Populate response
+    await session.commitTransaction();
+
+    // === POPULATE RESPONSE ===
     const populatedSale = await Sale.findById(sale._id)
       .populate('customerId', 'name email phone')
       .populate({
         path: 'products.variantId',
-        select: 'sku attribute value unit purchasePrice price discountPrice stockQuantity expiryDate weightQuantity image',
         populate: [
-          { path: 'product', select: 'name images thumbnail description' },
-          { path: 'unit', select: 'name symbol' }
+          { path: 'product', select: 'name thumbnail' },
+          { path: 'unit', select: 'name symbol' },
         ],
-      });
+      })
+      .lean();
 
-    res.status(201).json({ 
-      status: true, 
-      message: 'Sale created successfully', 
+    return res.status(201).json({
+      success: true,
+      message: 'Sale created successfully',
       data: {
         _id: populatedSale._id,
         saleCode: populatedSale.saleCode,
         date: populatedSale.date,
         status: populatedSale.status,
-        notes: populatedSale.notes,
         customer: {
           id: populatedSale.customerId?._id,
-          name: populatedSale.customerId?.name || 'Walk-in Customer',
+          name: populatedSale.customerId?.name || 'Walk-in',
           email: populatedSale.customerId?.email || '',
           phone: populatedSale.customerId?.phone || '',
         },
-        products: populatedSale.products.map((product) => {
-          const variant = product.variantId;
-          const taxAmount = (product.price * product.quantity * (product.taxPercent || 0)) / 100 
-                          * (product.taxType === 'Exclusive' ? 1 : 0);
+        products: populatedSale.products.map(p => {
+          const v = p.variantId;
+          const taxAmt = p.taxType === 'Exclusive' ? (p.price * p.quantity * p.taxPercent) / 100 : 0;
           return {
-            variantId: variant?._id,
-            productName: variant?.product?.name || 'Unknown',
-            sku: variant?.sku || '',
-            attribute: variant?.attribute || '',
-            value: variant?.value || '',
-            weightQuantity: variant?.weightQuantity || '',
-            unit: variant?.unit?.name || 'Unknown',
-            unitSymbol: variant?.unit?.symbol || '',
-            image: variant?.product?.thumbnail || variant?.image || '',
-            quantity: product.quantity,
-            price: parseFloat(product.price.toFixed(2)),
-            unitCost: parseFloat(product.unitCost.toFixed(2)),
-            taxPercent: product.taxPercent || 0,
-            taxType: product.taxType || 'Exclusive',
-            taxAmount: parseFloat(taxAmount.toFixed(2)),
-            total: parseFloat((product.price * product.quantity + taxAmount).toFixed(2)),
+            variantId: v._id,
+            productName: v.product?.name || 'Unknown',
+            sku: v.sku || '',
+            quantity: p.quantity,
+            price: Number(p.price.toFixed(2)),
+            taxAmount: Number(taxAmt.toFixed(2)),
+            total: Number((p.price * p.quantity + taxAmt).toFixed(2)),
           };
         }),
         summary: {
           totalQuantity: populatedSale.summary.totalQuantity,
-          subTotal: parseFloat(populatedSale.summary.subTotal.toFixed(2)),
-          taxTotal: parseFloat(populatedSale.summary.taxTotal.toFixed(2)),
-          discount: parseFloat(populatedSale.summary.discount.toFixed(2)),
-          otherCharges: parseFloat(populatedSale.summary.otherCharges.toFixed(2)),
-          grandTotal: parseFloat(populatedSale.summary.grandTotal.toFixed(2)),
+          subTotal: Number(populatedSale.summary.subTotal.toFixed(2)),
+          grandTotal: Number(populatedSale.summary.grandTotal.toFixed(2)),
         },
         payment: {
-          type: populatedSale.payment.type || null,
-          amountPaid: parseFloat(populatedSale.payment.amountPaid.toFixed(2)),
-          amountDue: parseFloat(populatedSale.payment.amountDue.toFixed(2)),
-          notes: populatedSale.payment.notes || '',
+          amountPaid: Number(populatedSale.payment.amountPaid.toFixed(2)),
+          amountDue: Number(populatedSale.payment.amountDue.toFixed(2)),
         },
-        createdAt: populatedSale.createdAt,
-        updatedAt: populatedSale.updatedAt,
-      }
+        notes: populatedSale.notes,
+      },
     });
+
   } catch (error) {
-    console.error('Error creating sale:', error);
-    res.status(500).json({ status: false, message: 'Server error', error: error.message });
+    await session.abortTransaction();
+    console.error('Create Sale Error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message,
+    });
+  } finally {
+    session.endSession();
   }
 };
+
 
 exports.getAllSales = async (req, res) => {
   try {

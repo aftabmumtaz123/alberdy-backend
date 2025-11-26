@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 
 
 
+
 exports.createPurchase = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -12,50 +13,55 @@ exports.createPurchase = async (req, res) => {
   try {
     const { supplierId, products, summary, payment, notes, status } = req.body;
 
-    // === 1. Validate Required Fields ===
+    // === 1. BASIC VALIDATION ===
     if (!supplierId || !products || !Array.isArray(products) || products.length === 0) {
+      await session.abortTransaction();
       return res.status(400).json({ success: false, message: 'Supplier and products are required' });
     }
 
     if (!summary || typeof summary !== 'object') {
-      return res.status(400).json({ success: false, message: 'Summary object is required' });
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, message: 'Summary is required' });
     }
 
     const { otherCharges = 0, discount = 0 } = summary;
-
     if (otherCharges < 0 || discount < 0) {
-      return res.status(400).json({ success: false, message: 'otherCharges and discount cannot be negative' });
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, message: 'Charges and discount cannot be negative' });
     }
 
-    // === 2. Validate Supplier ===
-    const supplier = await Supplier.findById(supplierId);
+    // === 2. VALIDATE SUPPLIER ===
+    const supplier = await Supplier.findById(supplierId).session(session);
     if (!supplier) {
+      await session.abortTransaction();
       return res.status(400).json({ success: false, message: 'Invalid supplier' });
     }
 
-    // === 3. Validate & Calculate Products + Subtotal ===
+    // === 3. PROCESS PRODUCTS ===
     let subtotal = 0;
     const validatedProducts = [];
 
     for (const item of products) {
       const { variantId, quantity, unitPrice, taxPercent = 0 } = item;
 
-      if (!variantId || !quantity || !unitPrice) {
+      if (!variantId || !quantity || unitPrice === undefined) {
+        await session.abortTransaction();
         return res.status(400).json({ success: false, message: 'variantId, quantity, and unitPrice are required' });
       }
 
       if (quantity < 1 || unitPrice < 0 || taxPercent < 0) {
+        await session.abortTransaction();
         return res.status(400).json({ success: false, message: 'Invalid quantity, price, or tax' });
       }
 
       const variant = await Variant.findById(variantId).session(session);
       if (!variant || variant.status === 'Inactive') {
+        await session.abortTransaction();
         return res.status(400).json({ success: false, message: `Variant not found or inactive: ${variantId}` });
       }
 
       const taxAmount = (unitPrice * quantity * taxPercent) / 100;
       const lineTotal = unitPrice * quantity + taxAmount;
-
       subtotal += lineTotal;
 
       validatedProducts.push({
@@ -64,51 +70,79 @@ exports.createPurchase = async (req, res) => {
         unitPrice,
         taxPercent,
         taxAmount,
+        lineTotal,
       });
     }
 
-    // === 4. Calculate Final Totals ===
     const grandTotal = subtotal + otherCharges - discount;
-
     if (grandTotal < 0) {
+      await session.abortTransaction();
       return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
     }
 
-    // === 5. Payment & Status Logic ===
+    // === 4. PAYMENT ===
     const amountPaid = payment?.amountPaid >= 0 ? payment.amountPaid : 0;
     const amountDue = grandTotal - amountPaid;
 
     if (amountDue < 0) {
-      return res.status(400).json({ success: false, message: 'Amount paid cannot exceed grand total' });
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, message: 'Overpayment not allowed' });
     }
 
-    // Auto-determine status unless explicitly provided
-    let finalStatus = status;
-    if (!finalStatus || finalStatus === 'Pending') {
-      if (amountDue === 0) finalStatus = 'Completed';
-      else if (amountPaid > 0) finalStatus = 'Partial';
-      else finalStatus = 'Pending';
+    // === 5. FINAL STATUS LOGIC — SAME AS SALE & UPDATE ===
+    let finalStatus;
+
+    if (status === 'Completed') {
+      if (amountDue > 0) {
+        await session.abortTransaction();
+        return res.status(400).json({ success: false, message: 'Full payment required to create as Completed' });
+      }
+      finalStatus = 'Completed';
+    }
+    else if (status === 'Pending' && amountPaid > 0) {
+      await session.abortTransaction();
+      return res.status(400).json({ success: false, message: 'Cannot create as Pending when payment is received' });
+    }
+    else if (status === 'Partial' && amountDue === 0) {
+      finalStatus = 'Completed'; // Auto-upgrade
+    }
+    else if (status && ['Pending', 'Partial'].includes(status)) {
+      finalStatus = status;
+    }
+    else {
+      // AUTO-DETERMINE — Best practice
+      finalStatus = amountDue === 0
+        ? 'Completed'
+        : amountPaid > 0
+          ? 'Partial'
+          : 'Pending';
     }
 
-    // But if user forces "Completed", validate full payment
-    if (finalStatus === 'Completed' && amountDue > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Full payment required for Completed status',
-      });
-    }
+    // === 6. GENERATE PURCHASE CODE (Sequential & Clean) ===
+    const lastPurchase = await Purchase.findOne()
+      .sort({ createdAt: -1 })
+      .select('purchaseCode')
+      .session(session);
 
-    // === 6. Generate Purchase Code ===
-    let purchaseCode = `PUR-${Date.now().toString(36).toUpperCase()}`;
-    while (await Purchase.findOne({ purchaseCode })) {
-      purchaseCode = `PUR-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substr(2, 3).toUpperCase()}`;
+    let seq = 1;
+    if (lastPurchase && lastPurchase.purchaseCode) {
+      const match = lastPurchase.purchaseCode.match(/PUR-(\d+)$/);
+      if (match) seq = parseInt(match[1]) + 1;
     }
+    const purchaseCode = `PUR-${String(seq).padStart(6, '0')}`;
 
-    // === 7. Create Purchase ===
+    // === 7. CREATE PURCHASE DOCUMENT ===
     const purchase = new Purchase({
       purchaseCode,
       supplierId,
-      products: validatedProducts,
+      products: validatedProducts.map(p => ({
+        variantId: p.variantId,
+        quantity: p.quantity,
+        unitPrice: p.unitPrice,
+        taxPercent: p.taxPercent,
+        taxAmount: p.taxAmount,
+        lineTotal: p.lineTotal,
+      })),
       summary: {
         subtotal,
         otherCharges,
@@ -116,9 +150,9 @@ exports.createPurchase = async (req, res) => {
         grandTotal,
       },
       payment: {
+        type: payment?.type || 'Cash',
         amountPaid,
         amountDue,
-        type: payment?.type || null,
       },
       notes: notes || '',
       status: finalStatus,
@@ -126,47 +160,86 @@ exports.createPurchase = async (req, res) => {
 
     await purchase.save({ session });
 
-    // === 8. Update Stock & Purchase Price ===
+    // === 8. UPDATE STOCK & PURCHASE PRICE ===
     for (const item of validatedProducts) {
-      const updateFields = {
+      const update = {
         $inc: { stockQuantity: item.quantity },
       };
 
-      // Update purchasePrice only if different
-      const variant = await Variant.findById(item.variantId);
+      // Update purchasePrice only if changed
+      const variant = await Variant.findById(item.variantId).session(session);
       if (variant.purchasePrice !== item.unitPrice) {
-        updateFields.$set = { purchasePrice: item.unitPrice };
+        update.$set = { purchasePrice: item.unitPrice };
       }
 
-      await Variant.findByIdAndUpdate(item.variantId, updateFields, { session });
+      await Variant.findByIdAndUpdate(item.variantId, update, { session });
     }
 
     await session.commitTransaction();
 
+    // === 9. RETURN POPULATED RESPONSE ===
     const populatedPurchase = await Purchase.findById(purchase._id)
-      .populate('supplierId', 'supplierName')
+      .populate('supplierId', 'supplierName contact phone')
       .populate({
         path: 'products.variantId',
         populate: [
           { path: 'product', select: 'name' },
           { path: 'unit', select: 'short_name' },
         ],
-      });
+      })
+      .lean();
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: 'Purchase created successfully',
-      data: populatedPurchase,
+      data: {
+        _id: populatedPurchase._id,
+        purchaseCode: populatedPurchase.purchaseCode,
+        date: populatedPurchase.createdAt,
+        status: populatedPurchase.status,
+        supplier: {
+          id: populatedPurchase.supplierId?._id,
+          name: populatedPurchase.supplierId?.supplierName || 'Unknown',
+        },
+        products: populatedPurchase.products.map(p => {
+          const v = p.variantId;
+          return {
+            variantId: v._id,
+            productName: v.product?.name || 'Unknown',
+            quantity: p.quantity,
+            unitPrice: Number(p.unitPrice.toFixed(2)),
+            taxAmount: Number(p.taxAmount.toFixed(2)),
+            total: Number(p.lineTotal.toFixed(2)),
+          };
+        }),
+        summary: {
+          subtotal: Number(populatedPurchase.summary.subtotal.toFixed(2)),
+          grandTotal: Number(populatedPurchase.summary.grandTotal.toFixed(2)),
+        },
+        payment: {
+          amountPaid: Number(populatedPurchase.payment.amountPaid.toFixed(2)),
+          amountDue: Number(populatedPurchase.payment.amountDue.toFixed(2)),
+        },
+        notes: populatedPurchase.notes,
+        createdAt: populatedPurchase.createdAt,
+      },
     });
 
   } catch (error) {
     await session.abortTransaction();
     console.error('Create Purchase Error:', error);
-    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message,
+    });
   } finally {
     session.endSession();
   }
 };
+
+
+
 
 exports.getAllPurchases = async (req, res) => {
   try {
