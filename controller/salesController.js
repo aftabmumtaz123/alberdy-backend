@@ -553,6 +553,13 @@ exports.updateSale = async (req, res) => {
       }
     }
 
+    
+    // Final status logic
+    let finalStatus = status;
+    if (!finalStatus) {
+      finalStatus = amountDue === 0 ? 'Completed' : amountPaid > 0 ? 'Partial' : 'Pending';
+    }
+
     // Validate summary calculations
     const grandTotal = subTotal + otherCharges - discount;
     if (grandTotal < 0) {
