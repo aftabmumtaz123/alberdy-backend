@@ -339,7 +339,7 @@ exports.getSingleVariant = async (req, res) => {
             reason: movement.reason,
             referenceId: movement.referenceId,
             performedBy: movement.performedBy?.name || "System",
-            performedAt: movement.createdAt,
+            createdAt: movement.createdAt,
           },
 
           currentLiveStock: variant.stockQuantity,
