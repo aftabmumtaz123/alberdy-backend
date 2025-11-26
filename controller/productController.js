@@ -232,7 +232,7 @@ exports.createProduct = async (req, res) => {
     }
 
     // Prevent duplicate product name + brand
-    const existingProduct = await Product.findOne({ name: name.trim(), brand: brand._id, isDeleted: false });
+    const existingProduct = await Product.findOne({ name: name.trim(), brand: brand._id});
     if (existingProduct) {
       await cleanupAllFiles();
       return res.status(400).json({ success: false, msg: 'Product with this name already exists under this brand' });
@@ -1184,5 +1184,48 @@ exports.restoreProduct = async (req, res) => {
     res.json({ success: true, msg: 'Product restored successfully' });
   } catch (err) {
     res.status(500).json({ success: false, msg: 'Restore failed' });
+  }
+};
+
+
+// GET /admin/trash/products
+exports.getDeletedProducts = async (req, res) => {
+  try {
+    const products = await Product.aggregate([
+      { $match: { isDeleted: true } }, // ← This overrides the middleware
+      { $sort: { deletedAt: -1 } },
+      {
+        $lookup: {
+          from: 'variants',
+          let: { varIds: '$variations' },
+          pipeline: [
+            { $match: { $expr: { $in: ['$_id', '$$varIds'] }, isDeleted: true } },
+            { $project: { sku: 1, value: 1, image: 1 } }
+          ],
+          as: 'variations'
+        }
+      },
+      {
+        $lookup: { from: 'brands', localField: 'brand', foreignField: '_id', as: 'brand' }
+      },
+      { $unwind: '$brand' },
+      {
+        $project: {
+          name: 1,
+          'brand.name': 1,
+          thumbnail: 1,
+          deletedAt: 1,
+          variationCount: { $size: '$variations' }
+        }
+      }
+    ]);
+
+    res.json({
+      success: true,
+      products,
+      total: products.length
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, msg: 'Failed to fetch trash' });
   }
 };

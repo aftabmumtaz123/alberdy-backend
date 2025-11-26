@@ -3,7 +3,7 @@ const express = require('express');
 const router = express.Router();
 const upload = require('../config/multer'); // Assuming multer config for multiple files
 
-const { createProduct, getAllProducts, updateProduct, deleteProduct, getProductById } = require('../controller/productController'); // Note: path to controller
+const { createProduct, getAllProducts, updateProduct, deleteProduct, getProductById, getDeletedProducts } = require('../controller/productController'); // Note: path to controller
 const productController = require('../controller/productController');
 // Auth and role middleware
 const authMiddleware = require('../middleware/auth');
@@ -39,6 +39,8 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), uplo
 // DELETE /api/products/:id
 router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), deleteProduct);
 
+// GET /admin/trash/products - View soft-deleted products
+router.get('/trash', authMiddleware, requireRole(['Super Admin', 'Manager']), getDeletedProducts);
 
 
 router.get('/category/:categoryIdOrName', async (req, res) => {
