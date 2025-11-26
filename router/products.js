@@ -40,7 +40,7 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), uplo
 router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), deleteProduct);
 
 // GET /admin/trash/products - View soft-deleted products
-router.get('/trash', authMiddleware, requireRole(['Super Admin', 'Manager']), getDeletedProducts);
+router.get('/see/trash', authMiddleware, requireRole(['Super Admin', 'Manager']), getDeletedProducts);
 
 
 router.get('/category/:categoryIdOrName', async (req, res) => {
