@@ -232,7 +232,7 @@ exports.createProduct = async (req, res) => {
     }
 
     // Prevent duplicate product name + brand
-    const existingProduct = await Product.findOne({ name: name.trim(), brand: brand._id});
+    const existingProduct = await Product.findOne({ name: name.trim(), brand: brand._id, isDeleted: false});
     if (existingProduct) {
       await cleanupAllFiles();
       return res.status(400).json({ success: false, msg: 'Product with this name already exists under this brand' });

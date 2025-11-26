@@ -9,6 +9,9 @@ const User = require('../model/User');
 const AppConfiguration = require('../model/app_configuration'); // Import AppConfiguration model
 const authMiddleware = require('../middleware/auth');
 
+
+
+
 const requireRole = roles => (req, res, next) => {
   if (!req.user || !roles.includes(req.user.role)) {
     return res.status(403).json({ success: false, msg: 'Access denied' });
@@ -59,6 +62,8 @@ const getCurrencySettings = async () => {
   }
 };
 
+
+
 /* -------------------------- CREATE ORDER -------------------------- */
 router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
@@ -71,13 +76,10 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
     if (!items?.length) return res.status(400).json({ success: false, msg: 'Order items required' });
     if (!paymentMethod) return res.status(400).json({ success: false, msg: 'Payment method required' });
     if (!shippingAddress?.street || !shippingAddress?.city || !shippingAddress?.zip ||
-        !shippingAddress?.fullName || !shippingAddress?.phone) {
-      return res.status(400).json({ success: false, msg: 'Complete shipping address required' });
+        !shippingAddress?.fullName || !shippingAddress?.phone || !shippingAddress?.email) {
+      return res.status(400).json({ success: false, msg: 'Complete shipping address and email required' });
     }
 
-    if (!shippingAddress?.email) {
-      return res.status(400).json({ success: false, msg: 'Email required' });
-    }
     // ---- compute subtotal & validate stock ----
     const orderItems = [];
     let computedSubtotal = 0;
@@ -91,11 +93,11 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
 
       if (!product) return res.status(400).json({ success: false, msg: `Product not found: ${itm.product}` });
       if (!product.variations?.length)
-        return res.status(400).json({ success: false, msg: `No variations for product ${itm.product}` });
+        return res.status(400).json({ success: false, msg: `No variations for product ${product.name}` });
 
       const qty = Number(itm.quantity);
       if (isNaN(qty) || qty <= 0)
-        return res.status(400).json({ success: false, msg: `Invalid quantity for ${itm.product}` });
+        return res.status(400).json({ success: false, msg: `Invalid quantity for ${product.name}` });
 
       if (!itm.variant)
         return res.status(400).json({ success: false, msg: `Variant required for ${product.name}` });
@@ -104,11 +106,10 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
         return res.status(400).json({ success: false, msg: `Invalid variant ID: ${itm.variant}` });
 
       const variant = product.variations.find(v => v._id.toString() === itm.variant);
-      if (!variant) return res.status(400).json({ success: false, msg: `Variant ${itm.variant} not found` });
+      if (!variant) return res.status(400).json({ success: false, msg: `Variant not found` });
 
       if (variant.stockQuantity < qty)
-        return res.status(400).json({ success: false,
-          msg: `Product is out of stock, please remove it from cart.` });
+        return res.status(400).json({ success: false, msg: `Insufficient stock for ${product.name} (${variant.attribute}: ${variant.value})` });
 
       const price = variant.discountPrice || variant.price;
       const lineTotal = price * qty;
@@ -125,14 +126,16 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
 
     // ---- subtotal / total validation ----
     if (Math.abs(computedSubtotal - subtotal) > 0.01)
-      return res.status(400).json({ success: false,
-        msg: `Subtotal mismatch: provided ${subtotal}, computed ${computedSubtotal.toFixed(2)}` });
+      return res.status(400).json({
+        success: false,
+        msg: `Subtotal mismatch: provided ${subtotal}, computed ${computedSubtotal.toFixed(2)}`
+      });
 
     const calcTotal = subtotal + tax + shipping - discount;
     if (Math.abs(calcTotal - total) > 0.01)
-      return res.status(400).json({ success: false, msg: 'Total mismatch' });
+      return res.status(400).json({ success: false, msg: 'Total amount mismatch' });
 
-    // ---- create order ----
+    // ---- generate numbers & create order ----
     const orderNumber = await generateOrderNumber();
     const trackingNumber = await generateTrackingNumber();
 
@@ -163,25 +166,73 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
 
     // ---- populate response ----
     await order.populate('items.product', 'name thumbnail images');
-    await order.populate({ path: 'items.variant',
-      select: 'attribute value sku price discountPrice stockQuantity image' });
+    await order.populate({
+      path: 'items.variant',
+      select: 'attribute value sku price discountPrice stockQuantity image'
+    });
     await order.populate('user', 'name email phone');
+
+    // ——————————————————————
+    // SEND PUSH NOTIFICATIONS (NOW SAFE!)
+    // ——————————————————————
+    try {
+      const PushSubscription = require('../model/PushSubscription');
+      const { sendNotification } = require('../utils/sendPushNotification');
+
+      const adminSubs = await PushSubscription.find({
+        role: { $in: ['Super Admin', 'Manager'] }
+      }).select('endpoint keys');
+
+      if (adminSubs.length > 0) {
+        const currency = await getCurrencySettings();
+        const totalFormatted = `${currency.currencySign}${total.toFixed(2)}`;
+
+        const notificationPromises = adminSubs.map(sub =>
+          sendNotification(
+            {
+              endpoint: sub.endpoint,
+              keys: sub.keys
+            },
+            'New Order Received!',
+            `${orderNumber} • ${totalFormatted} • ${paymentMethod.toUpperCase()}`,
+            {
+              orderId: order._id.toString(),
+              url: `/admin/orders/${order._id}`
+            }
+          ).catch(err => console.warn('Failed to send push to one subscriber:', err.message))
+        );
+
+        // Fire and forget (non-blocking)
+        Promise.allSettled(notificationPromises);
+      }
+    } catch (pushErr) {
+      console.error('Push notification error (non-critical):', pushErr);
+      // Don't fail the order just because push failed
+    }
+
+    // ——————————————————————
 
     res.status(201).json({
       success: true,
       data: order,
       msg: `Order ${orderNumber} placed successfully`
     });
+
   } catch (err) {
     console.error('Order creation error:', err);
     if (err.name === 'MongoServerError' && err.code === 11000)
       return res.status(400).json({ success: false, msg: 'Duplicate order/tracking number' });
-    res.status(500).json({ success: false,
+
+    res.status(500).json({
+      success: false,
       msg: 'Server error creating order',
-      details: err.message || 'Unknown error'
+      details: err.message
     });
   }
 });
+
+
+
 
 /* -------------------------- GET ONE ORDER -------------------------- */
 router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
@@ -378,8 +429,10 @@ router.put('/:id/tracking', authMiddleware, requireRole(['Super Admin', 'Manager
     if (!order) return res.status(404).json({ success: false, msg: 'Order not found' });
 
     if (trackingStatus && ['delivered', 'cancelled'].includes(order.trackingStatus))
-      return res.status(400).json({ success: false,
-        msg: `Cannot change tracking from ${order.trackingStatus}` });
+      return res.status(400).json({
+        success: false,
+        msg: `Cannot change tracking from ${order.trackingStatus}`
+      });
 
     if (orderTrackingNumber) {
       const exists = await Order.findOne({ orderTrackingNumber, _id: { $ne: id } });

@@ -86,5 +86,14 @@ app.get("/",(req,res)=>{
 })
 
 
+
+// generate-vapid.js
+const webPush = require('web-push');
+
+const vapidKeys = webPush.generateVAPIDKeys();
+console.log(vapidKeys);
+
+
+
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
