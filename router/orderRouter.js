@@ -523,7 +523,7 @@ router.post('/subscribe', authMiddleware, requireRole(['Super Admin', 'Manager']
   res.json({ success: true, msg: 'Subscribed to notifications' });
 });
 
-router.get('/public-key', (req, res) => {
+router.get('/key/public-key', (req, res) => {
   res.json({
     success: true,
     publicKey: process.env.VAPID_PUBLIC_KEY
