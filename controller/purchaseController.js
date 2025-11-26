@@ -15,25 +15,24 @@ exports.createPurchase = async (req, res) => {
 
     // === 1. BASIC VALIDATION ===
     if (!supplierId || !products || !Array.isArray(products) || products.length === 0) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Supplier and products are required' });
     }
 
     if (!summary || typeof summary !== 'object') {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Summary is required' });
     }
 
     const { otherCharges = 0, discount = 0 } = summary;
     if (otherCharges < 0 || discount < 0) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Charges and discount cannot be negative' });
     }
 
     // === 2. VALIDATE SUPPLIER ===
     const supplier = await Supplier.findById(supplierId).session(session);
     if (!supplier) {
-      await session.abortTransaction();
       return res.status(400).json({ success: false, message: 'Invalid supplier' });
     }
 
@@ -45,18 +44,15 @@ exports.createPurchase = async (req, res) => {
       const { variantId, quantity, unitPrice, taxPercent = 0 } = item;
 
       if (!variantId || !quantity || unitPrice === undefined) {
-        await session.abortTransaction();
         return res.status(400).json({ success: false, message: 'variantId, quantity, and unitPrice are required' });
       }
 
       if (quantity < 1 || unitPrice < 0 || taxPercent < 0) {
-        await session.abortTransaction();
         return res.status(400).json({ success: false, message: 'Invalid quantity, price, or tax' });
       }
 
       const variant = await Variant.findById(variantId).session(session);
       if (!variant || variant.status === 'Inactive') {
-        await session.abortTransaction();
         return res.status(400).json({ success: false, message: `Variant not found or inactive: ${variantId}` });
       }
 
@@ -76,7 +72,6 @@ exports.createPurchase = async (req, res) => {
 
     const grandTotal = subtotal + otherCharges - discount;
     if (grandTotal < 0) {
-      await session.abortTransaction();
       return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
     }
 
@@ -85,7 +80,6 @@ exports.createPurchase = async (req, res) => {
     const amountDue = grandTotal - amountPaid;
 
     if (amountDue < 0) {
-      await session.abortTransaction();
       return res.status(400).json({ success: false, message: 'Overpayment not allowed' });
     }
 
@@ -94,13 +88,11 @@ exports.createPurchase = async (req, res) => {
 
     if (status === 'Completed') {
       if (amountDue > 0) {
-        await session.abortTransaction();
         return res.status(400).json({ success: false, message: 'Full payment required to create as Completed' });
       }
       finalStatus = 'Completed';
     }
     else if (status === 'Pending' && amountPaid > 0) {
-      await session.abortTransaction();
       return res.status(400).json({ success: false, message: 'Cannot create as Pending when payment is received' });
     }
     else if (status === 'Partial' && amountDue === 0) {
@@ -226,7 +218,7 @@ exports.createPurchase = async (req, res) => {
     });
 
   } catch (error) {
-    await session.abortTransaction();
+     
     console.error('Create Purchase Error:', error);
     return res.status(500).json({
       success: false,
@@ -338,24 +330,24 @@ exports.updatePurchase = async (req, res) => {
 
     // Validate ID
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Invalid purchase ID' });
     }
 
     // Fetch purchase
     const purchase = await Purchase.findById(id).session(session);
     if (!purchase || purchase.isDeleted) {
-      await session.abortTransaction();
+       
       return res.status(404).json({ success: false, message: 'Purchase not found or deleted' });
     }
 
     // Block editing of Completed or Cancelled purchases (except cancellation flow)
     if (purchase.status === 'Completed') {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Cannot modify a Completed purchase' });
     }
     if (purchase.status === 'Cancelled') {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Cannot modify a Cancelled purchase' });
     }
 
@@ -395,12 +387,12 @@ exports.updatePurchase = async (req, res) => {
     // 2. NORMAL UPDATE (Pending / Partial → Edit)
     // ==================================================================
     if (!supplierId && !purchase.supplierId) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Supplier is required' });
     }
 
     if (!products || !Array.isArray(products) || products.length === 0 || !summary) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Products and summary are required' });
     }
 
@@ -416,18 +408,18 @@ exports.updatePurchase = async (req, res) => {
       const { variantId, quantity, unitPrice, taxPercent = 0 } = item;
 
       if (!variantId || !quantity || unitPrice === undefined) {
-        await session.abortTransaction();
+         
         return res.status(400).json({ success: false, message: 'variantId, quantity, and unitPrice required' });
       }
 
       if (quantity <= 0 || unitPrice < 0) {
-        await session.abortTransaction();
+         
         return res.status(400).json({ success: false, message: 'Invalid quantity or price' });
       }
 
       const variant = await Variant.findById(variantId).session(session);
       if (!variant || variant.status === 'Inactive') {
-        await session.abortTransaction();
+         
         return res.status(400).json({ success: false, message: `Invalid or inactive variant: ${variantId}` });
       }
 
@@ -437,7 +429,7 @@ exports.updatePurchase = async (req, res) => {
 
       // If reducing quantity → check stock availability
       if (qtyDiff < 0 && variant.stockQuantity < Math.abs(qtyDiff)) {
-        await session.abortTransaction();
+         
         return res.status(400).json({
           success: false,
           message: `Not enough stock to reduce quantity for ${variant.sku || variantId}`,
@@ -460,7 +452,7 @@ exports.updatePurchase = async (req, res) => {
 
     const grandTotal = subtotal + otherCharges - discount;
     if (grandTotal < 0) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
     }
 
@@ -471,7 +463,7 @@ exports.updatePurchase = async (req, res) => {
     const amountDue = grandTotal - amountPaid;
 
     if (amountDue < 0) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Overpayment not allowed' });
     }
 
@@ -482,13 +474,13 @@ exports.updatePurchase = async (req, res) => {
 
     if (status === 'Completed') {
       if (amountDue > 0) {
-        await session.abortTransaction();
+         
         return res.status(400).json({ success: false, message: 'Full payment required to mark as Completed' });
       }
       finalStatus = 'Completed';
     }
     else if (status === 'Pending' && amountPaid > 0) {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Cannot set Pending after receiving payment' });
     }
     else if (status === 'Partial' && amountDue === 0) {
@@ -507,7 +499,7 @@ exports.updatePurchase = async (req, res) => {
 
     // Prevent downgrading from Completed
     if (purchase.status === 'Completed' && finalStatus !== 'Completed') {
-      await session.abortTransaction();
+       
       return res.status(400).json({ success: false, message: 'Cannot downgrade status from Completed' });
     }
 
@@ -592,7 +584,7 @@ exports.updatePurchase = async (req, res) => {
     });
 
   } catch (error) {
-    await session.abortTransaction();
+     
     console.error('Update Purchase Error:', error);
     return res.status(500).json({
       success: false,
