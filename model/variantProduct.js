@@ -135,6 +135,11 @@ variantSchema.pre('findOne', function(next) {
   next();
 });
 
+variantSchema.pre('aggregate', function(next) {
+  this.pipeline().unshift({ $match: { isDeleted: { $ne: true } } });
+  next();
+});
+
 
 
 
