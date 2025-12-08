@@ -326,21 +326,21 @@ exports.createProduct = async (req, res) => {
   } catch (err) {
     await cleanupAllFiles();
 
-  if (err.code === 11000) {
-    let field = 'unknown field';
+    if (err.code === 11000) {
+      let field = 'unknown field';
 
-    if (err.message.includes('name_1_brand_1')) {
-      field = 'Product name already exists under this brand';
-    } else if (err.message.includes('sku_1')) {
-      field = 'SKU already exists';
+      if (err.message.includes('name_1_brand_1')) {
+        field = 'Product name already exists under this brand';
+      } else if (err.message.includes('sku_1')) {
+        field = 'SKU already exists';
+      }
+
+      return res.status(400).json({
+        success: false,
+        msg: `Duplicate value: ${field}`,
+      });
     }
 
-    return res.status(400).json({
-      success: false,
-      msg: `Duplicate value: ${field}`,
-    });
-  }
-    
 
     if (err.name === 'ValidationError') {
       return res.status(400).json({
@@ -359,9 +359,10 @@ exports.createProduct = async (req, res) => {
 };
 
 
+
 exports.getAllProducts = async (req, res) => {
   const { page = 1, limit, category, subcategory, brand, status, name, lowStock } = req.query;
-  const filter = { isDeleted: false }; // assuming soft delete
+  const filter = {};
 
   try {
     // Fetch currency configuration
@@ -397,14 +398,14 @@ exports.getAllProducts = async (req, res) => {
     if (status) filter.status = status;
     if (name) filter.name = { $regex: name, $options: 'i' };
 
-    // ---------- MAIN AGGREGATION PIPELINE ----------
+    // ---------- BASE AGGREGATION PIPELINE (WITH EARLY SORT) ----------
     let pipeline = [
       { $match: filter },
 
-      // Sort by newest first EARLY
+      // CRITICAL FIX: Sort by newest first EARLY in the pipeline
       { $sort: { createdAt: -1 } },
 
-      // Populate category, subcategory, brand
+      // Now all subsequent operations preserve the correct order
       {
         $lookup: {
           from: 'categories',
@@ -432,72 +433,12 @@ exports.getAllProducts = async (req, res) => {
         },
       },
       { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
-
-      // Lookup active offer (only one, latest, currently active)
-      {
-        $lookup: {
-          from: 'offers',
-          let: { prodId: '$_id', now: new Date() },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $in: ['$$prodId', '$applicableProducts'] },
-                status: 'active',
-                $expr: {
-                  $and: [
-                    { $lte: ['$startDate', '$$now'] },
-                    { $gte: ['$endDate', '$$now'] },
-                  ],
-                },
-              },
-            },
-            { $sort: { createdAt: -1 } },
-            { $limit: 1 },
-            {
-              $project: {
-                discountType: 1,
-                discountValue: 1,
-                offerName: 1,
-                startDate: 1,
-                endDate: 1,
-                status: 1,
-                _id: 0,
-              },
-            },
-          ],
-          as: 'activeOfferTemp',
-        },
-      },
-      { $unwind: { path: '$activeOfferTemp', preserveNullAndEmptyArrays: true } },
-
-      // Set clean activeOffer field (null if none)
-      {
-        $addFields: {
-          activeOffer: {
-            $cond: {
-              if: { $ne: ['$activeOfferTemp', null] },
-              then: {
-                discountType: '$activeOfferTemp.discountType',
-                discountValue: '$activeOfferTemp.discountValue',
-                offerName: '$activeOfferTemp.offerName',
-                startDate: '$activeOfferTemp.startDate',
-                endDate: '$activeOfferTemp.endDate',
-                status: '$activeOfferTemp.status',
-              },
-              else: null,
-            },
-          },
-        },
-      },
-      { $unset: 'activeOfferTemp' },
-
-      // Populate variants + unit + effective price
       {
         $lookup: {
           from: 'variants',
           let: { varIds: { $ifNull: ['$variations', []] } },
           pipeline: [
-            { $match: { $expr: { $in: ['$_id', '$$varIds'] }, isDeleted: false } },
+            { $match: { $expr: { $in: ['$_id', '$$varIds'] } } },
             {
               $lookup: {
                 from: 'units',
@@ -517,8 +458,8 @@ exports.getAllProducts = async (req, res) => {
                         { $lt: ['$expiryDate', new Date()] },
                       ],
                     },
-                    then: 'Inactive',
-                    else: { $ifNull: ['$status', 'Active'] },
+                    then: 'inactive',
+                    else: { $ifNull: ['$status', 'active'] },
                   },
                 },
               },
@@ -528,28 +469,52 @@ exports.getAllProducts = async (req, res) => {
                 attribute: 1,
                 value: 1,
                 sku: 1,
-                unit: { unit_name: '$unit.unit_name', _id: '$unit._id' },
+                unit: { $ifNull: ['$unit', null] },
                 purchasePrice: 1,
                 price: 1,
                 discountPrice: 1,
                 stockQuantity: 1,
-                weightQuantity: 1,
                 expiryDate: 1,
+                weightQuantity: 1,
                 image: 1,
                 status: 1,
+                _id: 1,
               },
             },
           ],
           as: 'variations',
         },
       },
+      {
+        $lookup: {
+          from: 'offers',
+          let: { prodId: '$_id', currentDate: new Date() },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $in: ['$$prodId', '$applicableProducts'] },
+                    { $eq: ['$status', 'active'] },
+                    { $lte: ['$startDate', '$$currentDate'] },
+                    { $gte: ['$endDate', '$$currentDate'] }
+                  ]
+                }
+              }
+            },
+            { $sort: { createdAt: -1 } },
+            { $limit: 1 }
+          ],
+          as: 'activeOffer'
+        }
+      },
 
-      // Calculate effectivePrice using activeOffer
+      { $unwind: { path: '$activeOffer', preserveNullAndEmptyArrays: true } },
       {
         $addFields: {
           variations: {
             $map: {
-              input: '$variations',
+              input: { $ifNull: ['$variations', []] },
               as: 'var',
               in: {
                 $mergeObjects: [
@@ -562,30 +527,25 @@ exports.getAllProducts = async (req, res) => {
                           $cond: {
                             if: { $eq: ['$activeOffer.discountType', 'Percentage'] },
                             then: {
-                              $round: [
+                              $subtract: [
+                                { $ifNull: ['$$var.price', 0] },
                                 {
-                                  $subtract: [
-                                    '$$var.price',
-                                    {
-                                      $multiply: [
-                                        '$$var.price',
-                                        { $divide: ['$activeOffer.discountValue', 100] },
-                                      ],
-                                    },
+                                  $multiply: [
+                                    { $ifNull: ['$$var.price', 0] },
+                                    { $divide: ['$activeOffer.discountValue', 100] },
                                   ],
                                 },
-                                2,
                               ],
                             },
                             else: {
-                              $round: [
-                                { $subtract: ['$$var.price', '$activeOffer.discountValue'] },
-                                2,
+                              $subtract: [
+                                { $ifNull: ['$$var.price', 0] },
+                                '$activeOffer.discountValue',
                               ],
                             },
                           },
                         },
-                        else: '$$var.price',
+                        else: { $ifNull: ['$$var.price', 0] },
                       },
                     },
                   },
@@ -595,64 +555,56 @@ exports.getAllProducts = async (req, res) => {
           },
         },
       },
-
-      // Optional: Low stock filter
-      {
-        $addFields: {
-          totalStock: { $sum: '$variations.stockQuantity' },
-        },
-      },
     ];
 
-    // Apply low stock filter if requested
+    // ---------- LOW STOCK FILTER (applied AFTER sort) ----------
     if (lowStock === 'true') {
+      pipeline.push({
+        $addFields: { totalStock: { $sum: '$variations.stockQuantity' } },
+      });
       pipeline.push({ $match: { totalStock: { $lt: 10 } } });
     }
 
-    // Count total documents (after filters)
+    // ---------- COUNT (must include sort + lowStock to be accurate) ----------
     const countPipeline = [...pipeline, { $count: 'total' }];
     const countResult = await Product.aggregate(countPipeline);
     const total = countResult[0]?.total || 0;
 
-    // Pagination
+    // ---------- PAGINATION ----------
     const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = limit ? Math.max(1, parseInt(limit)) : 10;
+    const limitNum = limit ? parseInt(limit) : null;
 
-    const finalPipeline = [
-      ...pipeline,
-      { $skip: (pageNum - 1) * limitNum },
-      { $limit: limitNum },
-      {
-        $project: {
-          __v: 0,
-          isDeleted: 0,
-          deletedAt: 0,
-        },
-      },
-    ];
+    let finalPipeline = [...pipeline];
 
+    if (limitNum && !isNaN(limitNum)) {
+      finalPipeline.push({ $skip: (pageNum - 1) * limitNum });
+      finalPipeline.push({ $limit: limitNum });
+    }
+
+    finalPipeline.push({ $project: { __v: 0 } });
+
+
+    // ---------- EXECUTE ----------
     const products = await Product.aggregate(finalPipeline);
 
-    return res.json({
+    res.json({
       success: true,
-      currency,
       products,
-      pagination: {
-        total,
-        pages: Math.ceil(total / limitNum),
-        currentPage: pageNum,
-        limit: limitNum,
-      },
+      currency,
+      total,
+      pages: limitNum ? Math.ceil(total / limitNum) : 1,
+      currentPage: pageNum,
     });
   } catch (err) {
     console.error('getAllProducts error:', err);
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
       msg: 'Server error fetching products',
-      error: err.message,
+      details: err.message,
     });
   }
 };
+
 
 exports.getProductById = async (req, res) => {
   try {
@@ -752,29 +704,19 @@ exports.getProductById = async (req, res) => {
           pipeline: [
             {
               $match: {
-                $expr: { $in: ['$$prodId', '$applicableProducts'] },
                 status: 'active',
                 $expr: {
                   $and: [
+                    { $in: ['$$prodId', '$applicableProducts'] },
                     { $lte: ['$startDate', '$$currentDate'] },
                     { $gte: ['$endDate', '$$currentDate'] },
-                  ],
-                },
-              },
+                  ]
+                }
+              }
             },
             { $sort: { createdAt: -1 } },
             { $limit: 1 },
-            {
-              $project: {
-                discountType: 1,
-                discountValue: 1,
-                offerName: 1,
-                startDate: 1,
-                endDate: 1,
-                status: 1,
-                _id: 0,
-              },
-            },
+
           ],
           as: 'activeOffer',
         },
@@ -1077,7 +1019,7 @@ exports.updateProduct = async (req, res) => {
 
           // Delete old image if replaced
           if (oldImage && variationImages[i] && oldImage !== variationImages[i]) {
-            try { await fs.unlink(oldImage); } catch {}
+            try { await fs.unlink(oldImage); } catch { }
           }
         } else {
           // Create new
@@ -1100,7 +1042,7 @@ exports.updateProduct = async (req, res) => {
       for (const vid of toDelete) {
         const variant = await Variant.findById(vid);
         if (variant?.image) {
-          try { await fs.unlink(variant.image); } catch {}
+          try { await fs.unlink(variant.image); } catch { }
         }
         await Variant.findByIdAndDelete(vid);
       }
@@ -1115,11 +1057,11 @@ exports.updateProduct = async (req, res) => {
     // Delete old product images if replaced
     if (newImages.length > 0 && oldImages.length > 0) {
       for (const img of oldImages) {
-        try { await fs.unlink(img); } catch {}
+        try { await fs.unlink(img); } catch { }
       }
     }
     if (newThumbnail && oldThumbnail && newThumbnail !== oldThumbnail) {
-      try { await fs.unlink(oldThumbnail); } catch {}
+      try { await fs.unlink(oldThumbnail); } catch { }
     }
 
     await existingProduct.save();
@@ -1258,7 +1200,7 @@ exports.permanentDeleteProduct = async (req, res) => {
     ].filter(Boolean);
 
     for (const filePath of filesToDelete) {
-      try { await fs.unlink(filePath); } catch {}
+      try { await fs.unlink(filePath); } catch { }
     }
 
     // Hard delete from DB
