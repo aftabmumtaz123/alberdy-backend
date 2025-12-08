@@ -359,10 +359,9 @@ exports.createProduct = async (req, res) => {
 };
 
 
-
 exports.getAllProducts = async (req, res) => {
   const { page = 1, limit, category, subcategory, brand, status, name, lowStock } = req.query;
-  const filter = {};
+  const filter = { isDeleted: false }; // assuming soft delete
 
   try {
     // Fetch currency configuration
@@ -398,14 +397,14 @@ exports.getAllProducts = async (req, res) => {
     if (status) filter.status = status;
     if (name) filter.name = { $regex: name, $options: 'i' };
 
-    // ---------- BASE AGGREGATION PIPELINE (WITH EARLY SORT) ----------
+    // ---------- MAIN AGGREGATION PIPELINE ----------
     let pipeline = [
       { $match: filter },
 
-      // CRITICAL FIX: Sort by newest first EARLY in the pipeline
+      // Sort by newest first EARLY
       { $sort: { createdAt: -1 } },
 
-      // Now all subsequent operations preserve the correct order
+      // Populate category, subcategory, brand
       {
         $lookup: {
           from: 'categories',
@@ -433,12 +432,64 @@ exports.getAllProducts = async (req, res) => {
         },
       },
       { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
+
+      // Lookup active offer (only one, latest, currently active)
+      {
+        $lookup: {
+          from: 'offers',
+          let: { prodId: '$_id', now: new Date() },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $in: ['$$prodId', '$applicableProducts'] },
+                status: 'active',
+                $expr: {
+                  $and: [
+                    { $lte: ['$startDate', '$$now'] },
+                    { $gte: ['$endDate', '$$now'] },
+                  ],
+                },
+              },
+            },
+            { $sort: { createdAt: -1 } },
+            { $limit: 1 },
+            {
+              $project: {
+                discountType: 1,
+                discountValue: 1,
+                _id: 0,
+              },
+            },
+          ],
+          as: 'activeOfferTemp',
+        },
+      },
+      { $unwind: { path: '$activeOfferTemp', preserveNullAndEmptyArrays: true } },
+
+      // Set clean activeOffer field (null if none)
+      {
+        $addFields: {
+          activeOffer: {
+            $cond: {
+              if: { $ne: ['$activeOfferTemp', null] },
+              then: {
+                discountType: '$activeOfferTemp.discountType',
+                discountValue: '$activeOfferTemp.discountValue',
+              },
+              else: null,
+            },
+          },
+        },
+      },
+      { $unset: 'activeOfferTemp' },
+
+      // Populate variants + unit + effective price
       {
         $lookup: {
           from: 'variants',
           let: { varIds: { $ifNull: ['$variations', []] } },
           pipeline: [
-            { $match: { $expr: { $in: ['$_id', '$$varIds'] } } },
+            { $match: { $expr: { $in: ['$_id', '$$varIds'] }, isDeleted: false } },
             {
               $lookup: {
                 from: 'units',
@@ -458,8 +509,8 @@ exports.getAllProducts = async (req, res) => {
                         { $lt: ['$expiryDate', new Date()] },
                       ],
                     },
-                    then: 'inactive',
-                    else: { $ifNull: ['$status', 'active'] },
+                    then: 'Inactive',
+                    else: { $ifNull: ['$status', 'Active'] },
                   },
                 },
               },
@@ -469,52 +520,28 @@ exports.getAllProducts = async (req, res) => {
                 attribute: 1,
                 value: 1,
                 sku: 1,
-                unit: { $ifNull: ['$unit', null] },
+                unit: { unit_name: '$unit.unit_name', _id: '$unit._id' },
                 purchasePrice: 1,
                 price: 1,
                 discountPrice: 1,
                 stockQuantity: 1,
-                expiryDate: 1,
                 weightQuantity: 1,
+                expiryDate: 1,
                 image: 1,
                 status: 1,
-                _id: 1,
               },
             },
           ],
           as: 'variations',
         },
       },
-      {
-        $lookup: {
-          from: 'offers',
-          let: { prodId: '$_id', currentDate: new Date() },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $in: ['$$prodId', '$applicableProducts'] },
-                status: 'active',
-                $expr: {
-                  $and: [
-                    { $lte: ['$startDate', '$$currentDate'] },
-                    { $gte: ['$endDate', '$$currentDate'] },
-                  ],
-                },
-              },
-            },
-            { $sort: { createdAt: -1 } },
-            { $limit: 1 },
-            { $project: { discountType: 1, discountValue: 1, _id: 0 } },
-          ],
-          as: 'activeOffer',
-        },
-      },
-      { $unwind: { path: '$activeOffer', preserveNullAndEmptyArrays: true } },
+
+      // Calculate effectivePrice using activeOffer
       {
         $addFields: {
           variations: {
             $map: {
-              input: { $ifNull: ['$variations', []] },
+              input: '$variations',
               as: 'var',
               in: {
                 $mergeObjects: [
@@ -527,25 +554,30 @@ exports.getAllProducts = async (req, res) => {
                           $cond: {
                             if: { $eq: ['$activeOffer.discountType', 'Percentage'] },
                             then: {
-                              $subtract: [
-                                { $ifNull: ['$$var.price', 0] },
+                              $round: [
                                 {
-                                  $multiply: [
-                                    { $ifNull: ['$$var.price', 0] },
-                                    { $divide: ['$activeOffer.discountValue', 100] },
+                                  $subtract: [
+                                    '$$var.price',
+                                    {
+                                      $multiply: [
+                                        '$$var.price',
+                                        { $divide: ['$activeOffer.discountValue', 100] },
+                                      ],
+                                    },
                                   ],
                                 },
+                                2,
                               ],
                             },
                             else: {
-                              $subtract: [
-                                { $ifNull: ['$$var.price', 0] },
-                                '$activeOffer.discountValue',
+                              $round: [
+                                { $subtract: ['$$var.price', '$activeOffer.discountValue'] },
+                                2,
                               ],
                             },
                           },
                         },
-                        else: { $ifNull: ['$$var.price', 0] },
+                        else: '$$var.price',
                       },
                     },
                   },
@@ -555,57 +587,64 @@ exports.getAllProducts = async (req, res) => {
           },
         },
       },
+
+      // Optional: Low stock filter
+      {
+        $addFields: {
+          totalStock: { $sum: '$variations.stockQuantity' },
+        },
+      },
     ];
 
-    // ---------- LOW STOCK FILTER (applied AFTER sort) ----------
+    // Apply low stock filter if requested
     if (lowStock === 'true') {
-      pipeline.push({
-        $addFields: { totalStock: { $sum: '$variations.stockQuantity' } },
-      });
       pipeline.push({ $match: { totalStock: { $lt: 10 } } });
     }
 
-    // ---------- COUNT (must include sort + lowStock to be accurate) ----------
+    // Count total documents (after filters)
     const countPipeline = [...pipeline, { $count: 'total' }];
     const countResult = await Product.aggregate(countPipeline);
     const total = countResult[0]?.total || 0;
 
-    // ---------- PAGINATION ----------
+    // Pagination
     const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = limit ? parseInt(limit) : null;
+    const limitNum = limit ? Math.max(1, parseInt(limit)) : 10;
 
-    let finalPipeline = [...pipeline];
+    const finalPipeline = [
+      ...pipeline,
+      { $skip: (pageNum - 1) * limitNum },
+      { $limit: limitNum },
+      {
+        $project: {
+          __v: 0,
+          isDeleted: 0,
+          deletedAt: 0,
+        },
+      },
+    ];
 
-    if (limitNum && !isNaN(limitNum)) {
-      finalPipeline.push({ $skip: (pageNum - 1) * limitNum });
-      finalPipeline.push({ $limit: limitNum });
-    }
-
-    finalPipeline.push(
-      { $project: { __v: 0, activeOffer: 0 } } // Clean output
-    );
-
-    // ---------- EXECUTE ----------
     const products = await Product.aggregate(finalPipeline);
 
-    res.json({
+    return res.json({
       success: true,
-      products,
       currency,
-      total,
-      pages: limitNum ? Math.ceil(total / limitNum) : 1,
-      currentPage: pageNum,
+      products,
+      pagination: {
+        total,
+        pages: Math.ceil(total / limitNum),
+        currentPage: pageNum,
+        limit: limitNum,
+      },
     });
   } catch (err) {
     console.error('getAllProducts error:', err);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       msg: 'Server error fetching products',
-      details: err.message,
+      error: err.message,
     });
   }
 };
-
 
 exports.getProductById = async (req, res) => {
   try {
