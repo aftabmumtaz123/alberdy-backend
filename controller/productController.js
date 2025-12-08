@@ -457,6 +457,9 @@ exports.getAllProducts = async (req, res) => {
               $project: {
                 discountType: 1,
                 discountValue: 1,
+                offerName: 1,
+                startDate: 1,
+                endDate: 1,
                 _id: 0,
               },
             },
@@ -475,6 +478,9 @@ exports.getAllProducts = async (req, res) => {
               then: {
                 discountType: '$activeOfferTemp.discountType',
                 discountValue: '$activeOfferTemp.discountValue',
+                offerName: '$activeOfferTemp.offerName',
+                startDate: '$activeOfferTemp.startDate',
+                endDate: '$activeOfferTemp.endDate',
               },
               else: null,
             },
@@ -760,6 +766,9 @@ exports.getProductById = async (req, res) => {
               $project: {
                 discountType: 1,
                 discountValue: 1,
+                offerName: 1,
+                startDate: 1,
+                endDate: 1,
                 _id: 0,
               },
             },
