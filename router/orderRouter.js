@@ -76,7 +76,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
     if (!items?.length) return res.status(400).json({ success: false, msg: 'Order items required' });
     if (!paymentMethod) return res.status(400).json({ success: false, msg: 'Payment method required' });
     if (!shippingAddress?.street || !shippingAddress?.city || !shippingAddress?.zip ||
-        !shippingAddress?.fullName || !shippingAddress?.phone || !shippingAddress?.email) {
+      !shippingAddress?.fullName || !shippingAddress?.phone || !shippingAddress?.email) {
       return res.status(400).json({ success: false, msg: 'Complete shipping address and email required' });
     }
 
@@ -124,12 +124,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       computedSubtotal += lineTotal;
     }
 
-    // ---- subtotal / total validation ----
-    if (Math.abs(computedSubtotal - subtotal) > 0.01)
-      return res.status(400).json({
-        success: false,
-        msg: `Subtotal mismatch: provided ${subtotal}, computed ${computedSubtotal.toFixed(2)}`
-      });
+  
 
     const calcTotal = subtotal + tax + shipping - discount;
     if (Math.abs(calcTotal - total) > 0.01)
