@@ -605,6 +605,7 @@ exports.getAllProducts = async (req, res) => {
   }
 };
 
+
 exports.getProductById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -613,13 +614,10 @@ exports.getProductById = async (req, res) => {
       return res.status(400).json({ success: false, msg: 'Invalid product ID' });
     }
 
-    // Fetch currency configuration
+    // Fetch currency once
     const config = await Configuration.findOne().lean();
     if (!config) {
-      return res.status(404).json({
-        success: false,
-        msg: 'App configuration not found',
-      });
+      return res.status(404).json({ success: false, msg: 'App configuration not found' });
     }
     const currency = {
       currencyName: config.currencyName || 'US Dollar',
@@ -627,35 +625,50 @@ exports.getProductById = async (req, res) => {
       currencySign: config.currencySign || '$',
     };
 
-    // ========= MAIN PRODUCT PIPELINE =========
-    const mainPipeline = [
-      { $match: { _id: new mongoose.Types.ObjectId(id), isDeleted: false, status: 'Active' } },
+    // Reusable pipeline stages for product + variations + offer logic
+    const buildProductPipeline = (excludeId = null) => [
       {
-        $lookup: { from: 'categories', localField: 'category', foreignField: '_id', as: 'category' },
+        $match: {
+          isDeleted: false,
+          status: 'Active',
+          ...(excludeId && { _id: { $ne: new mongoose.Types.ObjectId(excludeId) } }),
+        },
       },
+      // Populate references
+      { $lookup: { from: 'categories', localField: 'category', foreignField: '_id', as: 'category' } },
       { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
-      {
-        $lookup: { from: 'subcategories', localField: 'subcategory', foreignField: '_id', as: 'subcategory' },
-      },
+      { $lookup: { from: 'subcategories', localField: 'subcategory', foreignField: '_id', as: 'subcategory' } },
       { $unwind: { path: '$subcategory', preserveNullAndEmptyArrays: true } },
-      {
-        $lookup: { from: 'brands', localField: 'brand', foreignField: '_id', as: 'brand' },
-      },
+      { $lookup: { from: 'brands', localField: 'brand', foreignField: '_id', as: 'brand' } },
       { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
+
+      // Load only active variants
       {
         $lookup: {
           from: 'variants',
-          let: { varIds: { $ifNull: ['$variations', []] } },
+          let: { varIds: '$variations' },
           pipeline: [
-            { $match: { $expr: { $in: ['$_id', '$$varIds'] }, status: 'Active', isDeleted: { $ne: true } } },
             {
-              $lookup: { from: 'units', localField: 'unit', foreignField: '_id', as: 'unit' },
+              $match: {
+                $expr: { $in: ['$_id', '$$varIds'] },
+                status: 'Active',
+                isDeleted: { $ne: true },
+              },
             },
+            { $lookup: { from: 'units', localField: 'unit', foreignField: '_id', as: 'unit' } },
             { $unwind: { path: '$unit', preserveNullAndEmptyArrays: true } },
+            {
+              $addFields: {
+                unit: { unit_name: '$unit.unit_name' },
+              },
+            },
+            { $project: { unit: { unit_name: 1 } } },
           ],
           as: 'variations',
         },
       },
+
+      // Active offer lookup
       {
         $lookup: {
           from: 'offers',
@@ -680,6 +693,8 @@ exports.getProductById = async (req, res) => {
         },
       },
       { $unwind: { path: '$activeOffer', preserveNullAndEmptyArrays: true } },
+
+      // Apply offer discount to each variation
       {
         $addFields: {
           variations: {
@@ -715,109 +730,61 @@ exports.getProductById = async (req, res) => {
           },
         },
       },
-      { $unset: ['__v', 'activeOffer'] },
+
+      // Final projection (same for main + related)
+      {
+        $project: {
+          __v: 0,
+          activeOffer: 0,
+          isDeleted: 0,
+          updatedAt: 0,
+        },
+      },
     ];
 
-    const [productResult] = await Product.aggregate(mainPipeline);
+    // 1. Fetch main product
+    const mainPipeline = [
+      { $match: { _id: new mongoose.Types.ObjectId(id) } },
+      ...buildProductPipeline(),
+    ];
 
-    if (!productResult) {
+    const [product] = await Product.aggregate(mainPipeline);
+
+    if (!product) {
       return res.status(404).json({ success: false, msg: 'Product not found or inactive' });
     }
 
-    // ========= RELATED PRODUCTS (up to 4) =========
+    // 2. Fetch related products (same subcategory first, then category)
     const relatedPipeline = [
       {
         $match: {
           _id: { $ne: new mongoose.Types.ObjectId(id) },
-          isDeleted: false,
-          status: 'Active',
           $or: [
-            { subcategory: productResult.subcategory?._id },
-            { category: productResult.category._id },
+            { subcategory: product.subcategory?._id },
+            { category: product.category._id },
           ],
-        },
-      },
-      {
-        $lookup: {
-          from: 'variants',
-          localField: 'variations',
-          foreignField: '_id',
-          as: 'variations',
-        },
-      },
-      {
-        $match: {
-          'variations.status': 'Active',
-          'variations.isDeleted': { $ne: true },
         },
       },
       {
         $addFields: {
           priority: {
-            $cond: [{ $eq: ['$subcategory', productResult.subcategory?._id] }, 2, 1],
+            $cond: [{ $eq: ['$subcategory', product.subcategory?._id] }, 10, 1],
           },
         },
       },
       { $sort: { priority: -1, createdAt: -1 } },
       { $limit: 4 },
-      {
-        $lookup: { from: 'categories', localField: 'category', foreignField: '_id', as: 'category' },
-      },
-      { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
-      {
-        $lookup: { from: 'subcategories', localField: 'subcategory', foreignField: '_id', as: 'subcategory' },
-      },
-      { $unwind: { path: '$subcategory', preserveNullAndEmptyArrays: true } },
-      {
-        $lookup: { from: 'brands', localField: 'brand', foreignField: '_id', as: 'brand' },
-      },
-      { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
-      {
-        $addFields: {
-          thumbnail: {
-            $cond: [
-              { $gt: [{ $size: '$images' }, 0] },
-              { $arrayElemAt: ['$images', 0] },
-              { $arrayElemAt: ['$variations.image', 0] },
-            ],
-          },
-          minPrice: { $min: '$variations.price' },
-          minDiscountPrice: {
-            $min: {
-              $cond: [
-                { $gt: ['$variations.discountPrice', 0] },
-                '$variations.discountPrice',
-                '$variations.price',
-              ],
-            },
-          },
-        },
-      },
-      {
-        $project: {
-          name: 1,
-          thumbnail: 1,
-          images: 1,
-          minPrice: 1,
-          minDiscountPrice: 1,
-          totalStock: { $sum: '$variations.stockQuantity' },
-          category: { name: '$category.name' },
-          subcategory: { subcategoryName: '$subcategory.subcategoryName' },
-          brand: { name: '$brand.name' },
-          slug: 1,
-          createdAt: 1,
-        },
-      },
+      ...buildProductPipeline(id), // reuse same logic
     ];
 
     const relatedProducts = await Product.aggregate(relatedPipeline);
 
-    // ========= FINAL RESPONSE =========
+    // Final response
     res.json({
       success: true,
       message: 'Product fetched successfully',
-      product: productResult,
-      relatedProducts,   // ← This is what the frontend will use
+      product,
+      relatedProducts,   // Same exact structure as main product
       currency,
     });
 
@@ -826,7 +793,7 @@ exports.getProductById = async (req, res) => {
     res.status(500).json({
       success: false,
       msg: 'Server error fetching product',
-      details: err.message || 'Unknown error',
+      details: err.message,
     });
   }
 };
