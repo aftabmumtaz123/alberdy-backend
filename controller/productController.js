@@ -605,7 +605,6 @@ exports.getAllProducts = async (req, res) => {
   }
 };
 
-
 exports.getProductById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -628,33 +627,19 @@ exports.getProductById = async (req, res) => {
       currencySign: config.currencySign || '$',
     };
 
-    const pipeline = [
-      { $match: { _id: new mongoose.Types.ObjectId(id) } },
+    // ========= MAIN PRODUCT PIPELINE =========
+    const mainPipeline = [
+      { $match: { _id: new mongoose.Types.ObjectId(id), isDeleted: false, status: 'Active' } },
       {
-        $lookup: {
-          from: 'categories',
-          localField: 'category',
-          foreignField: '_id',
-          as: 'category',
-        },
+        $lookup: { from: 'categories', localField: 'category', foreignField: '_id', as: 'category' },
       },
       { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
       {
-        $lookup: {
-          from: 'subcategories',
-          localField: 'subcategory',
-          foreignField: '_id',
-          as: 'subcategory',
-        },
+        $lookup: { from: 'subcategories', localField: 'subcategory', foreignField: '_id', as: 'subcategory' },
       },
       { $unwind: { path: '$subcategory', preserveNullAndEmptyArrays: true } },
       {
-        $lookup: {
-          from: 'brands',
-          localField: 'brand',
-          foreignField: '_id',
-          as: 'brand',
-        },
+        $lookup: { from: 'brands', localField: 'brand', foreignField: '_id', as: 'brand' },
       },
       { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
       {
@@ -662,37 +647,11 @@ exports.getProductById = async (req, res) => {
           from: 'variants',
           let: { varIds: { $ifNull: ['$variations', []] } },
           pipeline: [
+            { $match: { $expr: { $in: ['$_id', '$$varIds'] }, status: 'Active', isDeleted: { $ne: true } } },
             {
-              $match: {
-                $expr: { $in: ['$_id', '$$varIds'] },
-              },
-            },
-            {
-              $lookup: {
-                from: 'units',
-                localField: 'unit',
-                foreignField: '_id',
-                as: 'unit',
-              },
+              $lookup: { from: 'units', localField: 'unit', foreignField: '_id', as: 'unit' },
             },
             { $unwind: { path: '$unit', preserveNullAndEmptyArrays: true } },
-            {
-              $project: {
-                attribute: 1,
-                value: 1,
-                sku: 1,
-                unit: { $ifNull: ['$unit', null] },
-                purchasePrice: 1,
-                price: 1,
-                discountPrice: 1,
-                stockQuantity: 1,
-                expiryDate: 1,
-                weightQuantity: 1,
-                image: 1,
-                status: 1,
-                _id: 1,
-              },
-            },
           ],
           as: 'variations',
         },
@@ -710,13 +669,12 @@ exports.getProductById = async (req, res) => {
                     { $in: ['$$prodId', '$applicableProducts'] },
                     { $lte: ['$startDate', '$$currentDate'] },
                     { $gte: ['$endDate', '$$currentDate'] },
-                  ]
-                }
-              }
+                  ],
+                },
+              },
             },
             { $sort: { createdAt: -1 } },
             { $limit: 1 },
-
           ],
           as: 'activeOffer',
         },
@@ -726,7 +684,7 @@ exports.getProductById = async (req, res) => {
         $addFields: {
           variations: {
             $map: {
-              input: { $ifNull: ['$variations', []] },
+              input: '$variations',
               as: 'var',
               in: {
                 $mergeObjects: [
@@ -740,24 +698,14 @@ exports.getProductById = async (req, res) => {
                             if: { $eq: ['$activeOffer.discountType', 'Percentage'] },
                             then: {
                               $subtract: [
-                                { $ifNull: ['$$var.price', 0] },
-                                {
-                                  $multiply: [
-                                    { $ifNull: ['$$var.price', 0] },
-                                    { $divide: ['$activeOffer.discountValue', 100] },
-                                  ],
-                                },
+                                '$$var.price',
+                                { $multiply: ['$$var.price', { $divide: ['$activeOffer.discountValue', 100] }] },
                               ],
                             },
-                            else: {
-                              $subtract: [
-                                { $ifNull: ['$$var.price', 0] },
-                                '$activeOffer.discountValue',
-                              ],
-                            },
+                            else: { $subtract: ['$$var.price', '$activeOffer.discountValue'] },
                           },
                         },
-                        else: { $ifNull: ['$$var.price', 0] },
+                        else: '$$var.price',
                       },
                     },
                   },
@@ -767,23 +715,114 @@ exports.getProductById = async (req, res) => {
           },
         },
       },
-      { $unset: '__v' },
+      { $unset: ['__v', 'activeOffer'] },
     ];
 
-    const products = await Product.aggregate(pipeline);
-    if (products.length === 0) {
-      return res.status(404).json({ success: false, msg: 'Product not found' });
+    const [productResult] = await Product.aggregate(mainPipeline);
+
+    if (!productResult) {
+      return res.status(404).json({ success: false, msg: 'Product not found or inactive' });
     }
 
-    const product = products[0];
+    // ========= RELATED PRODUCTS (up to 4) =========
+    const relatedPipeline = [
+      {
+        $match: {
+          _id: { $ne: new mongoose.Types.ObjectId(id) },
+          isDeleted: false,
+          status: 'Active',
+          $or: [
+            { subcategory: productResult.subcategory?._id },
+            { category: productResult.category._id },
+          ],
+        },
+      },
+      {
+        $lookup: {
+          from: 'variants',
+          localField: 'variations',
+          foreignField: '_id',
+          as: 'variations',
+        },
+      },
+      {
+        $match: {
+          'variations.status': 'Active',
+          'variations.isDeleted': { $ne: true },
+        },
+      },
+      {
+        $addFields: {
+          priority: {
+            $cond: [{ $eq: ['$subcategory', productResult.subcategory?._id] }, 2, 1],
+          },
+        },
+      },
+      { $sort: { priority: -1, createdAt: -1 } },
+      { $limit: 4 },
+      {
+        $lookup: { from: 'categories', localField: 'category', foreignField: '_id', as: 'category' },
+      },
+      { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: { from: 'subcategories', localField: 'subcategory', foreignField: '_id', as: 'subcategory' },
+      },
+      { $unwind: { path: '$subcategory', preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: { from: 'brands', localField: 'brand', foreignField: '_id', as: 'brand' },
+      },
+      { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
+      {
+        $addFields: {
+          thumbnail: {
+            $cond: [
+              { $gt: [{ $size: '$images' }, 0] },
+              { $arrayElemAt: ['$images', 0] },
+              { $arrayElemAt: ['$variations.image', 0] },
+            ],
+          },
+          minPrice: { $min: '$variations.price' },
+          minDiscountPrice: {
+            $min: {
+              $cond: [
+                { $gt: ['$variations.discountPrice', 0] },
+                '$variations.discountPrice',
+                '$variations.price',
+              ],
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          name: 1,
+          thumbnail: 1,
+          images: 1,
+          minPrice: 1,
+          minDiscountPrice: 1,
+          totalStock: { $sum: '$variations.stockQuantity' },
+          category: { name: '$category.name' },
+          subcategory: { subcategoryName: '$subcategory.subcategoryName' },
+          brand: { name: '$brand.name' },
+          slug: 1,
+          createdAt: 1,
+        },
+      },
+    ];
 
+    const relatedProducts = await Product.aggregate(relatedPipeline);
+
+    // ========= FINAL RESPONSE =========
     res.json({
       success: true,
       message: 'Product fetched successfully',
-      product,
-      currency, // Add currency details to response
+      product: productResult,
+      relatedProducts,   // ← This is what the frontend will use
+      currency,
     });
+
   } catch (err) {
+    console.error('getProductById error:', err);
     res.status(500).json({
       success: false,
       msg: 'Server error fetching product',
