@@ -4,6 +4,7 @@ const path = require('path');
 const Product = require('../model/Product');
 const Variant = require('../model/variantProduct');
 const Category = require('../model/Category');
+const Order = require('../model/Order');
 const Subcategory = require('../model/subCategory');
 const Brand = require('../model/Brand');
 const Unit = require('../model/Unit');
@@ -359,10 +360,9 @@ exports.createProduct = async (req, res) => {
 };
 
 
-
 exports.getAllProducts = async (req, res) => {
   const { page = 1, limit, category, subcategory, brand, status, name, lowStock } = req.query;
-  const filter = {};
+  const filter = { isDeleted: false };
 
   try {
     // Fetch currency configuration
@@ -398,93 +398,51 @@ exports.getAllProducts = async (req, res) => {
     if (status) filter.status = status;
     if (name) filter.name = { $regex: name, $options: 'i' };
 
-    // ---------- BASE AGGREGATION PIPELINE (WITH EARLY SORT) ----------
-    let pipeline = [
-      { $match: filter },
-
-      // CRITICAL FIX: Sort by newest first EARLY in the pipeline
+    // ---------- REUSABLE PRODUCT POPULATION PIPELINE ----------
+    const productPopulationPipeline = [
       { $sort: { createdAt: -1 } },
 
-      // Now all subsequent operations preserve the correct order
-      {
-        $lookup: {
-          from: 'categories',
-          localField: 'category',
-          foreignField: '_id',
-          as: 'category',
-        },
-      },
+      { $lookup: { from: 'categories', localField: 'category', foreignField: '_id', as: 'category' } },
       { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
-      {
-        $lookup: {
-          from: 'subcategories',
-          localField: 'subcategory',
-          foreignField: '_id',
-          as: 'subcategory',
-        },
-      },
+
+      { $lookup: { from: 'subcategories', localField: 'subcategory', foreignField: '_id', as: 'subcategory' } },
       { $unwind: { path: '$subcategory', preserveNullAndEmptyArrays: true } },
-      {
-        $lookup: {
-          from: 'brands',
-          localField: 'brand',
-          foreignField: '_id',
-          as: 'brand',
-        },
-      },
+
+      { $lookup: { from: 'brands', localField: 'brand', foreignField: '_id', as: 'brand' } },
       { $unwind: { path: '$brand', preserveNullAndEmptyArrays: true } },
+
       {
         $lookup: {
           from: 'variants',
           let: { varIds: { $ifNull: ['$variations', []] } },
           pipeline: [
             { $match: { $expr: { $in: ['$_id', '$$varIds'] } } },
-            {
-              $lookup: {
-                from: 'units',
-                localField: 'unit',
-                foreignField: '_id',
-                as: 'unit',
-              },
-            },
+            { $lookup: { from: 'units', localField: 'unit', foreignField: '_id', as: 'unit' } },
             { $unwind: { path: '$unit', preserveNullAndEmptyArrays: true } },
             {
               $addFields: {
                 status: {
                   $cond: {
-                    if: {
-                      $and: [
-                        { $ne: ['$expiryDate', null] },
-                        { $lt: ['$expiryDate', new Date()] },
-                      ],
-                    },
+                    if: { $and: [{ $ne: ['$expiryDate', null] }, { $lt: ['$expiryDate', new Date()] }] },
                     then: 'inactive',
-                    else: { $ifNull: ['$status', 'active'] },
-                  },
-                },
-              },
+                    else: { $ifNull: ['$status', 'active'] }
+                  }
+                }
+              }
             },
             {
               $project: {
-                attribute: 1,
-                value: 1,
-                sku: 1,
-                unit: { $ifNull: ['$unit', null] },
-                purchasePrice: 1,
-                price: 1,
-                discountPrice: 1,
-                stockQuantity: 1,
-                expiryDate: 1,
-                weightQuantity: 1,
-                image: 1,
-                status: 1,
-                _id: 1,
-              },
-            },
+                attribute: 1, value: 1, sku: 1, unit: 1, purchasePrice: 1,
+                price: 1, discountPrice: 1, stockQuantity: 1, weightQuantity: 1,
+                expiryDate: 1, image: 1, status: 1, _id: 1
+              }
+            }
           ],
-          as: 'variations',
-        },
+          as: 'variations'
+        }
       },
+
+      // Active Offer
       {
         $lookup: {
           from: 'offers',
@@ -508,8 +466,9 @@ exports.getAllProducts = async (req, res) => {
           as: 'activeOffer'
         }
       },
-
       { $unwind: { path: '$activeOffer', preserveNullAndEmptyArrays: true } },
+
+      // effectivePrice on variations
       {
         $addFields: {
           variations: {
@@ -529,72 +488,102 @@ exports.getAllProducts = async (req, res) => {
                             then: {
                               $subtract: [
                                 { $ifNull: ['$$var.price', 0] },
-                                {
-                                  $multiply: [
-                                    { $ifNull: ['$$var.price', 0] },
-                                    { $divide: ['$activeOffer.discountValue', 100] },
-                                  ],
-                                },
-                              ],
+                                { $multiply: [{ $ifNull: ['$$var.price', 0] }, { $divide: ['$activeOffer.discountValue', 100] }] }
+                              ]
                             },
-                            else: {
-                              $subtract: [
-                                { $ifNull: ['$$var.price', 0] },
-                                '$activeOffer.discountValue',
-                              ],
-                            },
-                          },
+                            else: { $subtract: [{ $ifNull: ['$$var.price', 0] }, '$activeOffer.discountValue'] }
+                          }
                         },
-                        else: { $ifNull: ['$$var.price', 0] },
-                      },
-                    },
-                  },
-                ],
-              },
-            },
-          },
-        },
+                        else: { $ifNull: ['$$var.price', 0] }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
       },
+
+      { $project: { __v: 0 } }
     ];
 
-    // ---------- LOW STOCK FILTER (applied AFTER sort) ----------
+    // ---------- MAIN PRODUCTS LIST (with filters & pagination) ----------
+    let mainPipeline = [
+      { $match: filter },
+      ...productPopulationPipeline
+    ];
+
     if (lowStock === 'true') {
-      pipeline.push({
-        $addFields: { totalStock: { $sum: '$variations.stockQuantity' } },
-      });
-      pipeline.push({ $match: { totalStock: { $lt: 10 } } });
+      mainPipeline.push({ $addFields: { totalStock: { $sum: '$variations.stockQuantity' } } });
+      mainPipeline.push({ $match: { totalStock: { $lt: 10 } } });
     }
 
-    // ---------- COUNT (must include sort + lowStock to be accurate) ----------
-    const countPipeline = [...pipeline, { $count: 'total' }];
-    const countResult = await Product.aggregate(countPipeline);
+    // Count for pagination
+    const countResult = await Product.aggregate([...mainPipeline, { $count: 'total' }]);
     const total = countResult[0]?.total || 0;
 
-    // ---------- PAGINATION ----------
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = limit ? parseInt(limit) : null;
 
-    let finalPipeline = [...pipeline];
-
-    if (limitNum && !isNaN(limitNum)) {
-      finalPipeline.push({ $skip: (pageNum - 1) * limitNum });
-      finalPipeline.push({ $limit: limitNum });
+    if (limitNum) {
+      mainPipeline.push({ $skip: (pageNum - 1) * limitNum });
+      mainPipeline.push({ $limit: limitNum });
     }
 
-    finalPipeline.push({ $project: { __v: 0 } });
+    const products = await Product.aggregate(mainPipeline);
 
-
-    // ---------- EXECUTE ----------
-    const products = await Product.aggregate(finalPipeline);
+    // ---------- BEST SELLERS: Top 10 products by total quantity sold ----------
+    const bestSellers = await Order.aggregate([
+      {
+        $match: {
+          status: 'delivered',
+          paymentStatus: 'paid',
+          // Optional: exclude cancelled/returned
+          status: { $nin: ['cancelled', 'returned'] }
+        }
+      },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$items.product',
+          totalSold: { $sum: '$items.quantity' }
+        }
+      },
+      { $sort: { totalSold: -1 } },
+      { $limit: 10 },
+      {
+        $lookup: {
+          from: 'products',
+          localField: '_id',
+          foreignField: '_id',
+          pipeline: [
+            { $match: { isDeleted: false, status: 'Active' } }, // Only active products
+            ...productPopulationPipeline
+          ],
+          as: 'product'
+        }
+      },
+      { $unwind: '$product' },
+      {
+        $replaceRoot: {
+          newRoot: {
+            $mergeObjects: ['$product', { totalSold: '$totalSold' }]
+          }
+        }
+      }
+    ]);
 
     res.json({
       success: true,
       products,
+      bestSellers, // ← New field: top 10 best-selling products
       currency,
       total,
       pages: limitNum ? Math.ceil(total / limitNum) : 1,
       currentPage: pageNum,
     });
+
   } catch (err) {
     console.error('getAllProducts error:', err);
     res.status(500).json({

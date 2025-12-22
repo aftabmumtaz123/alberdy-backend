@@ -7,7 +7,6 @@ exports.createCategory =  async (req, res) => {
   const { name, description, status = 'Active' } = req.body;
 
    const image = req.file ? req.file.path : null;
-
   if (!name) {
     return res.status(400).json({ success: false, msg: 'Category name is required' });
   }
