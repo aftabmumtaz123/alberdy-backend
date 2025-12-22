@@ -9,8 +9,9 @@ const requireRole = roles => (req, res, next) => {
   next();
 };
 
+
 // Subscribe to push notifications
-router.post('/subscribe', async (req, res) => {
+router.post('/subscribe', authMiddleware, async (req, res) => {
   try {
     const { subscription } = req.body;
     if (!subscription || !subscription.endpoint) {
@@ -22,7 +23,7 @@ router.post('/subscribe', async (req, res) => {
     await PushSubscription.findOneAndUpdate(
       { endpoint: subscription.endpoint },
       {
-        user: req.user.id,
+        user: req.user.id,           // Now safe – req.user exists
         endpoint: subscription.endpoint,
         keys: subscription.keys,
         role: req.user.role
@@ -36,6 +37,7 @@ router.post('/subscribe', async (req, res) => {
     res.status(500).json({ success: false, msg: 'Failed to subscribe' });
   }
 });
+
 
 // Optional: Unsubscribe (good practice)
 router.post('/unsubscribe', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {

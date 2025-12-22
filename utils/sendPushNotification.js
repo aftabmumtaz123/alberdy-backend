@@ -23,7 +23,7 @@ const sendNotification = async (subscription, title, body, data = {}) => {
   } catch (error) {
     console.error('Error sending push:', error);
     
-    // Remove invalid subscription
+    
     if (error.statusCode === 410) {
       const PushSubscription = require('../model/PushSubscription');
       await PushSubscription.deleteOne({ endpoint: subscription.endpoint });
