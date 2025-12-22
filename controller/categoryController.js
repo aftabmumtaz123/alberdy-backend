@@ -104,7 +104,6 @@ exports.getCategoryById =   async (req, res) => {
 }
 exports.updateCategory = async (req, res) => {
   const { name, description, status } = req.body;
-d
   try {
     const existingCategory = await Category.findById(req.params.id);
     if (!existingCategory) {
