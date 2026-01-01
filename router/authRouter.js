@@ -4,8 +4,8 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const User = require('../model/User');
 const Order = require('../model/Order');
-const JWT_SECRET = process.env.JWT_SECRET; // Fallback for dev; use env in prod
-const REFRESH_SECRET = process.env.REFRESH_SECRET; // Fallback for dev; use env in prod
+const JWT_SECRET = process.env.JWT_SECRET; 
+const REFRESH_SECRET = process.env.REFRESH_SECRET; 
 const authMiddleware = require('../middleware/auth');
 const RefreshToken = require('../model/refreshToken');
 const { OAuth2Client } = require('google-auth-library');
@@ -14,55 +14,50 @@ const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 
 router.post('/api/auth/google', async (req, res) => {
-  const { credential } = req.body; // ID token from frontend
+  const { credential } = req.body; 
   if (!credential) {
     return res.status(400).json({ success: false, msg: 'No credential provided' });
   }
 
+  if(credential === undefined){
+    res.status(400).json({ success: false, msg: 'No credential provided' });
+  }
+
   try {
-    // Verify the ID token
     const ticket = await googleClient.verifyIdToken({
       idToken: credential,
       audience: process.env.GOOGLE_CLIENT_ID, // Must match your client ID
     });
     const payload = ticket.getPayload();
-    // payload: { email, name, picture, sub (googleId), email_verified, etc. }
+
+    console.log("Payloads: ", {...payload});
 
     if (!payload.email_verified) {
       return res.status(400).json({ success: false, msg: 'Email not verified by Google' });
     }
 
-    // Find or create user
     let user = await User.findOne({ email: payload.email });
 
     if (!user) {
-      // New user - signup logic
       const newUser = new User({
         name: payload.name || payload.email.split('@')[0],
         email: payload.email,
-        role: 'Customer', // default
-        // Optional: googleId: payload.sub, picture: payload.picture
-        // You could add a field like provider: 'google' if needed
-        // No password needed for social logins
+        role: 'Customer',
       });
       await newUser.save();
       user = newUser;
     } else {
-      // Existing user - optional: update name/picture if changed
       if (user.name !== payload.name) user.name = payload.name;
       await user.save();
     }
 
-    // Update lastLogin
     await User.collection.updateOne(
       { _id: user._id },
       { $set: { lastLogin: new Date() } }
     );
 
-    // Optional: invalidate old refresh tokens for security
     await RefreshToken.deleteMany({ userId: user._id });
 
-    // Generate your JWT tokens (same as login)
     const accessPayload = { id: user._id, role: user.role };
     const accessToken = jwt.sign(accessPayload, JWT_SECRET, { expiresIn: '120m' });
 
@@ -94,6 +89,7 @@ router.post('/api/auth/google', async (req, res) => {
 
     res.json({
       success: true,
+      msg: 'Login successful',
       accessToken, // optional, if frontend needs it immediately
       user: updatedUser
     });
