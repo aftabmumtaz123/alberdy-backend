@@ -65,8 +65,8 @@ app.use('/api/expenses', require('./router/expense'));
 app.use('/api/expense-categories', require('./router/expenseCategory')); 
 app.use('/api/currencies', require('./router/currency')); 
 app.use('/api/configuration', require('./router/appConfigurationRouter')); 
-app.use('/api/dashboards', require('./router/dashboard'));
-app.use('/api/offers', require('./router/offer'));
+app.use('/api/dashboard', require('./router/dashboard'));
+app.use('/api/offer', require('./router/offer'));
 app.use('/api/orders', require('./router/orderRouter')); 
 app.use('/api/contact', require("./router/contactUs")) 
 app.use('/', require('./router/authRouter')); 
@@ -79,7 +79,7 @@ app.use('/api/supllier/payments', require('./router/paymentRoutes'))
 app.use('/api/customer-payments', require('./router/customerPaymentRoutes'));
 app.use('/api/inventory', require('./router/inventoryRoutes'));
 
-H
+
 
 app.use('/api/push', require('./router/push')); 
 
