@@ -70,7 +70,6 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       items, subtotal, tax = 0, discount = 0, total,
       paymentMethod, shippingAddress, notes, shipping = 5.99,
       paymentProvider, isPaymentVerified, paymentId, paymentResponse,
-      orderID
     } = req.body;
 
     // ---- basic validation ----
@@ -139,7 +138,6 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
 
       orderNumber,
       orderTrackingNumber: trackingNumber,
-
       items: orderItems,
 
       subtotal,
@@ -150,17 +148,19 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
 
       paymentMethod,
 
-      paymentProvider,
-      isPaymentVerified,
-      paymentId,
-      paymentResponse,
-      paymentStatus: paymentMethod === 'COD' ? 'pending' : 'unpaid',
+      paymentProvider: paymentProvider || null,
+      paymentId: paymentId || null,
+      paymentResponse: paymentResponse || null,
 
+      isPaymentVerified: false,
+      paymentStatus: 'unpaid',
       status: 'pending',
       trackingStatus: 'not shipped',
+
       shippingAddress,
       notes: notes || ''
     });
+
 
 
     await order.save();
