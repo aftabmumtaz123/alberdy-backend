@@ -24,14 +24,14 @@ const generateOrderNumber = async () => {
   const last = await Order.findOne().sort({ createdAt: -1 }).select('orderNumber');
   if (!last) return '#ORD-001';
   const num = parseInt(last.orderNumber.replace('#ORD-', '')) + 1;
-  return `#ORD-${num.toString().padStart(4, '0')}`;
+  return `#ORD-${num.toString().padStart(3, '0')}`;
 };
 
 const generateTrackingNumber = async () => {
   const last = await Order.findOne().sort({ createdAt: -1 }).select('orderTrackingNumber');
   if (!last || !last.orderTrackingNumber) return '#TRK-LEY-321-001';
   const num = parseInt(last.orderTrackingNumber.replace('#TRK-LEY-321-', '')) + 1;
-  return `#TRK-LEY-321-${num.toString().padStart(4, '0')}`;
+  return `#TRK-LEY-321-${num.toString().padStart(3, '0')}`;
 };
 
 /* ---------- Helper: fetch currency settings ---------- */
@@ -167,10 +167,10 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
     await order.save();
 
 
-    // // ---- decrement stock ----
-    // await Variant.findByIdAndUpdate(itm.variant, {
-    //   $inc: { stockQuantity: -itm.quantity }
-    // });
+    // ---- decrement stock ----
+    for (const itm of orderItems) {
+      await Variant.findByIdAndUpdate(itm.variant, { $inc: { stockQuantity: -itm.quantity } });
+    }
 
     // ---- populate response ----
     await order.populate('items.product', 'name thumbnail images');
@@ -538,7 +538,10 @@ router.get('/key/public-key', (req, res) => {
 });
 
 
-router.post('/:orderId/refund-request', authMiddleware, async (req, res) => {
+router.post(
+  '/:orderId/refund-request',
+  authMiddleware,
+  async (req, res) => {
     try {
       const { reason } = req.body;
 
@@ -555,10 +558,12 @@ router.post('/:orderId/refund-request', authMiddleware, async (req, res) => {
         return res.status(403).json({ msg: 'Not allowed' });
       }
 
+      // ❌ Must be paid
       if (order.paymentStatus !== 'paid') {
         return res.status(400).json({ msg: 'Only paid orders can be refunded' });
       }
 
+      // ❌ Prevent double refund
       if (order.status === 'returned' || order.paymentStatus === 'refunded') {
         return res.status(400).json({ msg: 'Refund already requested or processed' });
       }
