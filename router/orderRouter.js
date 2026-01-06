@@ -10,8 +10,6 @@ const AppConfiguration = require('../model/app_configuration'); // Import AppCon
 const authMiddleware = require('../middleware/auth');
 
 
-
-
 const requireRole = roles => (req, res, next) => {
   if (!req.user || !roles.includes(req.user.role)) {
     return res.status(403).json({ success: false, msg: 'Access denied' });
@@ -19,7 +17,6 @@ const requireRole = roles => (req, res, next) => {
   next();
 };
 
-/* ---------- Helper: generate order / tracking numbers ---------- */
 const generateOrderNumber = async () => {
   const last = await Order.findOne().sort({ createdAt: -1 }).select('orderNumber');
   if (!last) return '#ORD-001';
