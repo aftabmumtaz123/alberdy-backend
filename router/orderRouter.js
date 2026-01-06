@@ -64,12 +64,13 @@ const getCurrencySettings = async () => {
 
 
 
-/* -------------------------- CREATE ORDER -------------------------- */
 router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
     const {
       items, subtotal, tax = 0, discount = 0, total,
-      paymentMethod, shippingAddress, notes, shipping = 5.99
+      paymentMethod, shippingAddress, notes, shipping = 5.99,
+      paymentProvider, isPaymentVerified, paymentId, paymentResponse,
+      orderID
     } = req.body;
 
     // ---- basic validation ----
@@ -80,7 +81,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       return res.status(400).json({ success: false, msg: 'Complete shipping address and email required' });
     }
 
-    // ---- compute subtotal & validate stock ----
+
     const orderItems = [];
     let computedSubtotal = 0;
 
@@ -124,7 +125,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       computedSubtotal += lineTotal;
     }
 
-  
+
 
     const calcTotal = subtotal + tax + shipping - discount;
     if (Math.abs(calcTotal - total) > 0.01)
@@ -133,26 +134,37 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
     // ---- generate numbers & create order ----
     const orderNumber = await generateOrderNumber();
     const trackingNumber = await generateTrackingNumber();
-
     const order = new Order({
       user: req.user.id,
+
       orderNumber,
       orderTrackingNumber: trackingNumber,
+
       items: orderItems,
+
       subtotal,
       tax,
       discount,
       shipping,
       total,
+
       paymentMethod,
-      shippingAddress,
-      notes: notes || '',
+
+      paymentProvider,
+      isPaymentVerified,
+      paymentId,
+      paymentResponse,
+      paymentStatus: paymentMethod === 'COD' ? 'pending' : 'unpaid',
+
       status: 'pending',
-      paymentStatus: paymentMethod === 'COD' ? 'pending' : 'pending',
-      trackingStatus: 'not shipped'
+      trackingStatus: 'not shipped',
+      shippingAddress,
+      notes: notes || ''
     });
 
+
     await order.save();
+
 
     // ---- decrement stock ----
     for (const itm of orderItems) {

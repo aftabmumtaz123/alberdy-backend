@@ -26,8 +26,15 @@ const orderSchema = new mongoose.Schema(
       default: 'not shipped'
     },
 
+    orderID: { type: mongoose.Schema.Types.Mixed},
     items: [orderItemSchema],
-
+    paymentProvider: {type: String},
+    paymentStatus: {type: String},
+    isPaymentVerified: {
+      type: Boolean, default: false
+    },
+    paymentId: {type: String},
+    paymentResponse: {type: mongoose.Schema.Types.Mixed},
     subtotal: { type: Number, required: true },
     tax:      { type: Number, default: 0 },
     discount: { type: Number, default: 0 },
@@ -51,7 +58,6 @@ const orderSchema = new mongoose.Schema(
     },
 
     paymentMethod: { type: String, enum: ['COD','Online'], required: true },
-    paymentStatus: { type: String, enum: ['pending','paid', 'unpaid','refunded'], default: 'unpaid' },
 
     notes: { type: String }
   },
