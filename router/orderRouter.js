@@ -388,7 +388,6 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
   }
 });
 
-/* -------------------------- DELETE ORDER (restore stock) -------------------------- */
 router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { id } = req.params;
@@ -536,6 +535,57 @@ router.get('/key/public-key', (req, res) => {
     publicKey: process.env.VAPID_PUBLIC_KEY
   });
 });
+
+
+router.post(
+  '/:orderId/refund-request',
+  authMiddleware,
+  async (req, res) => {
+    try {
+      const { reason } = req.body;
+
+      const order = await Order.findById(req.params.orderId);
+      if (!order) {
+        return res.status(404).json({ msg: 'Order not found' });
+      }
+
+      // 🔒 Only owner or admin
+      if (
+        order.user.toString() !== req.user.id &&
+        !['Super Admin', 'Manager'].includes(req.user.role)
+      ) {
+        return res.status(403).json({ msg: 'Not allowed' });
+      }
+
+      // ❌ Must be paid
+      if (order.paymentStatus !== 'paid') {
+        return res.status(400).json({ msg: 'Only paid orders can be refunded' });
+      }
+
+      // ❌ Prevent double refund
+      if (order.status === 'returned' || order.paymentStatus === 'refunded') {
+        return res.status(400).json({ msg: 'Refund already requested or processed' });
+      }
+
+      // ✅ Mark refund requested
+      order.status = 'returned';
+      order.paymentStatus = 'refunded';
+      order.refundReason = reason || 'No reason provided';
+      order.refundRequestedAt = new Date();
+
+      await order.save();
+
+      res.json({
+        success: true,
+        msg: 'Refund request submitted successfully',
+        order
+      });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ msg: 'Refund request failed' });
+    }
+  }
+);
 
 
 
