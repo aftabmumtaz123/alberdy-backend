@@ -152,7 +152,6 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       paymentProvider: paymentProvider || null,
       paymentId: paymentId || null,
       paymentResponse: paymentResponse || null,
-
       isPaymentVerified: isPaymentVerified || false,
       paymentStatus: paymentStatus || null,
       status: 'pending',
@@ -167,10 +166,6 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
     await order.save();
 
 
-    // ---- decrement stock ----
-    for (const itm of orderItems) {
-      await Variant.findByIdAndUpdate(itm.variant, { $inc: { stockQuantity: -itm.quantity } });
-    }
 
     // ---- populate response ----
     await order.populate('items.product', 'name thumbnail images');
@@ -210,7 +205,6 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
           ).catch(err => console.warn('Failed to send push to one subscriber:', err.message))
         );
 
-        // Fire and forget (non-blocking)
         Promise.allSettled(notificationPromises);
       }
     } catch (pushErr) {
@@ -511,7 +505,6 @@ router.get('/track/:identifier', async (req, res) => {
 
 
 
-// routes/push.js
 router.post('/subscribe', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   const { subscription } = req.body;
   const PushSubscription = require('../model/PushSubscription');
@@ -538,10 +531,7 @@ router.get('/key/public-key', (req, res) => {
 });
 
 
-router.post(
-  '/:orderId/refund-request',
-  authMiddleware,
-  async (req, res) => {
+router.post('/:orderId/refund-request', authMiddleware, async (req, res) => {
     try {
       const { reason } = req.body;
 
@@ -558,17 +548,14 @@ router.post(
         return res.status(403).json({ msg: 'Not allowed' });
       }
 
-      // ❌ Must be paid
       if (order.paymentStatus !== 'paid') {
         return res.status(400).json({ msg: 'Only paid orders can be refunded' });
       }
 
-      // ❌ Prevent double refund
       if (order.status === 'returned' || order.paymentStatus === 'refunded') {
         return res.status(400).json({ msg: 'Refund already requested or processed' });
       }
 
-      // ✅ Mark refund requested
       order.status = 'returned';
       order.paymentStatus = 'refunded';
       order.refundReason = reason || 'No reason provided';
@@ -588,6 +575,118 @@ router.post(
   }
 );
 
+
+router.post('/verify-payment', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
+  try {
+    const { orderId, action, reason } = req.body;
+
+    // Validation
+    if (!orderId || !mongoose.Types.ObjectId.isValid(orderId)) {
+      return res.status(400).json({
+        success: false,
+        msg: 'Valid orderId is required'
+      });
+    }
+
+    if (!action || !['mark-paid', 'mark-unpaid'].includes(action)) {
+      return res.status(400).json({
+        success: false,
+        msg: 'Action must be "mark-paid" or "mark-unpaid"'
+      });
+    }
+
+    const order = await Order.findById(orderId)
+      .populate('items.product', 'name')
+      .populate('user', 'name email');
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        msg: 'Order not found'
+      });
+    }
+
+    if (order.status === 'cancelled') {
+      return res.status(400).json({
+        success: false,
+        msg: 'Cannot modify payment status of cancelled orders'
+      });
+    }
+
+    if (order.status === 'returned' && action === 'mark-paid') {
+      return res.status(400).json({
+        success: false,
+        msg: 'Cannot mark returned orders as paid'
+      });
+    }
+
+    const previousPaymentStatus = order.paymentStatus;
+
+    if (action === 'mark-paid') {
+      if (['paid', 'refunded'].includes(order.paymentStatus)) {
+        return res.status(400).json({
+          success: false,
+          msg: `Payment is already ${order.paymentStatus}`
+        });
+      }
+
+      order.paymentStatus = 'paid';
+      order.paymentVerifiedAt = new Date();
+      order.paymentVerifiedBy = req.user.id; 
+      order.paymentVerificationMethod = 'manual'; 
+
+      if (order.status === 'pending') {
+        order.status = 'confirmed';
+      }
+    }
+    
+    else if (action === 'mark-unpaid') {
+      if (order.paymentStatus === 'refunded') {
+        return res.status(400).json({
+          success: false,
+          msg: 'Cannot mark refunded order as unpaid'
+        });
+      }
+
+      order.paymentStatus = 'unpaid';
+      order.paymentVerifiedAt = null;
+      order.paymentVerifiedBy = null;
+      order.paymentVerificationMethod = null;
+    }
+
+    order.paymentHistory = order.paymentHistory || [];
+    order.paymentHistory.push({
+      action,
+      previousStatus: previousPaymentStatus,
+      newStatus: order.paymentStatus,
+      reason: reason || 'No reason provided',
+      performedBy: req.user.id,
+      performedByRole: req.user.role,
+      timestamp: new Date()
+    });
+
+    await order.save();
+
+    res.json({
+      success: true,
+      msg: `Payment status updated to "${order.paymentStatus}"`,
+      data: {
+        orderNumber: order.orderNumber,
+        previousStatus: previousPaymentStatus,
+        newStatus: order.paymentStatus,
+        updatedBy: req.user.name || req.user.email
+      }
+    });
+
+  } catch (err) {
+    console.error('Payment verification error:', err);
+    res.status(500).json({
+      success: false,
+      msg: 'Server error during payment verification',
+      details: err.message
+    });
+  }
+});
 
 
 module.exports = router;

@@ -34,6 +34,8 @@ const orderSchema = new mongoose.Schema(
       type: Boolean, default: false
     },
     paymentId: { type: String },
+    paymentVerifiedAt: { type: Date },
+    paymentVerifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     paymentResponse: { type: mongoose.Schema.Types.Mixed },
     subtotal: { type: Number, required: true },
     tax: { type: Number, default: 0 },
