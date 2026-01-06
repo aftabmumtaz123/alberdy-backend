@@ -70,6 +70,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       items, subtotal, tax = 0, discount = 0, total,
       paymentMethod, shippingAddress, notes, shipping = 5.99,
       paymentProvider, isPaymentVerified, paymentId, paymentResponse,
+      paymentStatus
     } = req.body;
 
     // ---- basic validation ----
@@ -167,9 +168,9 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
 
 
     // ---- decrement stock ----
-    for (const itm of orderItems) {
-      await Variant.findByIdAndUpdate(itm.variant, { $inc: { stockQuantity: -itm.quantity } });
-    }
+    await Variant.findByIdAndUpdate(itm.variant, {
+      $inc: { stockQuantity: -itm.quantity }
+    });
 
     // ---- populate response ----
     await order.populate('items.product', 'name thumbnail images');
@@ -537,10 +538,7 @@ router.get('/key/public-key', (req, res) => {
 });
 
 
-router.post(
-  '/:orderId/refund-request',
-  authMiddleware,
-  async (req, res) => {
+router.post('/:orderId/refund-request', authMiddleware, async (req, res) => {
     try {
       const { reason } = req.body;
 
@@ -557,12 +555,10 @@ router.post(
         return res.status(403).json({ msg: 'Not allowed' });
       }
 
-      // ❌ Must be paid
       if (order.paymentStatus !== 'paid') {
         return res.status(400).json({ msg: 'Only paid orders can be refunded' });
       }
 
-      // ❌ Prevent double refund
       if (order.status === 'returned' || order.paymentStatus === 'refunded') {
         return res.status(400).json({ msg: 'Refund already requested or processed' });
       }
