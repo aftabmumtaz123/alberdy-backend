@@ -152,8 +152,8 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       paymentId: paymentId || null,
       paymentResponse: paymentResponse || null,
 
-      isPaymentVerified: false,
-      paymentStatus: 'unpaid',
+      isPaymentVerified: isPaymentVerified || false,
+      paymentStatus: paymentStatus || null,
       status: 'pending',
       trackingStatus: 'not shipped',
 
