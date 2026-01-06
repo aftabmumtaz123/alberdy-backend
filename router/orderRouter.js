@@ -24,14 +24,14 @@ const generateOrderNumber = async () => {
   const last = await Order.findOne().sort({ createdAt: -1 }).select('orderNumber');
   if (!last) return '#ORD-001';
   const num = parseInt(last.orderNumber.replace('#ORD-', '')) + 1;
-  return `#ORD-${num.toString().padStart(3, '0')}`;
+  return `#ORD-${num.toString().padStart(4, '0')}`;
 };
 
 const generateTrackingNumber = async () => {
   const last = await Order.findOne().sort({ createdAt: -1 }).select('orderTrackingNumber');
   if (!last || !last.orderTrackingNumber) return '#TRK-LEY-321-001';
   const num = parseInt(last.orderTrackingNumber.replace('#TRK-LEY-321-', '')) + 1;
-  return `#TRK-LEY-321-${num.toString().padStart(3, '0')}`;
+  return `#TRK-LEY-321-${num.toString().padStart(4, '0')}`;
 };
 
 /* ---------- Helper: fetch currency settings ---------- */
