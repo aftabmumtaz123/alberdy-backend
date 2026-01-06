@@ -6,7 +6,7 @@ const Order = require('../model/Order');
 const Product = require('../model/Product');
 const Variant = require('../model/variantProduct');
 const User = require('../model/User');
-const AppConfiguration = require('../model/app_configuration'); // Import AppConfiguration model
+const AppConfiguration = require('../model/app_configuration');
 const authMiddleware = require('../middleware/auth');
 
 
