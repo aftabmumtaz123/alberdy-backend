@@ -167,10 +167,10 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
     await order.save();
 
 
-    // ---- decrement stock ----
-    await Variant.findByIdAndUpdate(itm.variant, {
-      $inc: { stockQuantity: -itm.quantity }
-    });
+    // // ---- decrement stock ----
+    // await Variant.findByIdAndUpdate(itm.variant, {
+    //   $inc: { stockQuantity: -itm.quantity }
+    // });
 
     // ---- populate response ----
     await order.populate('items.product', 'name thumbnail images');
