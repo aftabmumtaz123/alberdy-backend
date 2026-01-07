@@ -4,22 +4,23 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const User = require('../model/User');
 const Order = require('../model/Order');
-const JWT_SECRET = process.env.JWT_SECRET; 
-const REFRESH_SECRET = process.env.REFRESH_SECRET; 
+const JWT_SECRET = process.env.JWT_SECRET;
+const REFRESH_SECRET = process.env.REFRESH_SECRET;
 const authMiddleware = require('../middleware/auth');
 const RefreshToken = require('../model/refreshToken');
 const { OAuth2Client } = require('google-auth-library');
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
-
+const crypto = require('crypto');
+const sendEmail = require('../utils/sendEmail');
 
 
 router.post('/api/auth/google', async (req, res) => {
-  const { credential } = req.body; 
+  const { credential } = req.body;
   if (!credential) {
     return res.status(400).json({ success: false, msg: 'No credential provided' });
   }
 
-  if(credential === undefined){
+  if (credential === undefined) {
     res.status(400).json({ success: false, msg: 'No credential provided' });
   }
 
@@ -30,7 +31,7 @@ router.post('/api/auth/google', async (req, res) => {
     });
     const payload = ticket.getPayload();
 
-    console.log("Payloads: ", {...payload});
+    console.log("Payloads: ", { ...payload });
 
     if (!payload.email_verified) {
       return res.status(400).json({ success: false, msg: 'Email not verified by Google' });
@@ -101,7 +102,6 @@ router.post('/api/auth/google', async (req, res) => {
 });
 
 
-
 router.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
@@ -109,6 +109,15 @@ router.post('/api/auth/login', async (req, res) => {
   }
   try {
     const user = await User.findOne({ email });
+
+    // if (!user.isVerified) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     msg: 'Please verify your email first. Check your inbox for the OTP.',
+    //   });
+    // }
+
+
     if (!user || !(await user.comparePassword(password))) {
       return res.status(400).json({ success: false, msg: 'Invalid credentials' });
     }
@@ -150,35 +159,46 @@ router.post('/api/auth/login', async (req, res) => {
     res.json({
       success: true,
       accessToken, // For immediate use
-      user:  updatedUser
+      user: updatedUser
     });
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ success: false, msg: 'Server error' });
   }
 });
+
+
 router.post('/api/auth/register', async (req, res) => {
   const { name, email, password, cPassword, role = 'Customer', address, petType } = req.body;
+
   if (!name || !email || !password) {
     return res.status(400).json({ success: false, msg: 'Name, email, and password are required' });
   }
+  if (password !== cPassword) {
+    return res.status(400).json({ success: false, msg: 'Passwords do not match' });
+  }
   if (!['Super Admin', 'Manager', 'Staff', 'Customer'].includes(role)) {
-    return res.status(400).json({ success: false, msg: 'Invalid role specified' });
+    return res.status(400).json({ success: false, msg: 'Invalid role' });
   }
-  if(password !== cPassword) {
-    return res.status(400).json({ success: false, msg: 'Password and Confirm Password do not match' });
-  }
+
   try {
     const existingUser = await User.findOne({ email });
     if (existingUser) {
+      if (!existingUser.isVerified) {
+        // Allow resending OTP if not verified
+        return res.status(400).json({
+          success: false,
+          msg: 'Email already registered but not verified. Check your email for OTP.',
+        });
+      }
       return res.status(400).json({ success: false, msg: 'User with this email already exists' });
     }
-    if(role !== 'Customer'){
-      const adminExist = await User.findOne({ role: { $in: ['Super Admin', 'Manager', 'Staff'] } });
-      if (adminExist) {
-        return res.status(400).json({ success: false, msg: 'Admin already exist' });
-      }
-    }
+
+    // Generate 6-digit OTP
+    const otp = crypto.randomInt(100000, 999999).toString();
+    const otpExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+    // Validate address (same as before)
     let validAddress = undefined;
     if (address && typeof address === 'object' && address !== null) {
       validAddress = {
@@ -187,58 +207,132 @@ router.post('/api/auth/register', async (req, res) => {
         state: address.state || '',
         zip: address.zip || ''
       };
-    } else if (address) {
-      console.warn('Invalid address format provided during registration; omitting address.');
     }
+
+    // Create user with isVerified: false
     const newUser = new User({
       name,
       email,
-      password, // Will be hashed automatically
+      password,
       role,
       address: validAddress,
-      petType // Optional for customers
+      petType,
+      isVerified: false,
+      otp,
+      otpExpires,
     });
     await newUser.save();
-    // Generate Access Token
-    const accessPayload = { id: newUser._id, role: newUser.role };
-    const accessToken = jwt.sign(accessPayload, JWT_SECRET, { expiresIn: '1h' });
-    // Generate Refresh Token
-    const refreshPayload = { id: newUser._id, role: newUser.role };
-    const refreshTokenStr = jwt.sign(refreshPayload, REFRESH_SECRET, { expiresIn: '7d' });
-    await RefreshToken.create({
-      token: refreshTokenStr,
-      userId: newUser._id,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-    });
-    res.cookie('access_token', accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 60 * 60 * 1000
-    });
-    res.cookie('refresh_token', refreshTokenStr, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+
+    // Send OTP Email
+    const html = `
+      <h2>Email Verification</h2>
+      <p>Hello ${name},</p>
+      <p>Your verification code is: <strong style="font-size: 20px;">${otp}</strong></p>
+      <p>It will expire in 10 minutes.</p>
+      <p>If you didn't request this, ignore this email.</p>
+    `;
+
+    try {
+      await sendEmail(email, 'Verify Your Email - Your App', html);
+    } catch (emailErr) {
+      console.error('Failed to send OTP email:', emailErr);
+      // Optionally delete user if email fails?
+      await User.findByIdAndDelete(newUser._id);
+      return res.status(500).json({ success: false, msg: 'Failed to send verification email' });
+    }
+
     res.status(201).json({
       success: true,
-      msg: 'User registered successfully',
-      accessToken, // For immediate use
-      user: {
-        id: newUser._id,
-        name: newUser.name,
-        role: newUser.role,
-        address: newUser.address,
-        email: newUser.email
-      }
+      msg: 'Registration successful! Please check your email for the 6-digit verification code.',
+      userId: newUser._id,
+      email: newUser.email,
     });
+
   } catch (err) {
     console.error('Register error:', err);
     res.status(500).json({ success: false, msg: 'Server error during registration' });
   }
 });
+
+
+router.post('/api/auth/verify-otp', async (req, res) => {
+  const { email, otp } = req.body;
+
+  if (!email || !otp) {
+    return res.status(400).json({ success: false, msg: 'Email and OTP required' });
+  }
+
+  try {
+    const user = await User.findOne({
+      email,
+      otp,
+      otpExpires: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        msg: 'Invalid or expired OTP',
+      });
+    }
+
+    // Verify user
+    user.isVerified = true;
+    user.otp = undefined;
+    user.otpExpires = undefined;
+    await user.save();
+
+    // Now generate tokens (same as login)
+    await RefreshToken.deleteMany({ userId: user._id });
+
+    const accessToken = jwt.sign(
+      { id: user._id, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '120m' }
+    );
+
+    const refreshTokenStr = jwt.sign(
+      { id: user._id, role: user.role },
+      REFRESH_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    await RefreshToken.create({
+      token: refreshTokenStr,
+      userId: user._id,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    });
+
+    // Set cookies
+    res.cookie('access_token', accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 120 * 60 * 1000,
+    });
+    res.cookie('refresh_token', refreshTokenStr, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    const updatedUser = await User.findById(user._id).select('-password -__v');
+
+    res.json({
+      success: true,
+      msg: 'Email verified successfully! You are now logged in.',
+      accessToken,
+      user: updatedUser,
+    });
+
+  } catch (err) {
+    console.error('OTP verification error:', err);
+    res.status(500).json({ success: false, msg: 'Server error' });
+  }
+});
+
+
 // Optional: Logout Route (revoke refresh token)
 router.post('/api/auth/logout', authMiddleware, async (req, res) => {
   try {
@@ -271,7 +365,7 @@ router.get('/api/auth/users', authMiddleware, async (req, res) => {
     // Aggregation pipeline
     const usersAggregation = await User.aggregate([
       { $match: matchStage },
-      
+
 
       // Lookup orders
       {

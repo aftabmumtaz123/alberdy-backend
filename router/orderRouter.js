@@ -333,7 +333,6 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
       }
     }
 
-    // 3️⃣ Restrict manual paymentStatus override unless valid
     if (paymentStatus) {
       if (paymentStatus === 'paid' && order.status !== 'delivered') {
         return res.status(400).json({
@@ -349,8 +348,6 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
       }
       update.paymentStatus = paymentStatus;
     }
-
-    // 4️⃣ Restore stock for cancelled orders
     if (status === 'cancelled') {
       for (const item of order.items) {
         if (item.variant && mongoose.Types.ObjectId.isValid(item.variant._id)) {
@@ -363,7 +360,6 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
       }
     }
 
-    // 5️⃣ Save update
     const updatedOrder = await Order.findByIdAndUpdate(id, { $set: update }, { new: true, runValidators: true })
       .populate('items.product', 'name thumbnail images')
       .populate('items.variant', 'attribute value sku price discountPrice stockQuantity image')
@@ -483,7 +479,6 @@ router.get('/track/:identifier', async (req, res) => {
       items: order.items
     };
 
-    // Fetch currency settings
     const currency = await getCurrencySettings();
 
     res.json({
@@ -537,7 +532,6 @@ router.post('/:orderId/refund-request', authMiddleware, async (req, res) => {
         return res.status(404).json({ msg: 'Order not found' });
       }
 
-      // 🔒 Only owner or admin
       if (
         order.user.toString() !== req.user.id &&
         !['Super Admin', 'Manager'].includes(req.user.role)
@@ -575,7 +569,7 @@ router.post('/:orderId/refund-request', authMiddleware, async (req, res) => {
 
 router.post('/verify-payment', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
-    const { orderId, action, reason } = req.body;
+    const { orderId, isPaymentVerified, reason } = req.body;
 
     // Validation
     if (!orderId || !mongoose.Types.ObjectId.isValid(orderId)) {
@@ -585,10 +579,10 @@ router.post('/verify-payment', authMiddleware, requireRole(['Super Admin', 'Mana
       });
     }
 
-    if (!action || !['mark-paid', 'mark-unpaid'].includes(action)) {
+    if (typeof isPaymentVerified !== 'boolean') {
       return res.status(400).json({
         success: false,
-        msg: 'Action must be "mark-paid" or "mark-unpaid"'
+        msg: 'isPaymentVerified must be a boolean (true/false)'
       });
     }
 
@@ -610,52 +604,58 @@ router.post('/verify-payment', authMiddleware, requireRole(['Super Admin', 'Mana
       });
     }
 
-    if (order.status === 'returned' && action === 'mark-paid') {
-      return res.status(400).json({
-        success: false,
-        msg: 'Cannot mark returned orders as paid'
-      });
-    }
-
     const previousPaymentStatus = order.paymentStatus;
+    const previousIsVerified = order.isPaymentVerified;
 
-    if (action === 'mark-paid') {
-      if (['paid', 'refunded'].includes(order.paymentStatus)) {
+    if (isPaymentVerified === true) {
+      // Mark as Verified/Paid
+      if (order.isPaymentVerified === true) {
         return res.status(400).json({
           success: false,
-          msg: `Payment is already ${order.paymentStatus}`
+          msg: 'Payment is already verified'
         });
       }
 
+      if (order.status === 'returned') {
+        return res.status(400).json({
+          success: false,
+          msg: 'Cannot verify payment for returned orders'
+        });
+      }
+
+      // Update verification fields
+      order.isPaymentVerified = true;
       order.paymentStatus = 'paid';
       order.paymentVerifiedAt = new Date();
-      order.paymentVerifiedBy = req.user.id; 
-      order.paymentVerificationMethod = 'manual'; 
-
+      order.paymentVerifiedBy = req.user.id;
+    
       if (order.status === 'pending') {
         order.status = 'confirmed';
       }
-    }
-    
-    else if (action === 'mark-unpaid') {
+    } 
+    else {
+      // Mark as Unverified/Unpaid
       if (order.paymentStatus === 'refunded') {
         return res.status(400).json({
           success: false,
-          msg: 'Cannot mark refunded order as unpaid'
+          msg: 'Cannot unverify refunded orders'
         });
       }
 
+      // Update verification fields
+      order.isPaymentVerified = false;
       order.paymentStatus = 'unpaid';
       order.paymentVerifiedAt = null;
       order.paymentVerifiedBy = null;
-      order.paymentVerificationMethod = null;
     }
 
-    order.paymentHistory = order.paymentHistory || [];
+    if (!order.paymentHistory) order.paymentHistory = [];
     order.paymentHistory.push({
-      action,
+      action: isPaymentVerified ? 'mark-paid' : 'mark-unpaid',
       previousStatus: previousPaymentStatus,
       newStatus: order.paymentStatus,
+      previousVerified: previousIsVerified,
+      newVerified: order.isPaymentVerified,
       reason: reason || 'No reason provided',
       performedBy: req.user.id,
       performedByRole: req.user.role,
@@ -666,11 +666,13 @@ router.post('/verify-payment', authMiddleware, requireRole(['Super Admin', 'Mana
 
     res.json({
       success: true,
-      msg: `Payment status updated to "${order.paymentStatus}"`,
+      msg: `Payment verification ${isPaymentVerified ? 'enabled' : 'disabled'}`,
       data: {
         orderNumber: order.orderNumber,
         previousStatus: previousPaymentStatus,
         newStatus: order.paymentStatus,
+        previousVerified: previousIsVerified,
+        newVerified: order.isPaymentVerified,
         updatedBy: req.user.name || req.user.email
       }
     });
