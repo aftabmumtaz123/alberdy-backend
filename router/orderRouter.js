@@ -623,7 +623,7 @@ router.post('/verify-payment', authMiddleware, requireRole(['Super Admin', 'Mana
         });
       }
 
-      // Update verification fields
+      
       order.isPaymentVerified = true;
       order.paymentStatus = 'paid';
       order.paymentVerifiedAt = new Date();
@@ -676,7 +676,6 @@ router.post('/verify-payment', authMiddleware, requireRole(['Super Admin', 'Mana
         updatedBy: req.user.name || req.user.email
       }
     });
-
   } catch (err) {
     console.error('Payment verification error:', err);
     res.status(500).json({
