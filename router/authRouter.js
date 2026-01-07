@@ -12,6 +12,10 @@ const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const crypto = require('crypto');
 const sendEmail = require('../utils/sendEmail');
 
+
+
+
+
 router.post('/api/auth/google', async (req, res) => {
   const { credential } = req.body;
   if (!credential) {
@@ -100,6 +104,72 @@ router.post('/api/auth/google', async (req, res) => {
 });
 
 
+
+router.post('/api/auth/verify-otp1', async (req, res) => {
+  const { email, otp } = req.body;
+
+  if (!email || !otp) {
+    console.log('Missing email or otp');
+    return res.status(400).json({ success: false, msg: 'Email and OTP required' });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedOtp = String(otp).trim();
+
+
+  try {
+    const user = await User.findOne({
+      email: normalizedEmail,
+      otp: normalizedOtp,
+      otpExpires: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      console.log('No matching user found - possible mismatch or expired');
+      return res.status(400).json({
+        success: false,
+        msg: 'Invalid or expired verification code.',
+      });
+    }
+
+
+    user.isOtpVerified = true;
+    user.otp = undefined;
+    user.otpExpires = undefined;
+    await user.save();
+
+
+    // === Your existing token code below (keep it) ===
+    await RefreshToken.deleteMany({ userId: user._id });
+
+    const accessToken = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET, { expiresIn: '120m' });
+    const refreshTokenStr = jwt.sign({ id: user._id, role: user.role }, REFRESH_SECRET, { expiresIn: '7d' });
+
+    await RefreshToken.create({
+      token: refreshTokenStr,
+      userId: user._id,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    });
+
+    res.cookie('access_token', accessToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 120 * 60 * 1000 });
+    res.cookie('refresh_token', refreshTokenStr, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 7 * 24 * 60 * 60 * 1000 });
+
+    const updatedUser = await User.findById(user._id).select('-password -__v');
+
+
+    res.json({
+      success: true,
+      msg: 'Email verified successfully! You are now logged in.',
+      accessToken,
+      user: updatedUser,
+    });
+
+  } catch (err) {
+    console.error('Server error in verify-otp:', err);
+    res.status(500).json({ success: false, msg: 'Server error' });
+  }
+});
+
 router.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
@@ -114,12 +184,12 @@ router.post('/api/auth/login', async (req, res) => {
     }
 
     // Critical: Block login until email is verified
-    if (!user.isOtpVerified) {
-      return res.status(400).json({
-        success: false,
-        msg: 'Please verify your email first. Check your inbox or use "Resend OTP".',
-      });
-    }
+    // if (!user.isOtpVerified) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     msg: 'Please verify your email first. Check your inbox or use "Resend OTP".',
+    //   });
+    // }
 
     if (!(await user.comparePassword(password))) {
       return res.status(400).json({ success: false, msg: 'Invalid credentials' });
@@ -199,7 +269,7 @@ router.post('/api/auth/register', async (req, res) => {
     }
 
     const otp = crypto.randomInt(100000, 999999).toString();
-    const otpExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+    const otpExpires = Date.now() + 10 * 60 * 1000; 
 
     let validAddress = undefined;
     if (address && typeof address === 'object' && address !== null) {
@@ -286,70 +356,6 @@ router.post('/api/auth/resend-otp', async (req, res) => {
   } catch (err) {
     console.error('Resend OTP error:', err);
     res.status(500).json({ success: false, msg: 'Failed to resend code' });
-  }
-});
-
-router.post('/api/auth/verify-otp', async (req, res) => {
-  const { email, otp } = req.body;
-
-  if (!email || !otp) {
-    return res.status(400).json({ success: false, msg: 'Email and OTP required' });
-  }
-
-  try {
-    const user = await User.findOne({
-      email,
-      otp,
-      otpExpires: { $gt: Date.now() },
-    });
-
-    if (!user) {
-      return res.status(400).json({
-        success: false,
-        msg: 'Invalid or expired verification code.',
-      });
-    }
-
-    user.isOtpVerified = true;
-    user.otp = undefined;
-    user.otpExpires = undefined;
-    await user.save();
-
-    await RefreshToken.deleteMany({ userId: user._id });
-
-    const accessToken = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET, { expiresIn: '120m' });
-    const refreshTokenStr = jwt.sign({ id: user._id, role: user.role }, REFRESH_SECRET, { expiresIn: '7d' });
-
-    await RefreshToken.create({
-      token: refreshTokenStr,
-      userId: user._id,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    });
-
-    res.cookie('access_token', accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 120 * 60 * 1000,
-    });
-    res.cookie('refresh_token', refreshTokenStr, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    const updatedUser = await User.findById(user._id).select('-password -__v');
-
-    res.json({
-      success: true,
-      msg: 'Email verified! You are now logged in.',
-      accessToken,
-      user: updatedUser,
-    });
-  } catch (err) {
-    console.error('OTP verification error:', err);
-    res.status(500).json({ success: false, msg: 'Server error' });
   }
 });
 
