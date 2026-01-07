@@ -1,6 +1,5 @@
-const express = require('express')
+const express = require('express');
 const router = express.Router();
-const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const User = require('../model/User');
 const Order = require('../model/Order');
@@ -12,7 +11,6 @@ const { OAuth2Client } = require('google-auth-library');
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const crypto = require('crypto');
 const sendEmail = require('../utils/sendEmail');
-
 
 router.post('/api/auth/google', async (req, res) => {
   const { credential } = req.body;
@@ -107,66 +105,72 @@ router.post('/api/auth/login', async (req, res) => {
   if (!email || !password) {
     return res.status(400).json({ success: false, msg: 'Email and password required' });
   }
+
   try {
     const user = await User.findOne({ email });
 
-    // if (!user.isVerified) {
-    //   return res.status(400).json({
-    //     success: false,
-    //     msg: 'Please verify your email first. Check your inbox for the OTP.',
-    //   });
-    // }
-
-
-    if (!user || !(await user.comparePassword(password))) {
+    if (!user) {
       return res.status(400).json({ success: false, msg: 'Invalid credentials' });
     }
+
+    // Critical: Block login until email is verified
+    if (!user.isOtpVerified) {
+      return res.status(400).json({
+        success: false,
+        msg: 'Please verify your email first. Check your inbox or use "Resend OTP".',
+      });
+    }
+
+    if (!(await user.comparePassword(password))) {
+      return res.status(400).json({ success: false, msg: 'Invalid credentials' });
+    }
+
     if (user.status !== 'Active') {
       return res.status(400).json({ success: false, msg: 'Account inactive' });
     }
-    if (user.address && typeof user.address !== 'object') {
-      await User.collection.updateOne(
-        { _id: user._id },
-        { $set: { address: { street: '', city: '', state: '', zip: '' } } }
-      );
-    }
+
     await User.collection.updateOne(
       { _id: user._id },
       { $set: { lastLogin: new Date() } }
     );
-    const updatedUser = await User.findById(user._id).select('-password -__v');
-    const accessPayload = { id: user._id, role: user.role };
-    const accessToken = jwt.sign(accessPayload, JWT_SECRET, { expiresIn: '120m' });
-    const refreshPayload = { id: user._id, role: user.role };
-    const refreshTokenStr = jwt.sign(refreshPayload, REFRESH_SECRET, { expiresIn: '7d' });
+
+    await RefreshToken.deleteMany({ userId: user._id });
+
+    const accessToken = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET, { expiresIn: '120m' });
+    const refreshTokenStr = jwt.sign({ id: user._id, role: user.role }, REFRESH_SECRET, { expiresIn: '7d' });
+
     await RefreshToken.create({
       token: refreshTokenStr,
       userId: user._id,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     });
+
     res.cookie('access_token', accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      maxAge: 15 * 60 * 1000 // 15 minutes
+      maxAge: 120 * 60 * 1000,
     });
     res.cookie('refresh_token', refreshTokenStr, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      maxAge: 7 * 24 * 60 * 60 * 1000,
     });
+
+    const updatedUser = await User.findById(user._id).select('-password -__v');
+
     res.json({
       success: true,
-      accessToken, // For immediate use
-      user: updatedUser
+      msg: 'Login successful',
+      accessToken,
+      user: updatedUser,
     });
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ success: false, msg: 'Server error' });
   }
 });
-
 
 router.post('/api/auth/register', async (req, res) => {
   const { name, email, password, cPassword, role = 'Customer', address, petType } = req.body;
@@ -184,32 +188,29 @@ router.post('/api/auth/register', async (req, res) => {
   try {
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      if (!existingUser.isVerified) {
-        // Allow resending OTP if not verified
+      if (existingUser.isOtpVerified) {
+        return res.status(400).json({ success: false, msg: 'User with this email already exists' });
+      } else {
         return res.status(400).json({
           success: false,
-          msg: 'Email already registered but not verified. Check your email for OTP.',
+          msg: 'Email already registered but not verified. Please check your email or resend OTP.',
         });
       }
-      return res.status(400).json({ success: false, msg: 'User with this email already exists' });
     }
 
-    // Generate 6-digit OTP
     const otp = crypto.randomInt(100000, 999999).toString();
     const otpExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
 
-    // Validate address (same as before)
     let validAddress = undefined;
     if (address && typeof address === 'object' && address !== null) {
       validAddress = {
         street: address.street || '',
         city: address.city || '',
         state: address.state || '',
-        zip: address.zip || ''
+        zip: address.zip || '',
       };
     }
 
-    // Create user with isVerified: false
     const newUser = new User({
       name,
       email,
@@ -217,43 +218,76 @@ router.post('/api/auth/register', async (req, res) => {
       role,
       address: validAddress,
       petType,
-      isVerified: false,
+      isOtpVerified: false,
       otp,
       otpExpires,
     });
     await newUser.save();
 
-    // Send OTP Email
     const html = `
-      <h2>Email Verification</h2>
+      <h2>Welcome to Albreedy Pet Shop!</h2>
       <p>Hello ${name},</p>
-      <p>Your verification code is: <strong style="font-size: 20px;">${otp}</strong></p>
-      <p>It will expire in 10 minutes.</p>
-      <p>If you didn't request this, ignore this email.</p>
+      <p>Your 6-digit verification code is:</p>
+      <h1 style="font-size: 32px; letter-spacing: 10px; color: #2563eb;"><strong>${otp}</strong></h1>
+      <p>This code expires in <strong>10 minutes</strong>.</p>
+      <p>If you didn't register, please ignore this email.</p>
     `;
 
     try {
-      await sendEmail(email, 'Verify Your Email - Your App', html);
+      await sendEmail(email, 'Verify Your Email - Albreedy Pet Shop', html);
     } catch (emailErr) {
       console.error('Failed to send OTP email:', emailErr);
-      // Optionally delete user if email fails?
-      await User.findByIdAndDelete(newUser._id);
+      await User.findByIdAndDelete(newUser._id); // Cleanup
       return res.status(500).json({ success: false, msg: 'Failed to send verification email' });
     }
 
     res.status(201).json({
       success: true,
-      msg: 'Registration successful! Please check your email for the 6-digit verification code.',
+      msg: 'Registration successful! Check your email for the 6-digit verification code.',
       userId: newUser._id,
       email: newUser.email,
     });
-
   } catch (err) {
     console.error('Register error:', err);
     res.status(500).json({ success: false, msg: 'Server error during registration' });
   }
 });
 
+
+router.post('/api/auth/resend-otp', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ success: false, msg: 'Email is required' });
+
+  try {
+    const user = await User.findOne({ email, isOtpVerified: false });
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        msg: 'No pending verification found. You may already be verified.',
+      });
+    }
+
+    const otp = crypto.randomInt(100000, 999999).toString();
+    user.otp = otp;
+    user.otpExpires = Date.now() + 10 * 60 * 1000;
+    await user.save();
+
+    const html = `
+      <h2>New Verification Code</h2>
+      <p>Hello ${user.name},</p>
+      <p>Your new 6-digit code is:</p>
+      <h1 style="font-size: 32px; letter-spacing: 10px; color: #2563eb;"><strong>${otp}</strong></h1>
+      <p>Valid for 10 minutes.</p>
+    `;
+
+    await sendEmail(email, 'New Verification Code - Albreedy', html);
+
+    res.json({ success: true, msg: 'New verification code sent!' });
+  } catch (err) {
+    console.error('Resend OTP error:', err);
+    res.status(500).json({ success: false, msg: 'Failed to resend code' });
+  }
+});
 
 router.post('/api/auth/verify-otp', async (req, res) => {
   const { email, otp } = req.body;
@@ -272,30 +306,19 @@ router.post('/api/auth/verify-otp', async (req, res) => {
     if (!user) {
       return res.status(400).json({
         success: false,
-        msg: 'Invalid or expired OTP',
+        msg: 'Invalid or expired verification code.',
       });
     }
 
-    // Verify user
-    user.isVerified = true;
+    user.isOtpVerified = true;
     user.otp = undefined;
     user.otpExpires = undefined;
     await user.save();
 
-    // Now generate tokens (same as login)
     await RefreshToken.deleteMany({ userId: user._id });
 
-    const accessToken = jwt.sign(
-      { id: user._id, role: user.role },
-      JWT_SECRET,
-      { expiresIn: '120m' }
-    );
-
-    const refreshTokenStr = jwt.sign(
-      { id: user._id, role: user.role },
-      REFRESH_SECRET,
-      { expiresIn: '7d' }
-    );
+    const accessToken = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET, { expiresIn: '120m' });
+    const refreshTokenStr = jwt.sign({ id: user._id, role: user.role }, REFRESH_SECRET, { expiresIn: '7d' });
 
     await RefreshToken.create({
       token: refreshTokenStr,
@@ -303,7 +326,6 @@ router.post('/api/auth/verify-otp', async (req, res) => {
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     });
 
-    // Set cookies
     res.cookie('access_token', accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -321,11 +343,10 @@ router.post('/api/auth/verify-otp', async (req, res) => {
 
     res.json({
       success: true,
-      msg: 'Email verified successfully! You are now logged in.',
+      msg: 'Email verified! You are now logged in.',
       accessToken,
       user: updatedUser,
     });
-
   } catch (err) {
     console.error('OTP verification error:', err);
     res.status(500).json({ success: false, msg: 'Server error' });
@@ -333,12 +354,9 @@ router.post('/api/auth/verify-otp', async (req, res) => {
 });
 
 
-// Optional: Logout Route (revoke refresh token)
 router.post('/api/auth/logout', authMiddleware, async (req, res) => {
   try {
-    // Delete refresh token from DB
     await RefreshToken.deleteOne({ userId: req.user.id });
-    // Clear cookies
     res.clearCookie('access_token');
     res.clearCookie('refresh_token');
     res.json({ success: true, msg: 'Logged out successfully' });
@@ -347,7 +365,6 @@ router.post('/api/auth/logout', authMiddleware, async (req, res) => {
     res.status(500).json({ success: false, msg: 'Server error during logout' });
   }
 });
-
 
 
 router.get('/api/auth/users', authMiddleware, async (req, res) => {
