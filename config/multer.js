@@ -1,7 +1,7 @@
 require('dotenv').config();
 const multer = require('multer');
 const path = require('path');
-const CloudinaryStorage = require('multer-storage-cloudinary');
+const { CloudinaryStorage } = require('@fluidjs/multer-cloudinary');
 const cloudinary = require('cloudinary').v2;
 
 // Configure Cloudinary
