@@ -1,7 +1,7 @@
 require('dotenv').config();
 const multer = require('multer');
 const path = require('path');
-const {CloudinaryStorage} = require('multer-storage-cloudinary');
+const { CloudinaryStorage } = require('@fluidjs/multer-cloudinary'); // Modern package for Cloudinary v2
 const cloudinary = require('cloudinary').v2;
 
 // Configure Cloudinary
@@ -17,51 +17,50 @@ const storage = new CloudinaryStorage({
     const isImage = file.mimetype.startsWith('image/');
     const isPDF = file.mimetype === 'application/pdf';
 
-    // Clean filename (remove special chars, keep extension safe)
+    // Clean filename: remove special characters, keep only alphanumeric, underscore, hyphen
     const originalName = path.parse(file.originalname).name;
     const cleanName = originalName.replace(/[^a-zA-Z0-9_-]/g, '_');
     const timestamp = Date.now();
     const uniqueName = `${timestamp}-${cleanName}`;
 
-    // Base config
-    const config = {
+    // Base configuration
+    const baseConfig = {
       folder: 'Uploads',
       public_id: uniqueName,
     };
 
     if (isImage) {
-      // Only images get optimized and converted to WebP
       return {
-        ...config,
+        ...baseConfig,
         resource_type: 'image',
-        format: 'webp',                    // Final delivery format
+        format: 'webp', // Deliver as WebP
+        // Optional: restrict allowed formats (comma-separated, no dots)
+        // allowed_formats: 'jpg,jpeg,png,gif,webp,bmp,tiff,ico,heic,heif',
         transformation: [
-          { quality: 'auto:best' },        // Optimal quality
-          { fetch_format: 'webp' },        // Force WebP
-          { crop: 'limit', width: 2000, height: 2000 }, // Prevent huge files
+          { quality: 'auto:best' },                  // Best quality with good compression
+          { fetch_format: 'webp' },                  // Force WebP conversion
+          { crop: 'limit', width: 2000, height: 2000 }, // Prevent oversized uploads
         ],
       };
     }
 
     if (isPDF) {
-      // PDFs stay as-is, stored as raw files
       return {
-        ...config,
-        resource_type: 'raw',              // Critical: keeps PDF unchanged
-        format: 'pdf',                     // Keeps .pdf extension
+        ...baseConfig,
+        resource_type: 'raw',   // Important: stores PDF without conversion
+        format: 'pdf',          // Keeps the .pdf extension
       };
     }
 
-    // Fallback (should not happen due to fileFilter)
+    // Fallback for any other allowed file (though fileFilter should prevent this)
     return {
-      ...config,
+      ...baseConfig,
       resource_type: 'raw',
-      format: path.extname(file.originalname).slice(1) || 'file',
     };
   },
 });
 
-// Strict file filter
+// Strict file type filter
 const fileFilter = (req, file, cb) => {
   const allowedMimes = [
     // Images
@@ -79,30 +78,29 @@ const fileFilter = (req, file, cb) => {
     'application/pdf',
   ];
 
-  // Special case: some browsers send .jfif as octet-stream
+  // Handle .jfif files sometimes misreported as octet-stream
   const ext = path.extname(file.originalname).toLowerCase();
   const isJfifHack = ext === '.jfif' && file.mimetype === 'application/octet-stream';
 
   if (allowedMimes.includes(file.mimetype) || isJfifHack) {
-    // Optionally force correct mimetype for jfif
-    if (isJfifHack) file.mimetype = 'image/jpeg';
+    if (isJfifHack) {
+      file.mimetype = 'image/jpeg'; // Correct the mimetype
+    }
     cb(null, true);
   } else {
-    const error = new Error(
-      'Invalid file type. Only images (JPEG, PNG, GIF, WebP, etc.) and PDFs are allowed.'
-    );
+    const error = new Error('Invalid file type. Only images (JPEG, PNG, GIF, WebP, etc.) and PDFs are allowed.');
     error.code = 'INVALID_FILE_TYPE';
     cb(error, false);
   }
 };
 
-// Multer instance
+// Multer instance with limits
 const upload = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB max
-    files: 10,                  // Max 10 files per request
+    fileSize: 10 * 1024 * 1024, // 10 MB max per file
+    files: 10,                   // Max 10 files per request
   },
 });
 
