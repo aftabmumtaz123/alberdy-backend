@@ -495,8 +495,6 @@ router.get('/track/:identifier', async (req, res) => {
   }
 });
 
-
-
 router.post('/subscribe', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   const { subscription } = req.body;
   const PushSubscription = require('../model/PushSubscription');
