@@ -54,30 +54,30 @@ const connection = require('./config/db');
 connection();
 
 // Routes
-app.use('/api/products', productRoutes);
-app.use('/api/brands', require('./router/brand'));
-app.use('/api/categories', categoryRoutes); 
-app.use('/api/subcategories', require('./router/subcategories')); 
-app.use('/api/auth', require("./router/resetPassword"))
-app.use('/api/units', require('./router/unit'));
-app.use('/api', require('./router/customer')); 
-app.use('/api/expenses', require('./router/expense')); 
-app.use('/api/expense-categories', require('./router/expenseCategory')); 
-app.use('/api/currencies', require('./router/currency')); 
-app.use('/api/configuration', require('./router/appConfigurationRouter')); 
-app.use('/api/dashboard', require('./router/dashboard'));
-app.use('/api/offer', require('./router/offer'));
-app.use('/api/orders', require('./router/orderRouter')); 
-app.use('/api/contact', require("./router/contactUs")) 
+app.use('/api/v1/products', productRoutes);
+app.use('/api/v1/brands', require('./router/brand'));
+app.use('/api/v1/categories', categoryRoutes); 
+app.use('/api/v1/subcategories', require('./router/subcategories')); 
+app.use('/api/v1/auth', require("./router/resetPassword"))
+app.use('/api/v1/units', require('./router/unit'));
+app.use('/api/v1/customers', require('./router/customer')); 
+app.use('/api/v1/expenses', require('./router/expense')); 
+app.use('/api/v1/expense-categories', require('./router/expenseCategory')); 
+app.use('/api/v1/currencies', require('./router/currency')); 
+app.use('/api/v1/configuration', require('./router/appConfigurationRouter')); 
+app.use('/api/v1/dashboard', require('./router/dashboard'));
+app.use('/api/v1/offer', require('./router/offer'));
+app.use('/api/v1/orders', require('./router/orderRouter')); 
+app.use('/api/v1/contact', require("./router/contactUs")) 
 app.use('/', require('./router/authRouter')); 
-app.use('/api/variants', require('./router/variant'));
-app.use('/api/report', require('./router/reportsRouter'))
-app.use('/api/purchases', require('./router/purchaseRouter'));
-app.use('/api/suppliers', require('./router/supplierRouter')); 
-app.use('/api/sales', require('./router/saleRouter'));
-app.use('/api/supllier/payments', require('./router/paymentRoutes'))
-app.use('/api/customer-payments', require('./router/customerPaymentRoutes'));
-app.use('/api/inventory', require('./router/inventoryRoutes'));
+app.use('/api/v1/variants', require('./router/variant'));
+app.use('/api/v1/report', require('./router/reportsRouter'))
+app.use('/api/v1/purchases', require('./router/purchaseRouter'));
+app.use('/api/v1/suppliers', require('./router/supplierRouter')); 
+app.use('/api/v1/sales', require('./router/saleRouter'));
+app.use('/api/v1/supllier/payments', require('./router/paymentRoutes'))
+app.use('/api/v1/customer-payments', require('./router/customerPaymentRoutes'));
+app.use('/api/v1/inventory', require('./router/inventoryRoutes'));
 
 
 

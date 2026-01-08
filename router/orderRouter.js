@@ -564,7 +564,6 @@ router.post('/:orderId/refund-request', authMiddleware, async (req, res) => {
   }
 );
 
-
 router.post('/verify-payment', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { orderId, isPaymentVerified, reason } = req.body;

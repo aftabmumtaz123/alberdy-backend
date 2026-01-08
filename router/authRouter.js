@@ -16,7 +16,7 @@ const sendEmail = require('../utils/sendEmail');
 
 
 
-router.post('/api/auth/google', async (req, res) => {
+router.post('/api/v1/auth/google', async (req, res) => {
   const { credential } = req.body;
   if (!credential) {
     return res.status(400).json({ success: false, msg: 'No credential provided' });
@@ -105,7 +105,7 @@ router.post('/api/auth/google', async (req, res) => {
 
 
 
-router.post('/api/auth/verify-otp1', async (req, res) => {
+router.post('/api/v1/auth/verify-otp1', async (req, res) => {
   const { email, otp } = req.body;
 
   if (!email || !otp) {
@@ -170,7 +170,7 @@ router.post('/api/auth/verify-otp1', async (req, res) => {
   }
 });
 
-router.post('/api/auth/login', async (req, res) => {
+router.post('/api/v1/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ success: false, msg: 'Email and password required' });
@@ -242,7 +242,7 @@ router.post('/api/auth/login', async (req, res) => {
   }
 });
 
-router.post('/api/auth/register', async (req, res) => {
+router.post('/api/v1/auth/register', async (req, res) => {
   const { name, email, password, cPassword, role = 'Customer', address, petType } = req.body;
 
   if (!name || !email || !password) {
@@ -324,7 +324,7 @@ router.post('/api/auth/register', async (req, res) => {
 });
 
 
-router.post('/api/auth/resend-otp', async (req, res) => {
+router.post('/api/v1/auth/resend-otp', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ success: false, msg: 'Email is required' });
 
@@ -360,7 +360,7 @@ router.post('/api/auth/resend-otp', async (req, res) => {
 });
 
 
-router.post('/api/auth/logout', authMiddleware, async (req, res) => {
+router.post('/api/v1/auth/logout', authMiddleware, async (req, res) => {
   try {
     await RefreshToken.deleteOne({ userId: req.user.id });
     res.clearCookie('access_token');
@@ -373,7 +373,7 @@ router.post('/api/auth/logout', authMiddleware, async (req, res) => {
 });
 
 
-router.get('/api/auth/users', authMiddleware, async (req, res) => {
+router.get('/api/v1/auth/users', authMiddleware, async (req, res) => {
   try {
     const { page = 1, limit = 1000, status, name } = req.query;
 
@@ -453,7 +453,7 @@ router.get('/api/auth/users', authMiddleware, async (req, res) => {
   }
 });
 
-router.get('/api/auth/users/:id', authMiddleware, async (req, res) => {
+router.get('/api/v1/auth/users/:id', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.params.id)
       .select('-password -__v')
@@ -497,7 +497,7 @@ router.get('/api/auth/users/:id', authMiddleware, async (req, res) => {
 
 
 
-router.put('/api/auth/users/:id', authMiddleware, async (req, res) => {
+router.put('/api/v1/auth/users/:id', authMiddleware, async (req, res) => {
   try {
     const { name, email, role, phone, status, petType } = req.body;
 
@@ -573,7 +573,7 @@ router.put('/api/auth/users/:id', authMiddleware, async (req, res) => {
 
 
 
-router.delete('/api/auth/users/:id', authMiddleware, async (req, res) => {
+router.delete('/api/v1/auth/users/:id', authMiddleware, async (req, res) => {
   try {
     const deletedUser = await User.findByIdAndDelete(req.params.id);
     if (!deletedUser) {
