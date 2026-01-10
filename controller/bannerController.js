@@ -11,6 +11,14 @@ exports.createBanner = async (req, res) => {
         public_id: file.filename
     }));
 
+    if (!title || !description) {
+      return res.status(400).json({
+        success: false,
+        message: "Title and description are required"
+      });
+    }
+
+
     const isBannerExists = await Banner.find();
 
     // if(isBannerExists.length>=1){
@@ -26,13 +34,13 @@ exports.createBanner = async (req, res) => {
 
     await banner.save()
 
-    res.json({
+    res.status(201).json({
         message: "API's are running for banner boss",
         data: banner
     });
    } catch (error) {
     console.log(error)
-    res.json({message: "Server error: "+ error})
+    res.status(500).json({message: "Server error"})
    }
 };
 
@@ -40,7 +48,7 @@ exports.createBanner = async (req, res) => {
 exports.getBanner = async (req,res)=>{
     try{
         const banner = await Banner.find();
-        res.json({
+        res.status(200).json({
             success: true,
             message: "Banner Fetched Successfully",
             data: banner
@@ -48,7 +56,7 @@ exports.getBanner = async (req,res)=>{
     } 
     catch(error){
         console.log(error)
-        res.json({
+        res.status(500).json({
             success: false,
             message: "Server Error"
         })
