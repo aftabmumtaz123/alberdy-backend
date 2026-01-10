@@ -3,13 +3,12 @@ const cors = require('cors');
 const cron = require('node-cron');
 const Variant = require('./model/variantProduct');
 require('dotenv').config();
-const categoryRoutes = require('./router/categories'); // Import routes
-const productRoutes = require('./router/products'); // Import routes
+const categoryRoutes = require('./router/categories');
+const productRoutes = require('./router/products');
 const morgan = require('morgan');
 const app = express();
 const PORT = process.env.PORT || 5000;
-// Middleware (parsers first!)
-const cookieParser = require('cookie-parser'); // Add require
+const cookieParser = require('cookie-parser'); 
 
 const checkExpiredVariants = require('./jobs/checkExpiredVarients');
 
@@ -40,7 +39,6 @@ cron.schedule('0 0 * * *', async () => {
     console.log('Daily stock recalculation and variant status update completed at', new Date());
   } catch (error) {
     console.error('Cron job failed:', error);
-    // Optionally integrate a notification system (e.g., email or logging service)
   }
 });
 
@@ -60,7 +58,7 @@ app.use('/api/v1/categories', categoryRoutes);
 app.use('/api/v1/subcategories', require('./router/subcategories')); 
 app.use('/api/v1/auth', require("./router/resetPassword"))
 app.use('/api/v1/units', require('./router/unit'));
-app.use('/api/v1/customers', require('./router/customer')); 
+app.use('/api/v1/customers', require('./router/customer'));
 app.use('/api/v1/expenses', require('./router/expense')); 
 app.use('/api/v1/expense-categories', require('./router/expenseCategory')); 
 app.use('/api/v1/currencies', require('./router/currency')); 
@@ -78,7 +76,7 @@ app.use('/api/v1/sales', require('./router/saleRouter'));
 app.use('/api/v1/supllier/payments', require('./router/paymentRoutes'))
 app.use('/api/v1/customer-payments', require('./router/customerPaymentRoutes'));
 app.use('/api/v1/inventory', require('./router/inventoryRoutes'));
-
+app.use('/api/v2/banner', require('./router/bannerRoute'))
 
 
 app.use('/api/push', require('./router/push')); 
@@ -88,11 +86,4 @@ app.get("/",(req,res)=>{
   res.json({Message: "API's are running well bro!!"})
 })
 
-
-
-
-
-
-
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
