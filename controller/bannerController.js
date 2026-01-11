@@ -62,3 +62,20 @@ exports.getBanner = async (req,res)=>{
         })
     }
 }
+
+exports.updateBanner = async (req,res)=>{
+    try {
+        const id = req.params.id
+        const isBanner = await Banner.findById(id)
+        if(!isBanner){
+            return res.json({success: false, message: "There's not any banner of this id"})
+        }
+        const banner = await Banner.findByIdAndUpdate(id,
+            req.body,
+            {new: true}
+        )
+        res.json({success: true, message: "Banner Updated successfully", data: banner})
+    } catch (error) {
+        
+    }
+}

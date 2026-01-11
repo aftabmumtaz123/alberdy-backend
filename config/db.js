@@ -4,14 +4,11 @@ require('dotenv').config();
 
 const connectDB = async () => {
   try {
-    const mongoURI = process.env.MONGODB_URL;
+    const mongoURI = process.env.MONGODB_URL || 'mongodb://localhost:27017/albreedy';
     console.log("🔗 Connecting to MongoDB...");
     console.log("Mongo URI from env:", mongoURI);
 
-    await mongoose.connect(mongoURI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
+    await mongoose.connect(mongoURI);
 
     console.log("✅ MongoDB Connected Successfully");
   } catch (error) {
@@ -20,4 +17,4 @@ const connectDB = async () => {
   }
 };
 
-module.exports = connectDB; // ✅ Export a function
+module.exports = connectDB; 
