@@ -101,7 +101,7 @@ const renderTemplate = (content, variables) => {
 /* ---------- Helper: Create Transporter from SMTP Config ---------- */
 const createTransporter = (smtpConfig) => {
   if (!smtpConfig) return null;
-  return nodemailer.createTransporter({
+  return nodemailer.createTransport({
     host: smtpConfig.host,
     port: smtpConfig.port,
     secure: smtpConfig.encryption === 'SSL/TLS',
