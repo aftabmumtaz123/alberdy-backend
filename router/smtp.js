@@ -3,6 +3,7 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const SmtpConfig = require('../model/SmtpConfig');
 const authMiddleware = require('../middleware/auth');
+const AppConfiguration = require('../model/app_configuration')
 
 const requireRole = roles => (req, res, next) => {
   if (!req.user || !roles.includes(req.user.role)) {
@@ -134,5 +135,6 @@ router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), a
     res.status(500).json({ success: false, msg: 'Server error', details: err.message });
   }
 });
+
 
 module.exports = router;
