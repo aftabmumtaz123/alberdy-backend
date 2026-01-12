@@ -60,8 +60,9 @@ const getCurrencySettings = async () => {
 };
 
 /* ---------- Email Transporter Setup ---------- */
+
 const createTransporter = () => {
-  return nodemailer.createTransporter({
+  return nodemailer.createTransport({
     service: 'gmail',
     auth: {
       user: process.env.EMAIL_USER,
@@ -69,7 +70,6 @@ const createTransporter = () => {
     },
   });
 };
-
 /* ---------- Helper: Send Email ---------- */
 const sendEmail = async (to, subject, html, from = process.env.EMAIL_USER) => {
   const transporter = createTransporter();
