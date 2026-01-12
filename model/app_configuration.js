@@ -7,6 +7,9 @@ const appConfigurationSchema = new mongoose.Schema({
     required: true,
     trim: true,
   },
+  tax: {
+    type: Number,
+  },
   appLogo: {
     type: String, 
     trim: true,

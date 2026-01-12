@@ -4,11 +4,7 @@ const mongoose = require('mongoose');
 
 exports.createAppConfiguration = async (req, res) => {
   try {
-    // Debug: Log the incoming request body and file
-    console.log('req.body:', req.body);
-    console.log('req.file:', req.file);
 
-    // Check if req.body is undefined
     if (!req.body) {
       return res.status(400).json({
         success: false,
@@ -31,11 +27,11 @@ exports.createAppConfiguration = async (req, res) => {
       zip_code,
       currencyName,
       currencyCode,
-      currencySign
+      currencySign,
+      tax
     } = req.body;
-    const appLogo = req.file ? req.file.path : ''; // Use appLogo to match schema
+    const appLogo = req.file ? req.file.path : ''; 
 
-    // Validate required fields
     if (!appName || !primaryColor || !secondaryColor || !currencyName || !currencyCode || !currencySign) {
       return res.status(400).json({
         success: false,
@@ -127,6 +123,7 @@ exports.createAppConfiguration = async (req, res) => {
       zip_code: zip_code || '',
       currencyName,
       currencyCode,
+      tax,
       currencySign,
       lastUpdated: new Date().toISOString(),
     });
@@ -219,6 +216,7 @@ exports.updateAppConfiguration = async (req, res) => {
       currencyName,
       currencyCode,
       currencySign,
+      tax
     } = req.body;
 
     // Get new logo if uploaded
@@ -333,6 +331,7 @@ exports.updateAppConfiguration = async (req, res) => {
       currencyName: currencyName ?? existingConfig.currencyName,
       currencyCode: currencyCode ?? existingConfig.currencyCode,
       currencySign: currencySign ?? existingConfig.currencySign,
+      tax: tax ?? existingConfig.tax,
       lastUpdated: new Date().toISOString(),
     };
 
@@ -377,5 +376,4 @@ exports.updateAppConfiguration = async (req, res) => {
       });
     }
   }
-
 };

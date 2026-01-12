@@ -4,7 +4,7 @@ const mongoose = require('mongoose')
 
 exports.createBanner = async (req, res) => {
    try {
-     const { title, description, links } = req.body;
+     const { title, description, links, subTitle, bannerLayout, buttonText, buttonLink, buttonPosition } = req.body;
 
     const images = req.files?.map(file => ({
         url: file.path,
@@ -21,6 +21,12 @@ exports.createBanner = async (req, res) => {
 
     const isBannerExists = await Banner.find();
 
+    //check if banner already exists with this title
+    const existingBanner = await Banner.findOne({ title });
+    if (existingBanner) {
+        return res.json({ success: false, message: "Banner with this title already exists" });
+    }
+
     // if(isBannerExists.length>=1){
     //     return res.json({message: "there's already a banner so update that"})
     // }
@@ -29,7 +35,13 @@ exports.createBanner = async (req, res) => {
         title,
         description,
         links,
-        images
+        images,
+        subTitle,
+        bannerLayout,
+        buttonText,
+        buttonLink,
+        buttonPosition,
+        status: true
     })
 
     await banner.save()
@@ -67,9 +79,16 @@ exports.updateBanner = async (req,res)=>{
     try {
         const id = req.params.id
         const isBanner = await Banner.findById(id)
+        
         if(!isBanner){
             return res.json({success: false, message: "There's not any banner of this id"})
         }
+
+        const existingBanner = await Banner.findOne({ title: req.body.title });
+        if (existingBanner && existingBanner._id.toString() !== id) {
+            return res.json({ success: false, message: "Banner with this title already exists" });
+        }
+
         const banner = await Banner.findByIdAndUpdate(id,
             req.body,
             {new: true}
@@ -77,5 +96,24 @@ exports.updateBanner = async (req,res)=>{
         res.json({success: true, message: "Banner Updated successfully", data: banner})
     } catch (error) {
         
+    }
+}
+
+exports.deleteBanner = async (req,res)=>{
+    try {
+        const id = req.params.id
+        const isBanner = await Banner.findById(id)
+        
+        if(!isBanner){
+            return res.json({success: false, message: "There's not any banner of this id"})
+        }
+        await Banner.findByIdAndDelete(id)
+        res.json({success: true, message: "Banner Deleted successfully"})
+    } catch (error) {
+        console.log(error)
+        res.status(500).json({
+            success: false,
+            message: "Server Error"
+        })
     }
 }
