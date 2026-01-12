@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
+const nodemailer = require('nodemailer');
 
 const Order = require('../model/Order');
 const Product = require('../model/Product');
@@ -8,7 +9,6 @@ const Variant = require('../model/variantProduct');
 const User = require('../model/User');
 const AppConfiguration = require('../model/app_configuration');
 const authMiddleware = require('../middleware/auth');
-
 
 const requireRole = roles => (req, res, next) => {
   if (!req.user || !roles.includes(req.user.role)) {
@@ -59,7 +59,128 @@ const getCurrencySettings = async () => {
   }
 };
 
+/* ---------- Email Transporter Setup ---------- */
+const createTransporter = () => {
+  return nodemailer.createTransporter({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+  });
+};
 
+/* ---------- Helper: Send Email ---------- */
+const sendEmail = async (to, subject, html, from = process.env.EMAIL_USER) => {
+  const transporter = createTransporter();
+  try {
+    await transporter.sendMail({
+      from,
+      to,
+      subject,
+      html,
+    });
+    console.log(`Email sent successfully to ${to}`);
+  } catch (err) {
+    console.error('Email sending error:', err);
+    // Don't throw; make it non-critical
+  }
+};
+
+/* ---------- Helper: Generate Order Placed Email HTML ---------- */
+const generateOrderPlacedEmail = (order, currency) => {
+  const totalFormatted = `${currency.currencySign}${order.total.toFixed(2)}`;
+  const itemsHtml = order.items.map(item => `
+    <tr>
+      <td>${item.product.name} - ${item.variant.attribute}: ${item.variant.value}</td>
+      <td>${item.quantity}</td>
+      <td>${currency.currencySign}${item.price.toFixed(2)}</td>
+      <td>${currency.currencySign}${item.total.toFixed(2)}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <h2>Order Placed Successfully!</h2>
+    <p>Dear ${order.user.name},</p>
+    <p>Your order <strong>${order.orderNumber}</strong> has been placed.</p>
+    <p>Tracking Number: ${order.orderTrackingNumber}</p>
+    <p>Payment Method: ${order.paymentMethod}</p>
+    <p>Status: ${order.status}</p>
+    <table border="1" style="border-collapse: collapse;">
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>Qty</th>
+          <th>Price</th>
+          <th>Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${itemsHtml}
+      </tbody>
+    </table>
+    <p><strong>Total: ${totalFormatted}</strong></p>
+    <p>Shipping Address: ${order.shippingAddress.fullName}, ${order.shippingAddress.street}, ${order.shippingAddress.city}, ${order.shippingAddress.zip}</p>
+    <p>Thank you for your order!</p>
+  `;
+};
+
+/* ---------- Helper: Generate Order Status Updated Email HTML ---------- */
+const generateOrderStatusUpdatedEmail = (order, oldStatus, currency) => {
+  const totalFormatted = `${currency.currencySign}${order.total.toFixed(2)}`;
+  return `
+    <h2>Order Status Updated</h2>
+    <p>Dear ${order.user.name},</p>
+    <p>Your order <strong>${order.orderNumber}</strong> status has been updated from <strong>${oldStatus}</strong> to <strong>${order.status}</strong>.</p>
+    <p>Tracking Number: ${order.orderTrackingNumber}</p>
+    <p>Total: ${totalFormatted}</p>
+    <p>Thank you!</p>
+  `;
+};
+
+/* ---------- Helper: Generate Payment Confirmation Email HTML ---------- */
+const generatePaymentConfirmationEmail = (order, currency) => {
+  const totalFormatted = `${currency.currencySign}${order.total.toFixed(2)}`;
+  return `
+    <h2>Payment Confirmed!</h2>
+    <p>Dear ${order.user.name},</p>
+    <p>Your payment for order <strong>${order.orderNumber}</strong> has been confirmed.</p>
+    <p>Amount: ${totalFormatted}</p>
+    <p>Method: ${order.paymentMethod}</p>
+    <p>Status: ${order.status}</p>
+    <p>Thank you for your purchase!</p>
+  `;
+};
+
+/* ---------- Helper: Generate Low Stock Alert Email HTML ---------- */
+const generateLowStockAlertEmail = (variants, adminEmail) => {
+  const itemsHtml = variants.map(v => `
+    <li>${v.product.name} - ${v.attribute}: ${v.value} (Stock: ${v.stockQuantity})</li>
+  `).join('');
+  return `
+    <h2>Low Stock Alert</h2>
+    <p>Dear Admin,</p>
+    <p>The following items are running low on stock:</p>
+    <ul>${itemsHtml}</ul>
+    <p>Please restock soon.</p>
+  `;
+};
+
+/* ---------- Helper: Check and Send Low Stock Alerts ---------- */
+const checkAndSendLowStockAlerts = async (variants, adminEmail) => {
+  const lowStockVariants = variants.filter(v => v.stockQuantity < 5); // Threshold: 5
+  if (lowStockVariants.length === 0) return;
+
+  const populatedVariants = await Promise.all(
+    lowStockVariants.map(async (v) => {
+      const product = await Product.findById(v.product);
+      return { ...v, product };
+    })
+  );
+
+  const html = generateLowStockAlertEmail(populatedVariants, adminEmail);
+  await sendEmail(adminEmail, 'Low Stock Alert', html);
+};
 
 router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
@@ -78,16 +199,16 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       return res.status(400).json({ success: false, msg: 'Complete shipping address and email required' });
     }
 
-
     const orderItems = [];
     let computedSubtotal = 0;
+    const variantsToCheck = []; // For low stock
 
     for (const itm of items) {
       if (!mongoose.Types.ObjectId.isValid(itm.product))
         return res.status(400).json({ success: false, msg: `Invalid product ID: ${itm.product}` });
 
       const product = await Product.findById(itm.product)
-        .populate({ path: 'variations', select: 'attribute value sku price discountPrice stockQuantity image' });
+        .populate({ path: 'variations', select: 'attribute value sku price discountPrice stockQuantity image product' });
 
       if (!product) return res.status(400).json({ success: false, msg: `Product not found: ${itm.product}` });
       if (!product.variations?.length)
@@ -120,9 +241,10 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
         total: lineTotal
       });
       computedSubtotal += lineTotal;
+
+      // Collect variant for low stock check (post-order)
+      variantsToCheck.push(variant);
     }
-
-
 
     const calcTotal = subtotal + tax + shipping - discount;
     if (Math.abs(calcTotal - total) > 0.01)
@@ -158,11 +280,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       notes: notes || ''
     });
 
-
-
     await order.save();
-
-
 
     // ---- populate response ----
     await order.populate('items.product', 'name thumbnail images');
@@ -210,6 +328,41 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
     }
 
     // ——————————————————————
+    // SEND EMAIL NOTIFICATIONS FOR ORDER PLACED
+    // ——————————————————————
+    try {
+      const currency = await getCurrencySettings();
+      const userEmail = order.user.email;
+
+      // Email to Customer: Order Confirmation
+      const customerHtml = generateOrderPlacedEmail(order, currency);
+      await sendEmail(userEmail, `Order ${orderNumber} Placed Successfully`, customerHtml);
+
+      // Email to Admin: New Order Alert
+      // Fetch admin email (assuming first Super Admin or Manager)
+      const adminUser = await User.findOne({ role: { $in: ['Super Admin', 'Manager'] } }).select('email');
+      if (adminUser) {
+        const adminHtml = `
+          <h2>New Order Received!</h2>
+          <p>Order: ${orderNumber}</p>
+          <p>Total: ${currency.currencySign}${total.toFixed(2)}</p>
+          <p>Customer: ${order.user.name} (${userEmail})</p>
+          <p>Payment: ${paymentMethod}</p>
+        `;
+        await sendEmail(adminUser.email, `New Order: ${orderNumber}`, adminHtml);
+      }
+
+      // Low Stock Alert (if applicable after order placement)
+      if (variantsToCheck.length > 0) {
+        if (adminUser) {
+          await checkAndSendLowStockAlerts(variantsToCheck, adminUser.email);
+        }
+      }
+    } catch (emailErr) {
+      console.error('Email notification error (non-critical):', emailErr);
+    }
+
+    // ——————————————————————
 
     res.status(201).json({
       success: true,
@@ -229,9 +382,6 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
     });
   }
 });
-
-
-
 
 /* -------------------------- GET ONE ORDER -------------------------- */
 router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
@@ -302,9 +452,11 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
     if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ success: false, msg: 'Invalid order ID' });
 
-    const order = await Order.findById(id).populate('items.variant');
+    const order = await Order.findById(id).populate('items.variant user');
     if (!order)
       return res.status(404).json({ success: false, msg: 'Order not found' });
+
+    const oldStatus = order.status; // Track for email
 
     const update = {};
 
@@ -364,6 +516,19 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
       .populate('items.product', 'name thumbnail images')
       .populate('items.variant', 'attribute value sku price discountPrice stockQuantity image')
       .populate('user', 'name email phone');
+
+    // ——————————————————————
+    // SEND EMAIL NOTIFICATION FOR ORDER STATUS UPDATED (if status changed)
+    // ——————————————————————
+    if (status && status !== oldStatus) {
+      try {
+        const currency = await getCurrencySettings();
+        const customerHtml = generateOrderStatusUpdatedEmail(updatedOrder, oldStatus, currency);
+        await sendEmail(updatedOrder.user.email, `Order ${updatedOrder.orderNumber} Status Updated`, customerHtml);
+      } catch (emailErr) {
+        console.error('Status update email error (non-critical):', emailErr);
+      }
+    }
 
     res.json({
       success: true,
@@ -520,7 +685,6 @@ router.get('/key/public-key', (req, res) => {
   });
 });
 
-
 router.post('/:orderId/refund-request', authMiddleware, async (req, res) => {
     try {
       const { reason } = req.body;
@@ -661,6 +825,19 @@ router.post('/verify-payment', authMiddleware, requireRole(['Super Admin', 'Mana
 
     await order.save();
 
+    // ——————————————————————
+    // SEND EMAIL NOTIFICATION FOR PAYMENT CONFIRMATION (if verified)
+    // ——————————————————————
+    if (isPaymentVerified) {
+      try {
+        const currency = await getCurrencySettings();
+        const customerHtml = generatePaymentConfirmationEmail(order, currency);
+        await sendEmail(order.user.email, `Payment Confirmed for Order ${order.orderNumber}`, customerHtml);
+      } catch (emailErr) {
+        console.error('Payment confirmation email error (non-critical):', emailErr);
+      }
+    }
+
     res.json({
       success: true,
       msg: `Payment verification ${isPaymentVerified ? 'enabled' : 'disabled'}`,
@@ -682,6 +859,5 @@ router.post('/verify-payment', authMiddleware, requireRole(['Super Admin', 'Mana
     });
   }
 });
-
 
 module.exports = router;

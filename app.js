@@ -77,7 +77,8 @@ app.use('/api/v1/supllier/payments', require('./router/paymentRoutes'))
 app.use('/api/v1/customer-payments', require('./router/customerPaymentRoutes'));
 app.use('/api/v1/inventory', require('./router/inventoryRoutes'));
 app.use('/api/v2/banner', require('./router/bannerRoute'))
-
+app.use('/api/v2/smtp-configs', require('./router/smtp'));
+app.use('/api/v2/email-templates', require('./router/emailTemplates')); 
 
 app.use('/api/push', require('./router/push')); 
 
