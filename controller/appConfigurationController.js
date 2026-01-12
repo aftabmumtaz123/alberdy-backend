@@ -191,7 +191,6 @@ exports.updateAppConfiguration = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Validate ObjectId
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
@@ -199,7 +198,7 @@ exports.updateAppConfiguration = async (req, res) => {
       });
     }
 
-    // Destructure fields from body
+    
     const {
       appName,
       primaryColor,
@@ -219,10 +218,10 @@ exports.updateAppConfiguration = async (req, res) => {
       tax
     } = req.body;
 
-    // Get new logo if uploaded
+    
     const appLogo = req.file ? req.file.path : undefined;
 
-    // Find existing configuration
+    
     const existingConfig = await Configuration.findById(id);
     if (!existingConfig) {
       return res.status(404).json({
@@ -231,7 +230,7 @@ exports.updateAppConfiguration = async (req, res) => {
       });
     }
 
-    // Prevent empty required fields
+    
     if (
       appName === '' ||
       primaryColor === '' ||
@@ -246,13 +245,14 @@ exports.updateAppConfiguration = async (req, res) => {
       });
     }
 
-    // Validate color formats (hex or rgb)
+    
     if (primaryColor && !/^#([0-9A-F]{3}|[0-9A-F]{6})|rgb\(\d{1,3}%?,\s*\d{1,3}%?,\s*\d{1,3}%?\)$/i.test(primaryColor)) {
       return res.status(400).json({
         success: false,
         message: 'Invalid Primary Color format (e.g., #FF0000 or rgb(255, 0, 0))',
       });
     }
+    
     if (secondaryColor && !/^#([0-9A-F]{3}|[0-9A-F]{6})|rgb\(\d{1,3}%?,\s*\d{1,3}%?,\s*\d{1,3}%?\)$/i.test(secondaryColor)) {
       return res.status(400).json({
         success: false,
