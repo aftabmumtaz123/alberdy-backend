@@ -10,7 +10,6 @@ const User = require('../model/User');
 const AppConfiguration = require('../model/app_configuration');
 const SmtpConfig = require('../model/SmtpConfig');
 const EmailTemplate = require('../model/EmailTemplate'); 
-const PushSubscription = require('../model/PushSubscription');
 const authMiddleware = require('../middleware/auth');
 
 const requireRole = roles => (req, res, next) => {
@@ -28,21 +27,13 @@ const generateOrderNumber = async () => {
 };
 
 const generateTrackingNumber = async () => {
-  try {
-    await OrderCounter.findOneAndUpdate(
-      { type: 'tracking' },
-      { $inc: { seq: 1 } },
-      { upsert: true, new: true }
-    );
-    const counter = await OrderCounter.findOne({ type: 'tracking' });
-    return `#TRK-LEY-321-${counter.seq.toString().padStart(3, '0')}`;
-  } catch (err) {
-    console.error('Error generating tracking number:', err);
-    return '#TRK-LEY-321-001';  // Fallback
-  }
+  const last = await Order.findOne().sort({ createdAt: -1 }).select('orderTrackingNumber');
+  if (!last || !last.orderTrackingNumber) return '#TRK-LEY-321-001';
+  const num = parseInt(last.orderTrackingNumber.replace('#TRK-LEY-321-', '')) + 1;
+  return `#TRK-LEY-321-${num.toString().padStart(3, '0')}`;
 };
 
-/* ---------- Helper: Fetch Currency Settings ---------- */
+/* ---------- Helper: fetch currency settings ---------- */
 const getCurrencySettings = async () => {
   try {
     const config = await AppConfiguration.findOne().lean().select('currencyName currencyCode currencySign');
@@ -124,22 +115,13 @@ const createTransporter = (smtpConfig) => {
 /* ---------- Helper: Send Email using Config and Template ---------- */
 const sendEmail = async (to, templateType, variables = {}) => {
   const smtpConfig = await getActiveSmtpConfig();
-  if (!smtpConfig) {
-    console.warn('SMTP config unavailable – email skipped');
-    return false;
-  }
+  if (!smtpConfig) return;
 
   const template = await getEmailTemplate(templateType);
-  if (!template) {
-    console.warn(`Template unavailable for ${templateType} – email skipped`);
-    return false;
-  }
+  if (!template) return;
 
   const transporter = createTransporter(smtpConfig);
-  if (!transporter) {
-    console.error('Failed to create transporter');
-    return false;
-  }
+  if (!transporter) return;
 
   const subject = renderTemplate(template.subject, variables);
   const html = renderTemplate(template.content, variables);
@@ -152,10 +134,8 @@ const sendEmail = async (to, templateType, variables = {}) => {
       html,
     });
     console.log(`Email sent successfully to ${to} using template: ${templateType}`);
-    return true;
   } catch (err) {
     console.error(`Email sending error for ${templateType}:`, err);
-    return false;
   }
 };
 
@@ -164,23 +144,18 @@ const checkAndSendLowStockAlerts = async (variants, adminEmail) => {
   const lowStockVariants = variants.filter(v => v.stockQuantity < 5);
   if (lowStockVariants.length === 0) return;
 
-  try {
-    const populatedVariants = await Promise.all(
-      lowStockVariants.map(async (v) => {
-        const product = await Product.findById(v.product).lean();
-        return { ...v, product };
-      })
-    );
+  const populatedVariants = await Promise.all(
+    lowStockVariants.map(async (v) => {
+      const product = await Product.findById(v.product);
+      return { ...v, product };
+    })
+  );
 
-    const lowStockItems = populatedVariants.map(v => `${v.product.name} - ${v.attribute}: ${v.value} (Stock: ${v.stockQuantity})`).join('<br>');
-    const variables = { lowStockItems };
-    await sendEmail(adminEmail, 'low_stock_alert', variables);
-  } catch (err) {
-    console.error('Low stock alert error:', err);
-  }
+  const lowStockItems = populatedVariants.map(v => `${v.product.name} - ${v.attribute}: ${v.value} (Stock: ${v.stockQuantity})`).join('<br>');
+  const variables = { lowStockItems };
+  await sendEmail(adminEmail, 'low_stock_alert', variables);
 };
 
-/* -------------------------- CREATE ORDER -------------------------- */
 router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
     const {
@@ -190,7 +165,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       paymentStatus
     } = req.body;
 
-    // Validation
+
     if (!items?.length) return res.status(400).json({ success: false, msg: 'Order items required' });
     if (!paymentMethod) return res.status(400).json({ success: false, msg: 'Payment method required' });
     if (!shippingAddress?.street || !shippingAddress?.city || !shippingAddress?.zip ||
@@ -202,7 +177,6 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
     let computedSubtotal = 0;
     const variantsToCheck = [];
 
-    // Process items with stock check & decrement (optimistic – rollback on error)
     for (const itm of items) {
       if (!mongoose.Types.ObjectId.isValid(itm.product))
         return res.status(400).json({ success: false, msg: `Invalid product ID: ${itm.product}` });
@@ -275,27 +249,6 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
 
     await order.save();
 
-    // Decrement stock (transaction for atomicity)
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    try {
-      for (const item of orderItems) {
-        await Variant.findByIdAndUpdate(
-          item.variant,
-          { $inc: { stockQuantity: -item.quantity } },
-          { session }
-        );
-      }
-      await session.commitTransaction();
-    } catch (stockErr) {
-      await session.abortTransaction();
-      await order.deleteOne();
-      throw new Error('Stock update failed – order rolled back');
-    } finally {
-      session.endSession();
-    }
-
-    // Populate for response
     await order.populate('items.product', 'name thumbnail images');
     await order.populate({
       path: 'items.variant',
@@ -303,15 +256,14 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
     });
     await order.populate('user', 'name email phone');
 
-    // Push notifications
+    // Push notifications (unchanged)
     try {
+      const PushSubscription = require('../model/PushSubscription');
       const { sendNotification } = require('../utils/sendPushNotification');
 
       const adminSubs = await PushSubscription.find({
-        role: { $in: ['Super Admin', 'Manager'] },
-        endpoint: { $exists: true, $ne: null },
-        'keys.p256dh': { $exists: true }
-      }).select('endpoint keys').lean();
+        role: { $in: ['Super Admin', 'Manager'] }
+      }).select('endpoint keys');
 
       if (adminSubs.length > 0) {
         const currency = await getCurrencySettings();
@@ -326,13 +278,12 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
           ).catch(err => console.warn('Failed to send push to one subscriber:', err.message))
         );
 
-        await Promise.allSettled(notificationPromises);
+        Promise.allSettled(notificationPromises);
       }
     } catch (pushErr) {
       console.error('Push notification error (non-critical):', pushErr);
     }
 
-    // Emails
     try {
       const currency = await getCurrencySettings();
       const totalFormatted = `${currency.currencySign}${total.toFixed(2)}`;
@@ -349,7 +300,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       };
       await sendEmail(order.user.email, 'order_placed', customerVariables);
 
-      const adminUser = await User.findOne({ role: { $in: ['Super Admin', 'Manager'] } }).select('email').lean();
+      const adminUser = await User.findOne({ role: { $in: ['Super Admin', 'Manager'] } }).select('email');
       if (adminUser) {
         const adminVariables = {
           order_number: order.orderNumber,
@@ -358,8 +309,9 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
           customer_email: order.user.email,
           order_paymentMethod: paymentMethod,
         };
-        await sendEmail(adminUser.email, 'admin_order_alert', adminVariables);  // Dedicated template
+        await sendEmail(adminUser.email, 'order_placed', adminVariables); // Reuse template or create 'admin_order_alert'
 
+        
         if (variantsToCheck.length > 0) {
           await checkAndSendLowStockAlerts(variantsToCheck, adminUser.email);
         }
@@ -392,8 +344,7 @@ router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custo
     const order = await Order.findById(req.params.id)
       .populate('items.product', 'name thumbnail images')
       .populate('items.variant', 'attribute value sku price discountPrice stockQuantity image')
-      .populate('user', 'name email phone')
-      .lean();
+      .populate('user', 'name email phone');
 
     if (!order) return res.status(404).json({ success: false, msg: 'Order not found' });
 
@@ -415,9 +366,7 @@ router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custo
 /* -------------------------- LIST ORDERS -------------------------- */
 router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
-    const { page = 1, limit = 10, status } = req.query;  // Default limit for prod
-    const pageNum = Math.max(1, parseInt(page));
-    const limitNum = Math.min(100, Math.max(1, parseInt(limit)));  // Cap at 100
+    const { page = 1, limit, status } = req.query;
     const query = status ? { status } : {};
     if (req.user.role === 'Customer') query.user = req.user.id;
 
@@ -426,9 +375,8 @@ router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer
       .populate('items.variant', 'attribute value sku price discountPrice effectivePrice total stockQuantity image product')
       .populate('user', 'name email phone')
       .sort({ createdAt: -1 })
-      .skip((pageNum - 1) * limitNum)
-      .limit(limitNum)
-      .lean();
+      .skip((page - 1) * parseInt(limit))
+      .limit(parseInt(limit));
 
     const total = await Order.countDocuments(query);
 
@@ -440,12 +388,7 @@ router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer
         orders,
         currency,
       },
-      pagination: { 
-        current: pageNum, 
-        pages: Math.ceil(total / limitNum), 
-        total,
-        limit: limitNum 
-      },
+      pagination: { current: +page, pages: Math.ceil(total / limit), total },
     });
   } catch (err) {
     console.error('Error fetching orders:', err);
@@ -462,13 +405,13 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
     if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ success: false, msg: 'Invalid order ID' });
 
-    const order = await Order.findById(id).populate('items.variant user').lean();
+    const order = await Order.findById(id).populate('items.variant user');
     if (!order)
       return res.status(404).json({ success: false, msg: 'Order not found' });
 
     const oldStatus = order.status;
 
-    const update = { updatedAt: new Date() };
+    const update = {};
 
     if (shippingAddress) update.shippingAddress = shippingAddress;
     if (notes) update.notes = notes;
@@ -508,36 +451,24 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
       update.paymentStatus = paymentStatus;
     }
 
-    // Restock on cancel (transaction)
     if (status === 'cancelled') {
-      const session = await mongoose.startSession();
-      session.startTransaction();
-      try {
-        for (const item of order.items) {
-          if (item.variant && mongoose.Types.ObjectId.isValid(item.variant._id)) {
-            await Variant.findByIdAndUpdate(
-              item.variant._id,
-              { $inc: { stockQuantity: item.quantity } },
-              { session, runValidators: true }
-            );
-          }
+      for (const item of order.items) {
+        if (item.variant && mongoose.Types.ObjectId.isValid(item.variant._id)) {
+          await Variant.findByIdAndUpdate(
+            item.variant._id,
+            { $inc: { stockQuantity: item.quantity } },
+            { runValidators: true }
+          );
         }
-        await session.commitTransaction();
-      } catch (stockErr) {
-        await session.abortTransaction();
-        throw stockErr;
-      } finally {
-        session.endSession();
       }
     }
 
     const updatedOrder = await Order.findByIdAndUpdate(id, { $set: update }, { new: true, runValidators: true })
       .populate('items.product', 'name thumbnail images')
       .populate('items.variant', 'attribute value sku price discountPrice stockQuantity image')
-      .populate('user', 'name email phone')
-      .lean();
+      .populate('user', 'name email phone');
 
-    // Status update email
+    // Status update email (dynamic)
     if (status && status !== oldStatus) {
       try {
         const currency = await getCurrencySettings();
@@ -567,7 +498,6 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
   }
 });
 
-/* -------------------------- DELETE ORDER -------------------------- */
 router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { id } = req.params;
@@ -576,36 +506,23 @@ router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), a
 
     const order = await Order.findById(id)
       .populate('items.product', 'name thumbnail images')
-      .populate('items.variant', 'attribute value sku price discountPrice stockQuantity image')
-      .lean();
+      .populate('items.variant', 'attribute value sku price discountPrice stockQuantity image');
 
     if (!order) return res.status(404).json({ success: false, msg: 'Order not found' });
     if (order.status === 'delivered' || order.paymentStatus === 'paid')
       return res.status(400).json({ success: false, msg: 'Cannot delete delivered/paid orders' });
 
-    if (order.status !== 'pending') {
-      return res.status(400).json({ success: false, msg: 'Only pending orders can be deleted' });
-    }
-
-    // Restock (transaction)
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    try {
+    if (order.status === 'pending') {
       for (const item of order.items) {
         if (item.variant) {
-          await Variant.findByIdAndUpdate(item.variant, { $inc: { stockQuantity: item.quantity } }, { session });
+          await Variant.findByIdAndUpdate(item.variant, { $inc: { stockQuantity: item.quantity } });
         }
       }
-      await Order.findByIdAndDelete(id, { session });
-      await session.commitTransaction();
-    } catch (stockErr) {
-      await session.abortTransaction();
-      throw stockErr;
-    } finally {
-      session.endSession();
+      await Order.findByIdAndDelete(id);
+      res.json({ success: true, data: order, msg: `Order ${order.orderNumber} deleted successfully` });
+    } else {
+      return res.status(400).json({ success: false, msg: 'Only pending orders can be deleted' });
     }
-
-    res.json({ success: true, data: order, msg: `Order ${order.orderNumber} deleted successfully` });
   } catch (err) {
     console.error('Error deleting order:', err);
     res.status(500).json({ success: false, msg: 'Server error', details: err.message });
@@ -624,7 +541,7 @@ router.put('/:id/tracking', authMiddleware, requireRole(['Super Admin', 'Manager
     if (trackingStatus && !valid.includes(trackingStatus))
       return res.status(400).json({ success: false, msg: `Invalid tracking status: ${trackingStatus}` });
 
-    const order = await Order.findById(id).lean();
+    const order = await Order.findById(id);
     if (!order) return res.status(404).json({ success: false, msg: 'Order not found' });
 
     if (trackingStatus && ['delivered', 'cancelled'].includes(order.trackingStatus))
@@ -634,11 +551,11 @@ router.put('/:id/tracking', authMiddleware, requireRole(['Super Admin', 'Manager
       });
 
     if (orderTrackingNumber) {
-      const exists = await Order.findOne({ orderTrackingNumber, _id: { $ne: id } }).lean();
+      const exists = await Order.findOne({ orderTrackingNumber, _id: { $ne: id } });
       if (exists) return res.status(400).json({ success: false, msg: 'Tracking number already used' });
     }
 
-    const upd = { updatedAt: new Date() };
+    const upd = {};
     if (trackingStatus) upd.trackingStatus = trackingStatus;
     if (orderTrackingNumber) upd.orderTrackingNumber = orderTrackingNumber;
     if (!Object.keys(upd).length) return res.status(400).json({ success: false, msg: 'Nothing to update' });
@@ -646,8 +563,7 @@ router.put('/:id/tracking', authMiddleware, requireRole(['Super Admin', 'Manager
     const updated = await Order.findByIdAndUpdate(id, { $set: upd }, { new: true })
       .populate('items.product', 'name thumbnail images')
       .populate('items.variant', 'attribute value sku price discountPrice stockQuantity image')
-      .populate('user', 'name email phone')
-      .lean();
+      .populate('user', 'name email phone');
 
     res.json({ success: true, data: updated, msg: `Tracking updated for ${updated.orderNumber}` });
   } catch (err) {
@@ -667,12 +583,10 @@ router.get('/track/:identifier', async (req, res) => {
     const order = await Order.findOne(query)
       .populate('items.product', 'name thumbnail images')
       .populate('items.variant', 'attribute value sku price discountPrice stockQuantity image')
-      .populate('user', 'name email phone')
-      .lean();
+      .populate('user', 'name email phone');
 
     if (!order) return res.status(404).json({ success: false, msg: 'Order not found' });
 
-    // Partial auth for customers
     if (req.user?.role === 'Customer' && order.user.toString() !== req.user.id)
       return res.status(403).json({ success: false, msg: 'Access denied' });
 
@@ -703,101 +617,73 @@ router.get('/track/:identifier', async (req, res) => {
   }
 });
 
-/* -------------------------- PUSH SUBSCRIPTION -------------------------- */
 router.post('/subscribe', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
-  try {
-    const { subscription } = req.body;
-    if (!subscription || !subscription.endpoint || !subscription.keys?.p256dh || !subscription.keys?.auth) {
-      return res.status(400).json({ success: false, msg: 'Valid subscription required (endpoint + keys)' });
-    }
+  const { subscription } = req.body;
+  const PushSubscription = require('../model/PushSubscription');
 
-    // Validate key lengths
-    const { Buffer } = require('buffer');
-    if (Buffer.from(subscription.keys.p256dh, 'base64').length !== 65) {
-      return res.status(400).json({ success: false, msg: 'p256dh key must be 65 bytes' });
-    }
-    if (Buffer.from(subscription.keys.auth, 'base64').length < 16) {
-      return res.status(400).json({ success: false, msg: 'auth key too short' });
-    }
+  await PushSubscription.findOneAndUpdate(
+    { endpoint: subscription.endpoint },
+    {
+      user: req.user.id,
+      endpoint: subscription.endpoint,
+      keys: subscription.keys,
+      role: req.user.role
+    },
+    { upsert: true, new: true }
+  );
 
-    const updatedSub = await PushSubscription.findOneAndUpdate(
-      { endpoint: subscription.endpoint },
-      {
-        user: req.user.id,  // Real user now
-        endpoint: subscription.endpoint,
-        keys: subscription.keys,
-        role: req.user.role
-      },
-      { upsert: true, new: true }
-    );
-
-    res.json({ success: true, msg: 'Subscribed to notifications' });
-  } catch (err) {
-    console.error('Subscription error:', err);
-    res.status(500).json({ success: false, msg: 'Server error during subscription' });
-  }
+  res.json({ success: true, msg: 'Subscribed to notifications' });
 });
 
-/* -------------------------- VAPID PUBLIC KEY -------------------------- */
 router.get('/key/public-key', (req, res) => {
-  if (!process.env.VAPID_PUBLIC_KEY) {
-    return res.status(500).json({ success: false, msg: 'VAPID keys not configured' });
-  }
   res.json({
     success: true,
     publicKey: process.env.VAPID_PUBLIC_KEY
   });
 });
 
-/* -------------------------- REFUND REQUEST -------------------------- */
 router.post('/:orderId/refund-request', authMiddleware, async (req, res) => {
   try {
     const { reason } = req.body;
 
-    const order = await Order.findById(req.params.orderId).lean();
+    const order = await Order.findById(req.params.orderId);
     if (!order) {
-      return res.status(404).json({ success: false, msg: 'Order not found' });
+      return res.status(404).json({ msg: 'Order not found' });
     }
 
     if (
       order.user.toString() !== req.user.id &&
       !['Super Admin', 'Manager'].includes(req.user.role)
     ) {
-      return res.status(403).json({ success: false, msg: 'Not allowed' });
+      return res.status(403).json({ msg: 'Not allowed' });
     }
 
     if (order.paymentStatus !== 'paid') {
-      return res.status(400).json({ success: false, msg: 'Only paid orders can be refunded' });
+      return res.status(400).json({ msg: 'Only paid orders can be refunded' });
     }
 
     if (order.status === 'returned' || order.paymentStatus === 'refunded') {
-      return res.status(400).json({ success: false, msg: 'Refund already requested or processed' });
+      return res.status(400).json({ msg: 'Refund already requested or processed' });
     }
 
-    const updatedOrder = await Order.findByIdAndUpdate(
-      req.params.orderId,
-      {
-        status: 'returned',
-        paymentStatus: 'refunded',
-        refundReason: reason || 'No reason provided',
-        refundRequestedAt: new Date(),
-        updatedAt: new Date()
-      },
-      { new: true }
-    ).lean();
+    order.status = 'returned';
+    order.paymentStatus = 'refunded';
+    order.refundReason = reason || 'No reason provided';
+    order.refundRequestedAt = new Date();
+
+    await order.save();
 
     res.json({
       success: true,
       msg: 'Refund request submitted successfully',
-      data: updatedOrder
+      order
     });
   } catch (err) {
-    console.error('Refund error:', err);
-    res.status(500).json({ success: false, msg: 'Refund request failed', details: err.message });
+    console.error(err);
+    res.status(500).json({ msg: 'Refund request failed' });
   }
 });
 
-/* -------------------------- VERIFY PAYMENT -------------------------- */
 router.post('/verify-payment', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { orderId, isPaymentVerified, reason } = req.body;
@@ -818,8 +704,7 @@ router.post('/verify-payment', authMiddleware, requireRole(['Super Admin', 'Mana
 
     const order = await Order.findById(orderId)
       .populate('items.product', 'name')
-      .populate('user', 'name email')
-      .lean();
+      .populate('user', 'name email');
 
     if (!order) {
       return res.status(404).json({
@@ -838,8 +723,6 @@ router.post('/verify-payment', authMiddleware, requireRole(['Super Admin', 'Mana
     const previousPaymentStatus = order.paymentStatus;
     const previousIsVerified = order.isPaymentVerified;
 
-    const update = { updatedAt: new Date() };
-
     if (isPaymentVerified === true) {
       if (order.isPaymentVerified === true) {
         return res.status(400).json({
@@ -855,13 +738,13 @@ router.post('/verify-payment', authMiddleware, requireRole(['Super Admin', 'Mana
         });
       }
 
-      update.isPaymentVerified = true;
-      update.paymentStatus = 'paid';
-      update.paymentVerifiedAt = new Date();
-      update.paymentVerifiedBy = req.user.id;
+      order.isPaymentVerified = true;
+      order.paymentStatus = 'paid';
+      order.paymentVerifiedAt = new Date();
+      order.paymentVerifiedBy = req.user.id;
 
       if (order.status === 'pending') {
-        update.status = 'confirmed';
+        order.status = 'confirmed';
       }
     } else {
       if (order.paymentStatus === 'refunded') {
@@ -871,40 +754,40 @@ router.post('/verify-payment', authMiddleware, requireRole(['Super Admin', 'Mana
         });
       }
 
-      update.isPaymentVerified = false;
-      update.paymentStatus = 'unpaid';
-      update.paymentVerifiedAt = null;
-      update.paymentVerifiedBy = null;
+      order.isPaymentVerified = false;
+      order.paymentStatus = 'unpaid';
+      order.paymentVerifiedAt = null;
+      order.paymentVerifiedBy = null;
     }
 
-    if (!order.paymentHistory) update.paymentHistory = [];
-    update.paymentHistory = order.paymentHistory.concat({
+    if (!order.paymentHistory) order.paymentHistory = [];
+    order.paymentHistory.push({
       action: isPaymentVerified ? 'mark-paid' : 'mark-unpaid',
       previousStatus: previousPaymentStatus,
-      newStatus: update.paymentStatus,
+      newStatus: order.paymentStatus,
       previousVerified: previousIsVerified,
-      newVerified: update.isPaymentVerified,
+      newVerified: order.isPaymentVerified,
       reason: reason || 'No reason provided',
       performedBy: req.user.id,
       performedByRole: req.user.role,
       timestamp: new Date()
     });
 
-    const updatedOrder = await Order.findByIdAndUpdate(orderId, { $set: update }, { new: true }).lean();
+    await order.save();
 
-    // Payment confirmation email
+    // Payment confirmation email (dynamic)
     if (isPaymentVerified) {
       try {
         const currency = await getCurrencySettings();
-        const totalFormatted = `${currency.currencySign}${updatedOrder.total.toFixed(2)}`;
+        const totalFormatted = `${currency.currencySign}${order.total.toFixed(2)}`;
         const variables = {
-          user_name: updatedOrder.user.name,
-          order_number: updatedOrder.orderNumber,
+          user_name: order.user.name,
+          order_number: order.orderNumber,
           order_total: totalFormatted,
-          order_status: updatedOrder.status,
-          order_paymentMethod: updatedOrder.paymentMethod,
+          order_status: order.status,
+          order_paymentMethod: order.paymentMethod,
         };
-        await sendEmail(updatedOrder.user.email, 'payment_confirmation', variables);
+        await sendEmail(order.user.email, 'payment_confirmation', variables);
       } catch (emailErr) {
         console.error('Payment confirmation email error (non-critical):', emailErr);
       }
@@ -914,11 +797,11 @@ router.post('/verify-payment', authMiddleware, requireRole(['Super Admin', 'Mana
       success: true,
       msg: `Payment verification ${isPaymentVerified ? 'enabled' : 'disabled'}`,
       data: {
-        orderNumber: updatedOrder.orderNumber,
+        orderNumber: order.orderNumber,
         previousStatus: previousPaymentStatus,
-        newStatus: updatedOrder.paymentStatus,
+        newStatus: order.paymentStatus,
         previousVerified: previousIsVerified,
-        newVerified: updatedOrder.isPaymentVerified,
+        newVerified: order.isPaymentVerified,
         updatedBy: req.user.name || req.user.email
       }
     });
