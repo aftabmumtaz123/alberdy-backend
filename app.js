@@ -79,7 +79,7 @@ app.use('/api/v1/inventory', require('./router/inventoryRoutes'));
 app.use('/api/v2/banner', require('./router/bannerRoute'))
 app.use('/api/v2/smtp-configs', require('./router/smtp'));
 app.use('/api/v2/email-templates', require('./router/emailTemplates')); 
-
+app.use('/api/v2/notifications', require('./router/notifications'));
 app.use('/api/push', require('./router/push')); 
 
 
