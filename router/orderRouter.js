@@ -82,6 +82,17 @@ const renderTemplate = (content, variables) => {
   return rendered;
 };
 
+const buildProductRows = (order) => {
+  return order.items.map(item => `
+    <tr>
+      <td>${item.product?.name || "Product"}</td>
+      <td align="center">${item.quantity}</td>
+      <td align="right">${item.price}</td>
+      <td align="right">${item.total}</td>
+    </tr>
+  `).join("");
+};
+
 const createTransporter = (smtpConfig) => {
   if (!smtpConfig) return null;
   return nodemailer.createTransport({
@@ -94,7 +105,6 @@ const createTransporter = (smtpConfig) => {
     },
   });
 };
-
 const sendEmail = async (to, templateType, variables = {}) => {
   const smtp = await getActiveSmtpConfig();
   if (!smtp) return;
@@ -106,12 +116,16 @@ const sendEmail = async (to, templateType, variables = {}) => {
   if (!transporter) return;
 
   try {
+    const subject = renderTemplate(template.subject, variables);
+    const html = renderTemplate(template.content, variables);
+
     await transporter.sendMail({
       from: `${template.fromName} <${template.fromEmail}>`,
       to,
-      subject: renderTemplate(template.subject, variables),
-      html: renderTemplate(template.content, variables),
+      subject,
+      html
     });
+
     console.log(`Email sent to ${to} [${templateType}]`);
   } catch (err) {
     console.error(`Email failed [${templateType}]:`, err);
@@ -195,7 +209,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
     if (!paymentMethod) return res.status(400).json({ success: false, msg: 'Payment method required' });
 
     if (!shippingAddress?.street || !shippingAddress?.city || !shippingAddress?.zip ||
-        !shippingAddress?.fullName || !shippingAddress?.phone || !shippingAddress?.email) {
+      !shippingAddress?.fullName || !shippingAddress?.phone || !shippingAddress?.email) {
       return res.status(400).json({ success: false, msg: 'Complete shipping address and email required' });
     }
 
@@ -316,17 +330,20 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       const currency = await getCurrencySettings();
       const totalFormatted = `${currency.currencySign}${total.toFixed(2)}`;
 
-      // Customer email
+      const productRows = buildProductRows(order);
+
       const customerVars = {
-        user_name: order.user.name,
-        order_number: order.orderNumber,
-        order_trackingNumber: order.orderTrackingNumber,
-        order_total: totalFormatted,
-        order_status: order.status,
-        order_paymentMethod: order.paymentMethod,
+        customerName: order.shippingAddress.fullName,
+        orderId: order.orderNumber,
+        orderTotal: totalFormatted,
+        paymentMethod: order.paymentMethod,
         shippingAddress: `${order.shippingAddress.fullName}, ${order.shippingAddress.street}, ${order.shippingAddress.city}, ${order.shippingAddress.zip}`,
+        productRows,
+        orderTrackingUrl: `https://yourdomain.com/track/${order.orderTrackingNumber}`
       };
+
       await sendEmail(order.user.email, 'order_placed', customerVars);
+
 
       // Admins
       const admins = await User.find({ role: { $in: ['Super Admin', 'Manager'] } })

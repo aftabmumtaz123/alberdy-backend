@@ -120,7 +120,8 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
   }
 });
 
-// DELETE Email Template
+
+
 router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
