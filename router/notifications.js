@@ -54,7 +54,7 @@ router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer
 router.patch('/:id/read', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
     const notification = await Notification.findOneAndUpdate(
-      { _id: req.params.id, user: req.user._id },
+      { _id: req.params.id },
       { isRead: true },
       { new: true, select: '-__v' }
     );
@@ -74,8 +74,7 @@ router.patch('/:id/read', authMiddleware, requireRole(['Super Admin', 'Manager',
 router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
     const result = await Notification.deleteOne({
-      _id: req.params.id,
-      user: req.user._id
+      _id: req.params.id
     });
 
     if (result.deletedCount === 0) {
@@ -93,7 +92,7 @@ router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager', 'Cu
 router.patch('/mark-all-read', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
     const result = await Notification.updateMany(
-      { user: req.user._id, isRead: false },    // only update unread ones
+      { isRead: false },    // only update unread ones
       { $set: { isRead: true } }
     );
 
@@ -111,7 +110,7 @@ router.patch('/mark-all-read', authMiddleware, requireRole(['Super Admin', 'Mana
 // DELETE /notifications - Clear all for current user
 router.delete('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
-    const result = await Notification.deleteMany({ user: req.user._id });
+    const result = await Notification.deleteMany();
 
     res.json({
       success: true,
