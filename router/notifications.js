@@ -36,7 +36,7 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
-// Mark one as read
+
 router.patch('/:id/read', authMiddleware, async (req, res) => {
   try {
     const notification = await Notification.findOneAndUpdate(

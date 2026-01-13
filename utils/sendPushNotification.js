@@ -15,7 +15,7 @@ const sendNotification = async (subscription, title, body, data = {}) => {
     const p256dhBuf = Buffer.from(subscription.keys.p256dh, 'base64url');
     if (p256dhBuf.length !== 65) {
       console.error(`Invalid p256dh length ${p256dhBuf.length} for ${subscription.endpoint}`);
-      // Optionally delete bad sub here
+      const PushSubscription = require('../model/PushSubscription');
       await PushSubscription.deleteOne({ endpoint: subscription.endpoint });
       return;
     }
@@ -33,7 +33,14 @@ const sendNotification = async (subscription, title, body, data = {}) => {
   });
 
   try {
-    await webPush.sendNotification(subscription, payload);
+    await webPush.sendNotification(subscription, payload, {
+      vapidDetails: {
+        subject: 'mailto:aftabmumtaz14@gmail.com',          
+        publicKey: process.env.VAPID_PUBLIC_KEY,
+        privateKey: process.env.VAPID_PRIVATE_KEY
+      }
+    });
+
     console.log(`Push sent to ${subscription.endpoint}`);
   } catch (error) {
     console.error('Error sending push:', error);
@@ -45,7 +52,5 @@ const sendNotification = async (subscription, title, body, data = {}) => {
     }
   }
 };
-
-
 
 module.exports = { sendNotification };
