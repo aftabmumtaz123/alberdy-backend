@@ -277,6 +277,7 @@ exports.getDashboard = async (req, res) => {
 
     // Recent Orders mapping (match UI: #ORD-001 format if orderNumber is like that; capitalize status)
     const formattedRecentOrders = recentOrders.map(order => ({
+      _id: order._id,
       orderId: order.orderNumber?.startsWith('#ORD-') ? order.orderNumber : `#ORD-${String(order._id).slice(-3).padStart(3, '0')}`,
       customer: order.user?.name || 'Unknown',
       product: order.items[0]?.product?.name || 'N/A',
