@@ -89,6 +89,25 @@ router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager', 'Cu
   }
 });
 
+// NEW: PATCH /notifications/mark-all-read - Mark ALL notifications as read for current user
+router.patch('/mark-all-read', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
+  try {
+    const result = await Notification.updateMany(
+      { user: req.user._id, isRead: false },    // only update unread ones
+      { $set: { isRead: true } }
+    );
+
+    res.json({
+      success: true,
+      message: `Marked ${result.modifiedCount} notification${result.modifiedCount !== 1 ? 's' : ''} as read`,
+      modifiedCount: result.modifiedCount
+    });
+  } catch (err) {
+    console.error('Error marking all notifications as read:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // DELETE /notifications - Clear all for current user
 router.delete('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
