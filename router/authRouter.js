@@ -11,29 +11,101 @@ const { OAuth2Client } = require('google-auth-library');
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const crypto = require('crypto');
 const sendEmail = require('../utils/sendEmail');
+const { createNotification } = require('../utils/createNotification');
 
+// ────────────────────────────────────────────────
+// Notify admins about new user registration
+// (email + push + in-app notification)
+// ────────────────────────────────────────────────
+async function notifyAdminsNewUser(name, email, role, userId) {
+  try {
+    // 1. Email notification
+    const admins = await User.find({
+      role: { $in: ['Super Admin', 'Manager'] },
+      status: 'Active'
+    }).select('email');
 
+    if (admins.length > 0) {
+      const adminEmails = admins.map(a => a.email).join(',');
 
+      const adminHtml = `
+        <h2>New User Registration</h2>
+        <p>A new user has just registered:</p>
+        <ul>
+          <li><strong>Name:</strong> ${name || 'N/A'}</li>
+          <li><strong>Email:</strong> ${email}</li>
+          <li><strong>Role:</strong> ${role}</li>
+          <li><strong>Time:</strong> ${new Date().toISOString()}</li>
+        </ul>
+        <p>View user: <a href="${process.env.FRONTEND_URL || 'https://your-app.com'}/admin/users/${userId}">Click here</a></p>
+      `;
 
+      await sendEmail(adminEmails, 'New User Registration - Albreedy Pet Shop', adminHtml);
+    }
 
+    // 2. Web Push notification
+    const PushSubscription = require('../model/PushSubscription');
+    const { sendNotification } = require('../utils/sendPushNotification');
+
+    const adminSubs = await PushSubscription.find({
+      role: { $in: ['Super Admin', 'Manager'] }
+    }).select('endpoint keys').lean();
+
+    if (adminSubs.length > 0) {
+      const pushPromises = adminSubs.map(sub =>
+        sendNotification(
+          { endpoint: sub.endpoint, keys: sub.keys },
+          'New User Registered',
+          `${name || email} (${role}) just signed up.`,
+          {
+            userId: userId.toString(),
+            url: `/admin/users/${userId}`
+          }
+        ).catch(err => console.warn('Push failed for new user:', err.message))
+      );
+
+      await Promise.allSettled(pushPromises);
+    }
+
+    // 3. In-app bell notifications (per admin)
+    const adminUsers = await User.find({
+      role: { $in: ['Super Admin', 'Manager'] }
+    }).select('_id').lean();
+
+    if (adminUsers.length > 0) {
+      const message = `${name || email} (${role}) registered a new account`;
+
+      for (const admin of adminUsers) {
+        await createNotification({
+          userId: admin._id,
+          type: 'account_registration',
+          title: 'New User Registered',
+          message: message,
+          related: { userId: userId.toString() }
+        }).catch(err => console.error('In-app notification failed for new user:', err));
+      }
+    }
+
+  } catch (err) {
+    console.error('Failed to notify admins about new user:', err);
+  }
+}
+
+// ────────────────────────────────────────────────
+// Google Sign-in / Sign-up
+// ────────────────────────────────────────────────
 router.post('/api/v1/auth/google', async (req, res) => {
   const { credential } = req.body;
   if (!credential) {
     return res.status(400).json({ success: false, msg: 'No credential provided' });
   }
 
-  if (credential === undefined) {
-    res.status(400).json({ success: false, msg: 'No credential provided' });
-  }
-
   try {
     const ticket = await googleClient.verifyIdToken({
       idToken: credential,
-      audience: process.env.GOOGLE_CLIENT_ID, // Must match your client ID
+      audience: process.env.GOOGLE_CLIENT_ID,
     });
     const payload = ticket.getPayload();
-
-    console.log("Payloads: ", { ...payload });
 
     if (!payload.email_verified) {
       return res.status(400).json({ success: false, msg: 'Email not verified by Google' });
@@ -49,9 +121,14 @@ router.post('/api/v1/auth/google', async (req, res) => {
       });
       await newUser.save();
       user = newUser;
+
+      // Notify admins (email + push + in-app)
+      await notifyAdminsNewUser(user.name, user.email, user.role, user._id);
     } else {
-      if (user.name !== payload.name) user.name = payload.name;
-      await user.save();
+      if (user.name !== payload.name) {
+        user.name = payload.name;
+        await user.save();
+      }
     }
 
     await User.collection.updateOne(
@@ -59,87 +136,6 @@ router.post('/api/v1/auth/google', async (req, res) => {
       { $set: { lastLogin: new Date() } }
     );
 
-    await RefreshToken.deleteMany({ userId: user._id });
-
-    const accessPayload = { id: user._id, role: user.role };
-    const accessToken = jwt.sign(accessPayload, JWT_SECRET, { expiresIn: '120m' });
-
-    const refreshPayload = { id: user._id, role: user.role };
-    const refreshTokenStr = jwt.sign(refreshPayload, REFRESH_SECRET, { expiresIn: '7d' });
-
-    await RefreshToken.create({
-      token: refreshTokenStr,
-      userId: user._id,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-    });
-
-    // Set httpOnly cookies (same as your login)
-    res.cookie('access_token', accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 120 * 60 * 1000 // match expiry
-    });
-    res.cookie('refresh_token', refreshTokenStr, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
-
-    // Respond (similar to your login/register)
-    const updatedUser = await User.findById(user._id).select('-password -__v');
-
-    res.json({
-      success: true,
-      msg: 'Login successful',
-      accessToken, // optional, if frontend needs it immediately
-      user: updatedUser
-    });
-
-  } catch (err) {
-    console.error('Google auth error:', err);
-    res.status(400).json({ success: false, msg: 'Invalid Google credential' });
-  }
-});
-
-
-
-router.post('/api/v1/auth/verify-otp1', async (req, res) => {
-  const { email, otp } = req.body;
-
-  if (!email || !otp) {
-    console.log('Missing email or otp');
-    return res.status(400).json({ success: false, msg: 'Email and OTP required' });
-  }
-
-  const normalizedEmail = email.trim().toLowerCase();
-  const normalizedOtp = String(otp).trim();
-
-
-  try {
-    const user = await User.findOne({
-      email: normalizedEmail,
-      otp: normalizedOtp,
-      otpExpires: { $gt: Date.now() },
-    });
-
-    if (!user) {
-      console.log('No matching user found - possible mismatch or expired');
-      return res.status(400).json({
-        success: false,
-        msg: 'Invalid or expired verification code.',
-      });
-    }
-
-
-    user.isOtpVerified = true;
-    user.otp = undefined;
-    user.otpExpires = undefined;
-    await user.save();
-
-
-    // === Your existing token code below (keep it) ===
     await RefreshToken.deleteMany({ userId: user._id });
 
     const accessToken = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET, { expiresIn: '120m' });
@@ -151,11 +147,90 @@ router.post('/api/v1/auth/verify-otp1', async (req, res) => {
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     });
 
-    res.cookie('access_token', accessToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 120 * 60 * 1000 });
-    res.cookie('refresh_token', refreshTokenStr, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 7 * 24 * 60 * 60 * 1000 });
+    res.cookie('access_token', accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 120 * 60 * 1000,
+    });
+    res.cookie('refresh_token', refreshTokenStr, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
 
     const updatedUser = await User.findById(user._id).select('-password -__v');
 
+    res.json({
+      success: true,
+      msg: 'Login successful',
+      accessToken,
+      user: updatedUser,
+    });
+  } catch (err) {
+    console.error('Google auth error:', err);
+    res.status(400).json({ success: false, msg: 'Invalid Google credential' });
+  }
+});
+
+// ────────────────────────────────────────────────
+// OTP Verification + Login
+// ────────────────────────────────────────────────
+router.post('/api/v1/auth/verify-otp1', async (req, res) => {
+  const { email, otp } = req.body;
+
+  if (!email || !otp) {
+    return res.status(400).json({ success: false, msg: 'Email and OTP required' });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedOtp = String(otp).trim();
+
+  try {
+    const user = await User.findOne({
+      email: normalizedEmail,
+      otp: normalizedOtp,
+      otpExpires: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        msg: 'Invalid or expired verification code.',
+      });
+    }
+
+    user.isOtpVerified = true;
+    user.otp = undefined;
+    user.otpExpires = undefined;
+    await user.save();
+
+    await RefreshToken.deleteMany({ userId: user._id });
+
+    const accessToken = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET, { expiresIn: '120m' });
+    const refreshTokenStr = jwt.sign({ id: user._id, role: user.role }, REFRESH_SECRET, { expiresIn: '7d' });
+
+    await RefreshToken.create({
+      token: refreshTokenStr,
+      userId: user._id,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    });
+
+    res.cookie('access_token', accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 120 * 60 * 1000,
+    });
+    res.cookie('refresh_token', refreshTokenStr, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    const updatedUser = await User.findById(user._id).select('-password -__v');
 
     res.json({
       success: true,
@@ -163,13 +238,15 @@ router.post('/api/v1/auth/verify-otp1', async (req, res) => {
       accessToken,
       user: updatedUser,
     });
-
   } catch (err) {
     console.error('Server error in verify-otp:', err);
     res.status(500).json({ success: false, msg: 'Server error' });
   }
 });
 
+// ────────────────────────────────────────────────
+// Email + Password Login
+// ────────────────────────────────────────────────
 router.post('/api/v1/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
@@ -182,14 +259,6 @@ router.post('/api/v1/auth/login', async (req, res) => {
     if (!user) {
       return res.status(400).json({ success: false, msg: 'Invalid credentials' });
     }
-
-    // Critical: Block login until email is verified
-    // if (!user.isOtpVerified) {
-    //   return res.status(400).json({
-    //     success: false,
-    //     msg: 'Please verify your email first. Check your inbox or use "Resend OTP".',
-    //   });
-    // }
 
     if (!(await user.comparePassword(password))) {
       return res.status(400).json({ success: false, msg: 'Invalid credentials' });
@@ -242,6 +311,9 @@ router.post('/api/v1/auth/login', async (req, res) => {
   }
 });
 
+// ────────────────────────────────────────────────
+// Register (email + password)
+// ────────────────────────────────────────────────
 router.post('/api/v1/auth/register', async (req, res) => {
   const { name, email, password, cPassword, role = 'Customer', address, petType } = req.body;
 
@@ -269,15 +341,15 @@ router.post('/api/v1/auth/register', async (req, res) => {
     }
 
     const otp = crypto.randomInt(100000, 999999).toString();
-    const otpExpires = Date.now() + 10 * 60 * 1000; 
+    const otpExpires = Date.now() + 10 * 60 * 1000;
 
     let validAddress = undefined;
     if (address && typeof address === 'object' && address !== null) {
       validAddress = {
-        street: address.street || '',
-        city: address.city || '',
-        state: address.state || '',
-        zip: address.zip || '',
+        street: address.street?.trim() || '',
+        city: address.city?.trim() || '',
+        state: address.state?.trim() || '',
+        zip: address.zip?.trim() || '',
       };
     }
 
@@ -294,6 +366,7 @@ router.post('/api/v1/auth/register', async (req, res) => {
     });
     await newUser.save();
 
+    // Send OTP email
     const html = `
       <h2>Welcome to Albreedy Pet Shop!</h2>
       <p>Hello ${name},</p>
@@ -307,9 +380,12 @@ router.post('/api/v1/auth/register', async (req, res) => {
       await sendEmail(email, 'Verify Your Email - Albreedy Pet Shop', html);
     } catch (emailErr) {
       console.error('Failed to send OTP email:', emailErr);
-      await User.findByIdAndDelete(newUser._id); // Cleanup
+      await User.findByIdAndDelete(newUser._id);
       return res.status(500).json({ success: false, msg: 'Failed to send verification email' });
     }
+
+    // Notify admins (email + push + in-app bell notification)
+    await notifyAdminsNewUser(name, email, role, newUser._id);
 
     res.status(201).json({
       success: true,
@@ -323,7 +399,9 @@ router.post('/api/v1/auth/register', async (req, res) => {
   }
 });
 
-
+// ────────────────────────────────────────────────
+// Resend OTP
+// ────────────────────────────────────────────────
 router.post('/api/v1/auth/resend-otp', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ success: false, msg: 'Email is required' });
@@ -359,7 +437,9 @@ router.post('/api/v1/auth/resend-otp', async (req, res) => {
   }
 });
 
-
+// ────────────────────────────────────────────────
+// Logout
+// ────────────────────────────────────────────────
 router.post('/api/v1/auth/logout', authMiddleware, async (req, res) => {
   try {
     await RefreshToken.deleteOne({ userId: req.user.id });
@@ -372,7 +452,9 @@ router.post('/api/v1/auth/logout', authMiddleware, async (req, res) => {
   }
 });
 
-
+// ────────────────────────────────────────────────
+// Admin: List Users (with orders count)
+// ────────────────────────────────────────────────
 router.get('/api/v1/auth/users', authMiddleware, async (req, res) => {
   try {
     const { page = 1, limit = 1000, status, name } = req.query;
@@ -380,46 +462,33 @@ router.get('/api/v1/auth/users', authMiddleware, async (req, res) => {
     const pageNum = Math.max(parseInt(page), 1);
     const limitNum = Math.max(parseInt(limit), 1);
 
-    // Base match for role and filters
     const matchStage = { role: 'Customer' };
     if (status) matchStage.status = status;
     if (name) matchStage.name = { $regex: name, $options: 'i' };
 
-    // Aggregation pipeline
     const usersAggregation = await User.aggregate([
       { $match: matchStage },
-
-
-      // Lookup orders
       {
         $lookup: {
-          from: 'orders', // Ensure this matches your Order collection name in DB
+          from: 'orders',
           localField: '_id',
-          foreignField: 'user', // Field in Order that references User._id
+          foreignField: 'user',
           as: 'orders'
         }
       },
-
-      // Add orders count
       {
         $addFields: {
           ordersCount: { $size: '$orders' }
         }
       },
-
-      // Project: exclude full orders array, keep only needed fields
       {
         $project: {
           orders: 0,
-          password: 0, // Always exclude password
+          password: 0,
           __v: 0
         }
       },
-
-      // Sort by latest
       { $sort: { createdAt: -1 } },
-
-      // Facet for pagination and total count
       {
         $facet: {
           data: [
@@ -431,7 +500,6 @@ router.get('/api/v1/auth/users', authMiddleware, async (req, res) => {
       }
     ]);
 
-    // Extract results
     const total = usersAggregation[0]?.total[0]?.count || 0;
     const users = usersAggregation[0]?.data || [];
 
@@ -453,6 +521,9 @@ router.get('/api/v1/auth/users', authMiddleware, async (req, res) => {
   }
 });
 
+// ────────────────────────────────────────────────
+// Get single user (with payment history)
+// ────────────────────────────────────────────────
 router.get('/api/v1/auth/users/:id', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.params.id)
@@ -476,10 +547,9 @@ router.get('/api/v1/auth/users/:id', authMiddleware, async (req, res) => {
 
     const ordersCount = await Order.countDocuments({ user: user._id });
 
-    // Force amountDue to be included (even if 0)
     const paymentHistory = (user.paymentHistory || []).map(payment => ({
       ...payment.toObject(),
-      amountDue: payment.amountDue ?? (payment.totalAmount - payment.amountPaid), // fallback
+      amountDue: payment.amountDue ?? (payment.totalAmount - payment.amountPaid),
     }));
 
     const response = {
@@ -495,34 +565,28 @@ router.get('/api/v1/auth/users/:id', authMiddleware, async (req, res) => {
   }
 });
 
-
-
+// ────────────────────────────────────────────────
+// Update user
+// ────────────────────────────────────────────────
 router.put('/api/v1/auth/users/:id', authMiddleware, async (req, res) => {
   try {
     const { name, email, role, phone, status, petType } = req.body;
 
-    // --- Address Handling ---
     let validAddress;
     if (req.body.address) {
       let address = req.body.address;
-
-      // If coming as string (e.g. from FormData), parse it
       if (typeof address === 'string') {
         try {
           address = JSON.parse(address);
-        } catch (err) {
+        } catch {
           return res.status(400).json({ success: false, msg: 'Invalid address JSON format' });
         }
       }
 
-      // Validate address object
       if (
         typeof address === 'object' &&
         address !== null &&
-        address.street &&
-        address.city &&
-        address.state &&
-        address.zip
+        address.street && address.city && address.state && address.zip
       ) {
         validAddress = {
           street: address.street.trim(),
@@ -538,7 +602,6 @@ router.put('/api/v1/auth/users/:id', authMiddleware, async (req, res) => {
       }
     }
 
-    // --- Prepare update object dynamically ---
     const updateFields = {};
     if (name) updateFields.name = name;
     if (email) updateFields.email = email;
@@ -549,7 +612,6 @@ router.put('/api/v1/auth/users/:id', authMiddleware, async (req, res) => {
     if (validAddress) updateFields.address = validAddress;
     updateFields.updatedAt = new Date();
 
-    // --- Update user ---
     const user = await User.findByIdAndUpdate(req.params.id, updateFields, {
       new: true,
       runValidators: true,
@@ -571,8 +633,9 @@ router.put('/api/v1/auth/users/:id', authMiddleware, async (req, res) => {
   }
 });
 
-
-
+// ────────────────────────────────────────────────
+// Delete user
+// ────────────────────────────────────────────────
 router.delete('/api/v1/auth/users/:id', authMiddleware, async (req, res) => {
   try {
     const deletedUser = await User.findByIdAndDelete(req.params.id);
@@ -587,4 +650,3 @@ router.delete('/api/v1/auth/users/:id', authMiddleware, async (req, res) => {
 });
 
 module.exports = router;
-
