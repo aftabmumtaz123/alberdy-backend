@@ -5,7 +5,7 @@ const mongoose = require('mongoose');
 const User = require('../model/User')
 const notificationUtil = require('../utils/createNotification');
 const createNotification = notificationUtil.createNotification;
-
+const sendEmail = require('../utils/sendEmail');
 
 const getCurrencySettings = require('../model/app_configuration')
 const buildPurchaseProductRows = (purchase) => {
