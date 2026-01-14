@@ -192,8 +192,4 @@ router.patch('/:id/set-active', authMiddleware, requireRole(['Super Admin', 'Man
     res.status(500).json({ success: false, msg: 'Server error' });
   }
 });
-
-
-
-
 module.exports = router;
