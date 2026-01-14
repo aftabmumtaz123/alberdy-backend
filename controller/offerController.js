@@ -106,57 +106,42 @@ const createOffer = async (req, res) => {
       endDate: new Date(endDate),
       status
     });
+
     await offer.save();
     await offer.populate('applicableProducts', 'name price');
 
-
     // ===============================
-// 🔔 NOTIFICATION + EMAIL
-// ===============================
-try {
-  const admins = await User.find({ role: { $in: ['Super Admin', 'Manager'] } })
-    .select('_id email name')
-    .lean();
+    // 🔔 NOTIFY ALL CUSTOMERS
+    // ===============================
+    try {
+      const customers = await User.find({ role: "Customer" }).select("_id email name");
 
-  const currency = await getCurrencySettings();
-  const sign = currency.currencySign || '$';
+      for (const customer of customers) {
+        // In-app notification
+        await createNotification({
+          userId: customer._id,
+          type: "offer_created",
+          title: "New Offer Available 🎉",
+          message: `New offer: ${offer.offerName}`,
+          related: { offerId: offer._id.toString() }
+        });
 
-  const discountLabel =
-    discountType === 'Percentage'
-      ? `${discountValue}%`
-      : `${sign}${discountValue}`;
+        // Email (optional)
+        if (customer.email) {
+          const vars = {
+            offerName: offer.offerName,
+            discountType: offer.discountType,
+            discountValue: offer.discountValue,
+            startDate: offer.startDate.toDateString(),
+            endDate: offer.endDate.toDateString(),
+          };
 
-  for (const admin of admins) {
-    // 🔔 In-app notification
-    await createNotification({
-      userId: admin._id,
-      type: 'offer_created',
-      title: 'New Offer Created',
-      message: `${offerName} • ${discountLabel} • ${status}`,
-      related: {
-        offerId: offer._id.toString()
+          await sendTemplatedEmail(customer.email, "offer_created_customer", vars);
+        }
       }
-    });
-
-    // 📧 Email
-    if (admin.email) {
-      const vars = {
-        offerName,
-        discountType,
-        discountValue: discountLabel,
-        startDate: new Date(startDate).toDateString(),
-        endDate: new Date(endDate).toDateString(),
-        status,
-        adminOfferUrl: `https://al-bready-admin.vercel.app/admin/offers/${offer._id}`
-      };
-
-      await sendTemplatedEmail(admin.email, 'offer_created_admin', vars);
+    } catch (notifyErr) {
+      console.error("Offer notify/email error:", notifyErr);
     }
-  }
-
-} catch (notifyErr) {
-  console.error('Offer notify/email error:', notifyErr);
-}
 
 
 
