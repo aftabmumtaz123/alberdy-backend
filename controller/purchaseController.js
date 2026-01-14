@@ -4,6 +4,17 @@ const Supplier = require('../model/Supplier');
 const mongoose = require('mongoose');
 
 
+const buildPurchaseProductRows = (purchase) => {
+  return purchase.products.map(p => `
+    <tr>
+      <td>${p.variantId?.product?.name || "Product"}</td>
+      <td align="center">${p.quantity}</td>
+      <td align="right">${p.unitPrice}</td>
+    </tr>
+  `).join("");
+};
+
+
 
 exports.createPurchase = async (req, res) => {
   const session = await mongoose.startSession();
@@ -12,50 +23,32 @@ exports.createPurchase = async (req, res) => {
   try {
     const { supplierId, products, summary, payment, notes, status } = req.body;
 
-    // === 1. Validate Required Fields ===
     if (!supplierId || !products || !Array.isArray(products) || products.length === 0) {
       return res.status(400).json({ success: false, message: 'Supplier and products are required' });
     }
 
-    if (!summary || typeof summary !== 'object') {
-      return res.status(400).json({ success: false, message: 'Summary object is required' });
-    }
-
-    const { otherCharges = 0, discount = 0 } = summary;
-
-    if (otherCharges < 0 || discount < 0) {
-      return res.status(400).json({ success: false, message: 'otherCharges and discount cannot be negative' });
-    }
-
-    // === 2. Validate Supplier ===
     const supplier = await Supplier.findById(supplierId);
     if (!supplier) {
       return res.status(400).json({ success: false, message: 'Invalid supplier' });
     }
 
-    // === 3. Validate & Calculate Products + Subtotal ===
     let subtotal = 0;
     const validatedProducts = [];
 
     for (const item of products) {
       const { variantId, quantity, unitPrice, taxPercent = 0 } = item;
 
-      if (!variantId || !quantity || !unitPrice) {
+      if (!variantId || !quantity || unitPrice === undefined) {
         return res.status(400).json({ success: false, message: 'variantId, quantity, and unitPrice are required' });
-      }
-
-      if (quantity < 1 || unitPrice < 0 || taxPercent < 0) {
-        return res.status(400).json({ success: false, message: 'Invalid quantity, price, or tax' });
       }
 
       const variant = await Variant.findById(variantId).session(session);
       if (!variant || variant.status === 'Inactive') {
-        return res.status(400).json({ success: false, message: `Variant not found or inactive: ${variantId}` });
+        return res.status(400).json({ success: false, message: `Variant not found: ${variantId}` });
       }
 
       const taxAmount = (unitPrice * quantity * taxPercent) / 100;
       const lineTotal = unitPrice * quantity + taxAmount;
-
       subtotal += lineTotal;
 
       validatedProducts.push({
@@ -64,25 +57,16 @@ exports.createPurchase = async (req, res) => {
         unitPrice,
         taxPercent,
         taxAmount,
+        lineTotal
       });
     }
 
-    // === 4. Calculate Final Totals ===
+    const { otherCharges = 0, discount = 0 } = summary || {};
     const grandTotal = subtotal + otherCharges - discount;
 
-    if (grandTotal < 0) {
-      return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
-    }
-
-    // === 5. Payment & Status Logic ===
     const amountPaid = payment?.amountPaid >= 0 ? payment.amountPaid : 0;
     const amountDue = grandTotal - amountPaid;
 
-    if (amountDue < 0) {
-      return res.status(400).json({ success: false, message: 'Amount paid cannot exceed grand total' });
-    }
-
-    // Auto-determine status unless explicitly provided
     let finalStatus = status;
     if (!finalStatus || finalStatus === 'Pending') {
       if (amountDue === 0) finalStatus = 'Completed';
@@ -90,21 +74,11 @@ exports.createPurchase = async (req, res) => {
       else finalStatus = 'Pending';
     }
 
-    // But if user forces "Completed", validate full payment
-    if (finalStatus === 'Completed' && amountDue > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Full payment required for Completed status',
-      });
-    }
-
-    // === 6. Generate Purchase Code ===
     let purchaseCode = `PUR-${Date.now().toString(36).toUpperCase()}`;
     while (await Purchase.findOne({ purchaseCode })) {
       purchaseCode = `PUR-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substr(2, 3).toUpperCase()}`;
     }
 
-    // === 7. Create Purchase ===
     const purchase = new Purchase({
       purchaseCode,
       supplierId,
@@ -113,26 +87,23 @@ exports.createPurchase = async (req, res) => {
         subtotal,
         otherCharges,
         discount,
-        grandTotal,
+        grandTotal
       },
       payment: {
         amountPaid,
         amountDue,
-        type: payment?.type || null,
+        type: payment?.type || null
       },
       notes: notes || '',
-      status: finalStatus,
+      status: finalStatus
     });
 
     await purchase.save({ session });
 
-    // === 8. Update Stock & Purchase Price ===
+    // Update stock
     for (const item of validatedProducts) {
-      const updateFields = {
-        $inc: { stockQuantity: item.quantity },
-      };
+      const updateFields = { $inc: { stockQuantity: item.quantity } };
 
-      // Update purchasePrice only if different
       const variant = await Variant.findById(item.variantId);
       if (variant.purchasePrice !== item.unitPrice) {
         updateFields.$set = { purchasePrice: item.unitPrice };
@@ -140,6 +111,8 @@ exports.createPurchase = async (req, res) => {
 
       await Variant.findByIdAndUpdate(item.variantId, updateFields, { session });
     }
+
+    
 
     await session.commitTransaction();
 
@@ -149,14 +122,54 @@ exports.createPurchase = async (req, res) => {
         path: 'products.variantId',
         populate: [
           { path: 'product', select: 'name' },
-          { path: 'unit', select: 'short_name' },
-        ],
+          { path: 'unit', select: 'short_name' }
+        ]
       });
+
+    // ===============================
+    // 🔔 NOTIFICATIONS + EMAIL
+    // ===============================
+    try {
+      const admins = await User.find({ role: { $in: ['Super Admin', 'Manager'] } })
+        .select('_id email name')
+        .lean();
+
+      const currency = await getCurrencySettings();
+      const grandTotalFormatted = `${currency.currencySign}${grandTotal.toFixed(2)}`;
+
+      const productRows = buildPurchaseProductRows(populatedPurchase);
+
+      for (const admin of admins) {
+        await createNotification({
+          userId: admin._id,
+          type: 'purchase_created',
+          title: 'New Purchase Created',
+          message: `Purchase ${purchaseCode} • ${grandTotalFormatted} • ${finalStatus}`,
+          related: { purchaseId: purchase._id.toString() }
+        });
+
+        if (admin.email) {
+          const vars = {
+            purchaseCode,
+            supplierName: supplier.supplierName,
+            subtotal: `${currency.currencySign}${subtotal.toFixed(2)}`,
+            grandTotal: grandTotalFormatted,
+            status: finalStatus,
+            productRows,
+            adminPurchaseUrl: `https://al-bready-admin.vercel.app/admin/purchases/${purchase._id}`
+          };
+
+          await sendEmail(admin.email, 'purchase_created_admin', vars);
+        }
+      }
+    } catch (notifyErr) {
+      console.error('Purchase notify/email error:', notifyErr);
+    }
 
     res.status(201).json({
       success: true,
       message: 'Purchase created successfully',
-      data: populatedPurchase,
+      data: populatedPurchase
     });
 
   } catch (error) {
@@ -167,6 +180,8 @@ exports.createPurchase = async (req, res) => {
     session.endSession();
   }
 };
+
+
 
 exports.getAllPurchases = async (req, res) => {
   try {

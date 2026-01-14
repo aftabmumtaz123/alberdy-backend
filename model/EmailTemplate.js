@@ -10,7 +10,7 @@ const emailTemplateSchema = new mongoose.Schema({
   type: {
     type: String,
     required: [true, 'Template Type is required'],
-    enum: ['user_registration','order_placed_admin', 'order_placed', 'order_status_updated', 'payment_confirmation', 'low_stock_alert', 'other'],
+    enum: ['user_registration', 'purchase_created_admin','order_placed_admin', 'order_placed', 'order_status_updated', 'payment_confirmation', 'low_stock_alert', 'other'],
     trim: true
   },
   fromName: {
