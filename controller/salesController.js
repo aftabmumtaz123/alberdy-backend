@@ -6,6 +6,7 @@ const notificationUtil = require('../utils/createNotification');
 const { createNotification } = notificationUtil;
 const sendEmail = require('../utils/sendEmail');
 const AppConfiguration = require('../model/app_configuration');
+const sendTemplatedEmail = require('../utils/sendTemplatedEmail');
 
 
 const getCurrencySettings = async () => {
@@ -241,91 +242,90 @@ exports.createSale = async (req, res) => {
             adminSaleUrl: `https://al-bready-admin.vercel.app/admin/sales/${sale._id}`
           };
 
-          await sendEmail(admin.email, 'sale_created_admin', vars);
+          await sendTemplatedEmail(admin.email, 'sale_created_admin', vars);
+
         }
       }
 
-      // 📧 Email to Customer
       if (customer.email) {
         const vars = {
           saleCode,
-          customerName: customer.name,
+          customerName: customer.name || 'Customer',
           grandTotal: grandTotalFormatted,
           status: finalStatus
         };
 
-        await sendEmail(customer.email, 'sale_created_customer', vars);
+        await sendTemplatedEmail(customer.email, 'sale_created_customer', vars);
       }
-
     } catch (notifyErr) {
-      console.error('Sale notify/email error:', notifyErr);
-    }
-
-
-
-    // === POPULATE RESPONSE ===
-    const populatedSale = await Sale.findById(sale._id)
-      .populate('customerId', 'name email phone')
-      .populate({
-        path: 'products.variantId',
-        populate: [
-          { path: 'product', select: 'name thumbnail' },
-          { path: 'unit', select: 'name symbol' },
-        ],
-      })
-      .lean();
-
-    return res.status(201).json({
-      success: true,
-      message: 'Sale created successfully',
-      data: {
-        _id: populatedSale._id,
-        saleCode: populatedSale.saleCode,
-        date: populatedSale.date,
-        status: finalStatus,
-        customer: {
-          id: populatedSale.customerId?._id,
-          name: populatedSale.customerId?.name || 'Walk-in',
-          email: populatedSale.customerId?.email || '',
-          phone: populatedSale.customerId?.phone || '',
-        },
-        products: populatedSale.products.map(p => {
-          const v = p.variantId;
-          const taxAmt = p.taxType === 'Exclusive' ? (p.price * p.quantity * p.taxPercent) / 100 : 0;
-          return {
-            variantId: v._id,
-            productName: v.product?.name || 'Unknown',
-            sku: v.sku || '',
-            quantity: p.quantity,
-            price: Number(p.price.toFixed(2)),
-            taxAmount: Number(taxAmt.toFixed(2)),
-            total: Number((p.price * p.quantity + taxAmt).toFixed(2)),
-          };
-        }),
-        summary: {
-          totalQuantity: populatedSale.summary.totalQuantity,
-          subTotal: Number(populatedSale.summary.subTotal.toFixed(2)),
-          grandTotal: Number(populatedSale.summary.grandTotal.toFixed(2)),
-        },
-        payment: {
-          amountPaid: Number(populatedSale.payment.amountPaid.toFixed(2)),
-          amountDue: Number(populatedSale.payment.amountDue.toFixed(2)),
-        },
-        notes: populatedSale.notes,
-      },
-    });
-
-  } catch (error) {
-
-    console.error('Create Sale Error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message,
-    });
-  } finally {
-    session.endSession();
+    console.error('Sale notify/email error:', notifyErr);
   }
+
+
+
+  // === POPULATE RESPONSE ===
+  const populatedSale = await Sale.findById(sale._id)
+    .populate('customerId', 'name email phone')
+    .populate({
+      path: 'products.variantId',
+      populate: [
+        { path: 'product', select: 'name thumbnail' },
+        { path: 'unit', select: 'name symbol' },
+      ],
+    })
+    .lean();
+
+  return res.status(201).json({
+    success: true,
+    message: 'Sale created successfully',
+    data: {
+      _id: populatedSale._id,
+      saleCode: populatedSale.saleCode,
+      date: populatedSale.date,
+      status: finalStatus,
+      customer: {
+        id: populatedSale.customerId?._id,
+        name: populatedSale.customerId?.name || 'Walk-in',
+        email: populatedSale.customerId?.email || '',
+        phone: populatedSale.customerId?.phone || '',
+      },
+      products: populatedSale.products.map(p => {
+        const v = p.variantId;
+        const taxAmt = p.taxType === 'Exclusive' ? (p.price * p.quantity * p.taxPercent) / 100 : 0;
+        return {
+          variantId: v._id,
+          productName: v.product?.name || 'Unknown',
+          sku: v.sku || '',
+          quantity: p.quantity,
+          price: Number(p.price.toFixed(2)),
+          taxAmount: Number(taxAmt.toFixed(2)),
+          total: Number((p.price * p.quantity + taxAmt).toFixed(2)),
+        };
+      }),
+      summary: {
+        totalQuantity: populatedSale.summary.totalQuantity,
+        subTotal: Number(populatedSale.summary.subTotal.toFixed(2)),
+        grandTotal: Number(populatedSale.summary.grandTotal.toFixed(2)),
+      },
+      payment: {
+        amountPaid: Number(populatedSale.payment.amountPaid.toFixed(2)),
+        amountDue: Number(populatedSale.payment.amountDue.toFixed(2)),
+      },
+      notes: populatedSale.notes,
+    },
+  });
+
+} catch (error) {
+
+  console.error('Create Sale Error:', error);
+  return res.status(500).json({
+    success: false,
+    message: 'Server error',
+    error: error.message,
+  });
+} finally {
+  session.endSession();
+}
 };
 
 
