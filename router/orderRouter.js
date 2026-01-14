@@ -165,7 +165,8 @@ const checkAndSendLowStockAlerts = async (variants, adminEmail) => {
 
   // Email (combined list)
   const lowStockItems = enriched
-    .map(v => `${v.product.name} - ${v.attribute}: ${v.value} (Stock: ${v.stockQuantity})`)
+  .map(v => `${v.name} - ${v.attribute || 'N/A'}: ${v.value || 'N/A'} (Stock: ${v.stockQuantity || "Few"})`)
+
     .join('<br>');
 
   if (adminEmail) {
@@ -178,7 +179,7 @@ const checkAndSendLowStockAlerts = async (variants, adminEmail) => {
     .lean();
 
   for (const v of enriched) {
-    const msg = `${v.product.name} (${v.attribute}: ${v.value}) → only ${v.stockQuantity} left`;
+    const msg = `${v.name} (${v.attribute}: ${v.value}) → only ${v.stockQuantity} left`;
 
     for (const admin of admins) {
       await createNotification({
@@ -256,7 +257,15 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       });
 
       computedSubtotal += lineTotal;
-      variantsToCheck.push(variant);
+      variantsToCheck.push({
+        _id: variant._id,
+        product: product._id,
+        name: product.name,
+        attribute: variant.attribute,
+        value: variant.value,
+        stockQuantity: variant.stockQuantity,
+        reservedQuantity: variant.reservedQuantity || 0
+      });
     }
 
     const calcTotal = subtotal + tax + shipping - discount;
@@ -339,7 +348,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
         paymentMethod: order.paymentMethod,
         shippingAddress: `${order.shippingAddress.fullName}, ${order.shippingAddress.street}, ${order.shippingAddress.city}, ${order.shippingAddress.zip}`,
         productRows,
-        orderTrackingUrl: `https://yourdomain.com/track/${order.orderTrackingNumber}`
+        orderTrackingUrl: `https://al-bready-website.vercel.app/orders/track/${order.orderTrackingNumber}`
       };
 
       await sendEmail(order.user.email, 'order_placed', customerVars);
@@ -402,10 +411,6 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
   }
 });
 
-// ────────────────────────────────────────────────
-// Other routes (GET one, list, update, delete, tracking, public track, subscribe, refund, verify-payment)
-// ────────────────────────────────────────────────
-// (kept mostly unchanged, but added status change & payment verification notifications)
 
 router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
