@@ -1,11 +1,10 @@
-// routes/emailTemplates.js
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const EmailTemplate = require('../model/EmailTemplate');
 const authMiddleware = require('../middleware/auth');
 
-// Inline requireRole
+
 const requireRole = roles => (req, res, next) => {
   if (!req.user || !roles.includes(req.user.role)) {
     return res.status(403).json({ success: false, msg: 'Access denied' });
@@ -13,12 +12,12 @@ const requireRole = roles => (req, res, next) => {
   next();
 };
 
-// CREATE Email Template
+
 router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
-    const { name, type, fromName, fromEmail, replyTo, subject, content, status = 'active' } = req.body;
+    const { name, type, fromName, fromEmail, replyTo, imageUrl , subject, content, status = 'active' } = req.body;
 
-    // Validation
+    
     if (!name || !type || !fromName || !fromEmail || !subject || !content) {
       return res.status(400).json({ success: false, msg: 'Required fields missing' });
     }
@@ -50,7 +49,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async 
   }
 });
 
-// GET ALL Email Templates
+
 router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     const { page = 1, limit = 10, type, status } = req.query;
@@ -76,7 +75,7 @@ router.get('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async (
   }
 });
 
-// GET ONE Email Template
+
 router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
@@ -95,7 +94,7 @@ router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
   }
 });
 
-// UPDATE Email Template
+
 router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
