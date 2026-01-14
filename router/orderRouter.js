@@ -351,16 +351,19 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
         .lean();
 
       for (const admin of admins) {
-        // Admin email
         if (admin.email) {
           const adminVars = {
-            order_number: order.orderNumber,
-            order_total: totalFormatted,
-            customer_name: order.user.name,
-            customer_email: order.user.email,
-            order_paymentMethod: paymentMethod,
+            orderId: order.orderNumber,
+            customerName: order.shippingAddress.fullName,
+            customerEmail: order.shippingAddress.email,
+            orderTotal: totalFormatted,
+            paymentMethod: order.paymentMethod,
+            shippingAddress: `${order.shippingAddress.fullName}, ${order.shippingAddress.street}, ${order.shippingAddress.city}, ${order.shippingAddress.zip}`,
+            productRows,
+            adminOrderUrl: `https://al-bready-admin.vercel.app/admin/orders/${order._id}`
           };
-          await sendEmail(admin.email, 'order_placed', adminVars);
+
+          await sendEmail(admin.email, 'order_placed_admin', adminVars);
         }
 
         // In-app notification
