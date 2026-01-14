@@ -2,6 +2,33 @@ const Sale = require('../model/Sales');
 const Variant = require('../model/variantProduct');
 const User = require('../model/User');
 const mongoose = require('mongoose');
+const notificationUtil = require('../utils/createNotification');
+const { createNotification } = notificationUtil;
+const sendEmail = require('../utils/sendEmail');
+const AppConfiguration = require('../model/app_configuration');
+
+
+const getCurrencySettings = async () => {
+  try {
+    const config = await AppConfiguration.findOne()
+      .lean()
+      .select('currencyName currencyCode currencySign');
+
+    return {
+      currencyName: config?.currencyName || 'US Dollar',
+      currencyCode: config?.currencyCode || 'USD',
+      currencySign: config?.currencySign || '$',
+    };
+  } catch (err) {
+    console.error('Error fetching currency settings:', err);
+    return {
+      currencyName: 'US Dollar',
+      currencyCode: 'USD',
+      currencySign: '$',
+    };
+  }
+};
+
 
 
 exports.createSale = async (req, res) => {
@@ -13,12 +40,12 @@ exports.createSale = async (req, res) => {
 
     // === BASIC VALIDATION ===
     if (!customerId || !products || !summary) {
-       
+
       return res.status(400).json({ success: false, message: 'Customer ID, products, and summary are required' });
     }
 
     if (!Array.isArray(products) || products.length === 0) {
-       
+
       return res.status(400).json({ success: false, message: 'Products array cannot be empty' });
     }
 
@@ -27,7 +54,7 @@ exports.createSale = async (req, res) => {
     // Validate customer
     const customer = await User.findById(customerId).session(session);
     if (!customer) {
-       
+
       return res.status(400).json({ success: false, message: 'Invalid customer' });
     }
 
@@ -41,23 +68,23 @@ exports.createSale = async (req, res) => {
       const { variantId, quantity, price, unitCost, taxPercent = 0, taxType = 'Exclusive' } = prod;
 
       if (!variantId || !quantity || !price || !unitCost) {
-         
+
         return res.status(400).json({ success: false, message: 'variantId, quantity, price, unitCost required' });
       }
 
       if (quantity < 1 || price < 0 || unitCost < 0) {
-         
+
         return res.status(400).json({ success: false, message: 'Invalid quantity or price' });
       }
 
       const variant = await Variant.findById(variantId).session(session);
       if (!variant || variant.status === 'Inactive') {
-         
+
         return res.status(400).json({ success: false, message: `Invalid or inactive variant: ${variantId}` });
       }
 
       if (variant.stockQuantity < quantity) {
-         
+
         return res.status(400).json({
           success: false,
           message: `Insufficient stock for ${variant.sku || variantId}. Available: ${variant.stockQuantity}, Required: ${quantity}`,
@@ -85,47 +112,47 @@ exports.createSale = async (req, res) => {
 
     const grandTotal = subtotal + otherCharges - discount;
     if (grandTotal < 0) {
-       
+
       return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
     }
 
-        // === 4. PAYMENT ===
+    // === 4. PAYMENT ===
     const amountPaid = payment?.amountPaid >= 0 ? payment.amountPaid : 0;
     const amountDue = grandTotal - amountPaid;
 
     if (amountDue < 0) {
-       
+
       return res.status(400).json({ success: false, message: 'Overpayment not allowed' });
     }
 
-    
+
     let finalStatus;
 
-if (status === 'Completed') {
-  if (amountDue > 0) {
-     
-    return res.status(400).json({ success: false, message: 'Full payment required to create sale as Completed' });
-  }
-  finalStatus = 'Completed';
-}
-else if (status === 'Pending' && amountPaid > 0) {
-   
-  return res.status(400).json({ success: false, message: 'Cannot create sale as Pending when payment is received' });
-}
-else if (status === 'Partial' && amountDue === 0) {
-  finalStatus = 'Completed'; // Auto-upgrade to Completed
-}
-else if (status && ['Pending', 'Partial'].includes(status)) {
-  finalStatus = status;
-}
-else {
-  // Auto-determine status — CORRECT LOGIC
-  finalStatus = amountDue === 0
-    ? 'Completed'
-    : amountPaid > 0
-      ? 'Partial'   // ← This fixes your bug
-      : 'Pending';
-}
+    if (status === 'Completed') {
+      if (amountDue > 0) {
+
+        return res.status(400).json({ success: false, message: 'Full payment required to create sale as Completed' });
+      }
+      finalStatus = 'Completed';
+    }
+    else if (status === 'Pending' && amountPaid > 0) {
+
+      return res.status(400).json({ success: false, message: 'Cannot create sale as Pending when payment is received' });
+    }
+    else if (status === 'Partial' && amountDue === 0) {
+      finalStatus = 'Completed'; // Auto-upgrade to Completed
+    }
+    else if (status && ['Pending', 'Partial'].includes(status)) {
+      finalStatus = status;
+    }
+    else {
+      // Auto-determine status — CORRECT LOGIC
+      finalStatus = amountDue === 0
+        ? 'Completed'
+        : amountPaid > 0
+          ? 'Partial'   // ← This fixes your bug
+          : 'Pending';
+    }
 
     // === GENERATE SALE CODE ===
     const lastSale = await Sale.findOne().sort({ createdAt: -1 }).select('saleCode').session(session);
@@ -181,6 +208,61 @@ else {
 
     await session.commitTransaction();
 
+    // ===============================
+    // 🔔 NOTIFICATIONS + EMAIL
+    // ===============================
+    try {
+      const admins = await User.find({ role: { $in: ['Super Admin', 'Manager'] } })
+        .select('_id email name')
+        .lean();
+
+      const currency = await getCurrencySettings();
+      const sign = currency.currencySign || '$';
+      const grandTotalFormatted = `${sign}${Number(grandTotal).toFixed(2)}`;
+
+      for (const admin of admins) {
+        // 🔔 Notification
+        await createNotification({
+          userId: admin._id,
+          type: 'sale_created',
+          title: 'New Sale Created',
+          message: `Sale ${saleCode} • ${grandTotalFormatted} • ${finalStatus}`,
+          related: { saleId: sale._id.toString() }
+        });
+
+        // 📧 Email
+        if (admin.email) {
+          const vars = {
+            saleCode,
+            customerName: customer.name || 'Walk-in',
+            subtotal: `${sign}${subtotal.toFixed(2)}`,
+            grandTotal: grandTotalFormatted,
+            status: finalStatus,
+            adminSaleUrl: `https://al-bready-admin.vercel.app/admin/sales/${sale._id}`
+          };
+
+          await sendEmail(admin.email, 'sale_created_admin', vars);
+        }
+      }
+
+      // 📧 Email to Customer
+      if (customer.email) {
+        const vars = {
+          saleCode,
+          customerName: customer.name,
+          grandTotal: grandTotalFormatted,
+          status: finalStatus
+        };
+
+        await sendEmail(customer.email, 'sale_created_customer', vars);
+      }
+
+    } catch (notifyErr) {
+      console.error('Sale notify/email error:', notifyErr);
+    }
+
+
+
     // === POPULATE RESPONSE ===
     const populatedSale = await Sale.findById(sale._id)
       .populate('customerId', 'name email phone')
@@ -234,7 +316,7 @@ else {
     });
 
   } catch (error) {
-     
+
     console.error('Create Sale Error:', error);
     return res.status(500).json({
       success: false,
@@ -249,7 +331,7 @@ else {
 
 exports.getAllSales = async (req, res) => {
   try {
-    const { page = 1, limit , startDate, endDate, paymentStatus, search } = req.query;
+    const { page = 1, limit, startDate, endDate, paymentStatus, search } = req.query;
     const skip = (page - 1) * limit;
 
     let query = { isDeleted: false };
@@ -328,8 +410,8 @@ exports.getAllSales = async (req, res) => {
           },
           paymentStatus: sale.payment.amountPaid >= sale.summary.grandTotal ? 'Paid' : 'Pending',
           products: sale.products.map((product) => {
-            const taxAmount = (product.price * product.quantity * (product.taxPercent || 0)) / 100 
-                            * (product.taxType === 'Exclusive' ? 1 : 0);
+            const taxAmount = (product.price * product.quantity * (product.taxPercent || 0)) / 100
+              * (product.taxType === 'Exclusive' ? 1 : 0);
             return {
               variantId: product.variantId?._id,
               productName: product.variantId?.product?.name || 'Unknown',
@@ -393,7 +475,7 @@ exports.deleteSale = async (req, res) => {
       if (product.variantId && mongoose.Types.ObjectId.isValid(product.variantId)) {
         const variant = await Variant.findById(product.variantId).session(session);
         if (!variant) {
-           
+
           return res.status(400).json({ status: false, message: `Invalid variant: ${product.variantId}` });
         }
         await Variant.findByIdAndUpdate(
@@ -418,7 +500,7 @@ exports.deleteSale = async (req, res) => {
     await session.commitTransaction();
     res.status(200).json({ status: true, message: `Sale ${sale.saleCode} soft deleted successfully` });
   } catch (error) {
-     
+
     console.error('Error deleting sale:', error);
     res.status(500).json({ status: false, message: 'Server error', error: error.message });
   } finally {
@@ -439,24 +521,24 @@ exports.updateSale = async (req, res) => {
 
     // Validate ID
     if (!mongoose.Types.ObjectId.isValid(id)) {
-       
+
       return res.status(400).json({ success: false, message: 'Invalid sale ID' });
     }
 
     // Fetch sale
     const sale = await Sale.findById(id).session(session);
     if (!sale || sale.isDeleted) {
-       
+
       return res.status(404).json({ success: false, message: 'Sale not found or deleted' });
     }
 
     // Block editing of Completed or Cancelled sales (except for cancellation)
     if (sale.status === 'Completed') {
-       
+
       return res.status(400).json({ success: false, message: 'Cannot modify a Completed sale' });
     }
     if (sale.status === 'Cancelled') {
-       
+
       return res.status(400).json({ success: false, message: 'Cannot modify a Cancelled sale' });
     }
 
@@ -495,7 +577,7 @@ exports.updateSale = async (req, res) => {
     // 2. NORMAL UPDATE VALIDATION
     // ==================================================================
     if (!customerId || !products || !Array.isArray(products) || products.length === 0 || !summary) {
-       
+
       return res.status(400).json({ success: false, message: 'Customer, products, and summary are required' });
     }
 
@@ -504,7 +586,7 @@ exports.updateSale = async (req, res) => {
     // Validate customer
     const customer = await User.findById(customerId).session(session);
     if (!customer) {
-       
+
       return res.status(400).json({ success: false, message: 'Invalid customer' });
     }
 
@@ -519,27 +601,27 @@ exports.updateSale = async (req, res) => {
     for (const prod of products) {
       const { variantId, quantity, price, unitCost, taxPercent = 0, taxType = 'Exclusive' } = prod;
 
-      if(!mongoose.Types.ObjectId.isValid(variantId)) {
+      if (!mongoose.Types.ObjectId.isValid(variantId)) {
         return res.status(400).json({ success: false, message: `Invalid variant ID: ${variantId}` });
       }
-      if(!quantity){
+      if (!quantity) {
         return res.status(400).json({ success: false, message: 'Quantity is required' });
       }
-      if(!price){
+      if (!price) {
         return res.status(400).json({ success: false, message: 'Price is required' });
       }
-      if(!unitCost){
+      if (!unitCost) {
         return res.status(400).json({ success: false, message: 'Unit cost is required' });
       }
 
       if (quantity < 1 || price < 0 || unitCost < 0) {
-         
+
         return res.status(400).json({ success: false, message: 'Invalid quantity or price' });
       }
 
       const variant = await Variant.findById(variantId).session(session);
       if (!variant || variant.status === 'Inactive') {
-         
+
         return res.status(400).json({ success: false, message: `Invalid or inactive variant: ${variantId}` });
       }
 
@@ -549,7 +631,7 @@ exports.updateSale = async (req, res) => {
       const availableStock = variant.stockQuantity + oldQty;
 
       if (availableStock < quantity) {
-         
+
         return res.status(400).json({
           success: false,
           message: `Insufficient stock for ${variant.sku || variantId}. Available: ${availableStock}, Requested: ${quantity}`,
@@ -579,7 +661,7 @@ exports.updateSale = async (req, res) => {
 
     const grandTotal = subtotal + otherCharges - discount;
     if (grandTotal < 0) {
-       
+
       return res.status(400).json({ success: false, message: 'Grand total cannot be negative' });
     }
 
@@ -590,7 +672,7 @@ exports.updateSale = async (req, res) => {
     const amountDue = grandTotal - amountPaid;
 
     if (amountDue < 0) {
-       
+
       return res.status(400).json({ success: false, message: 'Overpayment not allowed' });
     }
 
@@ -601,13 +683,13 @@ exports.updateSale = async (req, res) => {
 
     if (status === 'Completed') {
       if (amountDue > 0) {
-         
+
         return res.status(400).json({ success: false, message: 'Full payment required to mark as Completed' });
       }
       finalStatus = 'Completed';
     }
     else if (status === 'Pending' && amountPaid > 0) {
-       
+
       return res.status(400).json({ success: false, message: 'Cannot set Pending after receiving payment' });
     }
     else if (status === 'Partial' && amountDue === 0) {
@@ -627,7 +709,7 @@ exports.updateSale = async (req, res) => {
 
     // Prevent downgrading from Completed
     if (sale.status === 'Completed' && finalStatus !== 'Completed') {
-       
+
       return res.status(400).json({ success: false, message: 'Cannot downgrade status from Completed' });
     }
 
@@ -756,7 +838,7 @@ exports.updateSale = async (req, res) => {
     });
 
   } catch (error) {
-     
+
     console.error('Update Sale Error:', error);
     return res.status(500).json({
       success: false,
@@ -787,8 +869,8 @@ exports.getSaleById = async (req, res) => {
       });
     if (!sale || sale.isDeleted) return res.status(404).json({ status: false, message: 'Sale not found' });
 
-    res.status(200).json({ 
-      status: true, 
+    res.status(200).json({
+      status: true,
       message: 'Sale fetched successfully',
       data: {
         _id: sale._id,
@@ -804,8 +886,8 @@ exports.getSaleById = async (req, res) => {
         },
         products: sale.products.map((product) => {
           const variant = product.variantId;
-          const taxAmount = (product.price * product.quantity * (product.taxPercent || 0)) / 100 
-                          * (product.taxType === 'Exclusive' ? 1 : 0);
+          const taxAmount = (product.price * product.quantity * (product.taxPercent || 0)) / 100
+            * (product.taxType === 'Exclusive' ? 1 : 0);
           return {
             variantId: variant?._id,
             productName: variant?.product?.name || 'Unknown',

@@ -17,7 +17,9 @@ const notificationSchema = new mongoose.Schema({
       'payment_confirmation',
       'low_stock_alert',
       'account_registration',
-      'purchase_created'
+      'purchase_created',
+      'sale_created_admin',
+      'sale_created_customer'
     ],
     required: true
   },
