@@ -21,6 +21,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async 
     if (!name || !type || !fromName || !fromEmail || !subject || !content) {
       return res.status(400).json({ success: false, msg: 'Required fields missing' });
     }
+    
 
     const template = new EmailTemplate({
       name,
