@@ -22,7 +22,9 @@ const emailTemplateSchema = new mongoose.Schema({
       'sale_created_admin',
       'sale_created_customer',
       'payment_created_admin',
-      'payment_created_supplier'
+      'payment_created_supplier',
+      'customer_payment_created_admin',
+      'customer_payment_created_customer'
     ],
     trim: true
   },

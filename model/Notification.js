@@ -21,7 +21,9 @@ const notificationSchema = new mongoose.Schema({
       'sale_created_admin',
       'sale_created_customer',
       'sale_created',
-      'payment_created'
+      'payment_created',
+      'customer_payment_created',
+      'supplier_payment_created'
     ],
     required: true
   },

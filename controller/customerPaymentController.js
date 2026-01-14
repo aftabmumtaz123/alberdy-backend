@@ -1,5 +1,26 @@
 const CustomerPayment = require('../model/CustomerPayment');
 const User = require('../model/User');
+const { createNotification } = require('../utils/createNotification');
+const sendTemplatedEmail = require('../utils/sendTemplatedEmail');
+const AppConfiguration = require('../model/app_configuration');
+
+
+
+const getCurrencySettings = async () => {
+  try {
+    const config = await AppConfiguration.findOne()
+      .lean()
+      .select('currencySign');
+
+    return {
+      currencySign: config?.currencySign || '$',
+    };
+  } catch (err) {
+    return { currencySign: '$' };
+  }
+};
+
+
 
 // Generate unique invoice number
 const generateInvoiceNo = async () => {
@@ -23,8 +44,8 @@ exports.createPayment = async (req, res) => {
 
 
 
-    if(!customerId){
-       return res.status(400).json({
+    if (!customerId) {
+      return res.status(400).json({
         success: false,
         msg: 'Customer ID is required',
       });
@@ -32,11 +53,11 @@ exports.createPayment = async (req, res) => {
 
 
     if (amountPaid === undefined || amountPaid === null) {
-  return res.status(400).json({
-    success: false,
-    message: 'Amount Paid is required',
-  });
-}
+      return res.status(400).json({
+        success: false,
+        message: 'Amount Paid is required',
+      });
+    }
 
 
     // Check if customer exists and is a Customer
@@ -62,7 +83,7 @@ exports.createPayment = async (req, res) => {
       });
     }
 
-   
+
 
     // Validate amountDue (if provided)
     if (amountDue !== undefined && amountDue < 0) {
@@ -123,6 +144,52 @@ exports.createPayment = async (req, res) => {
 
     await payment.save();
 
+
+    // ===============================
+// 🔔 NOTIFICATION + EMAIL TO CUSTOMER
+// ===============================
+try {
+  const currency = await getCurrencySettings();
+  const sign = currency.currencySign || '$';
+
+  const totalFormatted = `${sign}${Number(totalAmount).toFixed(2)}`;
+  const paidFormatted = `${sign}${Number(amountPaid).toFixed(2)}`;
+  const dueFormatted = `${sign}${Number(amountDue || 0).toFixed(2)}`;
+
+  // 🔔 Create Notification
+  await createNotification({
+    userId: customerId,
+    type: 'customer_payment_created',
+    title: 'Payment Received',
+    message: `Invoice ${invoiceNo} • Paid ${paidFormatted} • ${paymentStatus}`,
+    related: {
+      paymentId: payment._id.toString()
+    }
+  });
+
+  // 📧 Send Email
+  if (customer.email) {
+    const vars = {
+      invoiceNo,
+      customerName: customer.name,
+      totalAmount: totalFormatted,
+      amountPaid: paidFormatted,
+      amountDue: dueFormatted,
+      status: paymentStatus
+    };
+
+    await sendTemplatedEmail(
+      customer.email,
+      'customer_payment_created_customer',
+      vars
+    );
+  }
+
+} catch (notifyErr) {
+  console.error('Customer payment notify/email error:', notifyErr);
+}
+
+
     // Update customer's payment history
     await User.findByIdAndUpdate(
       customerId,
@@ -177,8 +244,8 @@ exports.updatePayment = async (req, res) => {
     // === Always recalculate amountDue and status ===
     const newAmountDue = newTotalAmount - newAmountPaid;
     const newStatus = newAmountPaid >= newTotalAmount && newTotalAmount > 0 ? 'Completed'
-                    : newAmountPaid > 0 ? 'Partial'
-                    : 'Pending';
+      : newAmountPaid > 0 ? 'Partial'
+        : 'Pending';
 
     // Optional: Validate customer if changing
     if (customerId) {
