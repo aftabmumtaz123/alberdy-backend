@@ -19,7 +19,8 @@ const notificationSchema = new mongoose.Schema({
       'account_registration',
       'purchase_created',
       'sale_created_admin',
-      'sale_created_customer'
+      'sale_created_customer',
+      'sale_created'
     ],
     required: true
   },
