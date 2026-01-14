@@ -36,6 +36,15 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager']), async 
 
     await smtpConfig.save();
 
+    // 👇 ADD THIS BLOCK
+    if (status === 'active') {
+      await SmtpConfig.updateMany(
+        { _id: { $ne: smtpConfig._id } },
+        { $set: { status: 'inactive' } }
+      );
+    }
+
+
     res.status(201).json({
       success: true,
       data: smtpConfig,
@@ -100,11 +109,27 @@ router.put('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), asyn
     }
 
     const updateData = req.body;
+
     const config = await SmtpConfig.findByIdAndUpdate(
       req.params.id,
       { $set: updateData },
       { new: true, runValidators: true }
     );
+
+    if (!config) {
+      return res.status(404).json({ success: false, msg: 'SMTP Config not found' });
+    }
+
+    // 👇 ADD THIS BLOCK
+    if (updateData.status === 'active') {
+      await SmtpConfig.updateMany(
+        { _id: { $ne: config._id } },
+        { $set: { status: 'inactive' } }
+      );
+    }
+
+
+
 
     if (!config) {
       return res.status(404).json({ success: false, msg: 'SMTP Config not found' });
@@ -135,6 +160,40 @@ router.delete('/:id', authMiddleware, requireRole(['Super Admin', 'Manager']), a
     res.status(500).json({ success: false, msg: 'Server error', details: err.message });
   }
 });
+
+router.patch('/:id/set-active', authMiddleware, requireRole(['Super Admin', 'Manager']), async (req, res) => {
+  try {
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ success: false, msg: 'Invalid ID' });
+    }
+
+    const config = await SmtpConfig.findById(req.params.id);
+    if (!config) {
+      return res.status(404).json({ success: false, msg: 'SMTP Config not found' });
+    }
+
+    await SmtpConfig.updateMany(
+      { _id: { $ne: config._id } },
+      { $set: { status: 'inactive' } }
+    );
+
+    config.status = 'active';
+    await config.save();
+
+    res.json({
+      success: true,
+      msg: 'SMTP set as active successfully',
+      data: config
+    });
+
+  } catch (err) {
+    console.error('Set active error:', err);
+    res.status(500).json({ success: false, msg: 'Server error' });
+  }
+});
+
+
 
 
 module.exports = router;
