@@ -2,6 +2,10 @@ const Offer = require('../model/Offer');
 const Product = require('../model/Product');
 const AppConfiguration = require('../model/app_configuration'); // Import AppConfiguration model
 const mongoose = require('mongoose');
+const User = require('../model/User');
+const { createNotification } = require('../utils/createNotification');
+const sendTemplatedEmail = require('../utils/sendTemplatedEmail');
+
 
 // Helper: Resolve Product IDs (unchanged)
 const resolveProducts = async (productRefs) => {
@@ -104,6 +108,58 @@ const createOffer = async (req, res) => {
     });
     await offer.save();
     await offer.populate('applicableProducts', 'name price');
+
+
+    // ===============================
+// 🔔 NOTIFICATION + EMAIL
+// ===============================
+try {
+  const admins = await User.find({ role: { $in: ['Super Admin', 'Manager'] } })
+    .select('_id email name')
+    .lean();
+
+  const currency = await getCurrencySettings();
+  const sign = currency.currencySign || '$';
+
+  const discountLabel =
+    discountType === 'Percentage'
+      ? `${discountValue}%`
+      : `${sign}${discountValue}`;
+
+  for (const admin of admins) {
+    // 🔔 In-app notification
+    await createNotification({
+      userId: admin._id,
+      type: 'offer_created',
+      title: 'New Offer Created',
+      message: `${offerName} • ${discountLabel} • ${status}`,
+      related: {
+        offerId: offer._id.toString()
+      }
+    });
+
+    // 📧 Email
+    if (admin.email) {
+      const vars = {
+        offerName,
+        discountType,
+        discountValue: discountLabel,
+        startDate: new Date(startDate).toDateString(),
+        endDate: new Date(endDate).toDateString(),
+        status,
+        adminOfferUrl: `https://al-bready-admin.vercel.app/admin/offers/${offer._id}`
+      };
+
+      await sendTemplatedEmail(admin.email, 'offer_created_admin', vars);
+    }
+  }
+
+} catch (notifyErr) {
+  console.error('Offer notify/email error:', notifyErr);
+}
+
+
+
     res.status(201).json({
       success: true,
       data: offer

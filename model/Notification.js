@@ -23,7 +23,8 @@ const notificationSchema = new mongoose.Schema({
       'sale_created',
       'payment_created',
       'customer_payment_created',
-      'supplier_payment_created'
+      'supplier_payment_created',
+      'offer_created'
     ],
     required: true
   },
