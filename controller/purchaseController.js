@@ -2,7 +2,7 @@ const Purchase = require('../model/Purchase');
 const Variant = require('../model/variantProduct');
 const Supplier = require('../model/Supplier');
 const mongoose = require('mongoose');
-
+const user = require('../model/User')
 
 const buildPurchaseProductRows = (purchase) => {
   return purchase.products.map(p => `
