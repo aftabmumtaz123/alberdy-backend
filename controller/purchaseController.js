@@ -6,8 +6,9 @@ const User = require('../model/User')
 const notificationUtil = require('../utils/createNotification');
 const createNotification = notificationUtil.createNotification;
 const sendEmail = require('../utils/sendEmail');
+const AppConfiguration = require('../model/app_configuration');
 
-const getCurrencySettings = require('../model/app_configuration')
+
 const buildPurchaseProductRows = (purchase) => {
   return purchase.products.map(p => `
     <tr>
@@ -16,6 +17,29 @@ const buildPurchaseProductRows = (purchase) => {
       <td align="right">${p.unitPrice}</td>
     </tr>
   `).join("");
+};
+
+
+
+const getCurrencySettings = async () => {
+  try {
+    const config = await AppConfiguration.findOne()
+      .lean()
+      .select('currencyName currencyCode currencySign');
+
+    return {
+      currencyName: config?.currencyName || 'US Dollar',
+      currencyCode: config?.currencyCode || 'USD',
+      currencySign: config?.currencySign || '$',
+    };
+  } catch (err) {
+    console.error('Error fetching currency settings:', err);
+    return {
+      currencyName: 'US Dollar',
+      currencyCode: 'USD',
+      currencySign: '$',
+    };
+  }
 };
 
 
@@ -139,7 +163,8 @@ exports.createPurchase = async (req, res) => {
         .lean();
 
       const currency = await getCurrencySettings();
-      const grandTotalFormatted = `${currency.currencySign}${grandTotal.toFixed(2)}`;
+      const sign = currency.currencySign || '$';
+      const grandTotalFormatted = `${sign}${Number(grandTotal).toFixed(2)}`;
 
       const productRows = buildPurchaseProductRows(populatedPurchase);
 
