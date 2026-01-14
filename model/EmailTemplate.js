@@ -20,7 +20,9 @@ const emailTemplateSchema = new mongoose.Schema({
       'low_stock_alert',
       'other',
       'sale_created_admin',
-      'sale_created_customer'
+      'sale_created_customer',
+      'payment_created_admin',
+      'payment_created_supplier'
     ],
     trim: true
   },

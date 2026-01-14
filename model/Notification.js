@@ -20,7 +20,8 @@ const notificationSchema = new mongoose.Schema({
       'purchase_created',
       'sale_created_admin',
       'sale_created_customer',
-      'sale_created'
+      'sale_created',
+      'payment_created'
     ],
     required: true
   },

@@ -1,5 +1,9 @@
 const Payment = require('../model/Payment');
 const Supplier = require('../model/Supplier');
+const { createNotification } = require('../utils/createNotification');
+const sendTemplatedEmail = require('../utils/sendTemplatedEmail');
+const User = require('../model/User');
+const AppConfiguration = require('../model/app_configuration');
 
 // Generate unique invoice number
 const generateInvoiceNo = async () => {
@@ -16,36 +20,51 @@ const generateInvoiceNo = async () => {
   return invoiceNo;
 };
 
+const getCurrencySettings = async () => {
+  try {
+    const config = await AppConfiguration.findOne()
+      .lean()
+      .select('currencySign');
+
+    return {
+      currencySign: config?.currencySign || '$',
+    };
+  } catch (err) {
+    return { currencySign: '$' };
+  }
+};
+
+
 // Create a new payment
 exports.createPayment = async (req, res) => {
   try {
     const { supplierId, amountPaid, amountDue, paymentMethod, date, notes, totalAmount, status } = req.body;
 
-  
 
-    if(!supplierId){
+
+    if (!supplierId) {
       return res.status(400).json({
         success: false,
         message: 'Supplier ID is required',
       });
     }
 
-if (amountPaid === undefined || amountPaid === null) {
-  return res.status(400).json({
-    success: false,
-    message: 'Amount Paid is required',
-  });
-}
+    if (amountPaid === undefined || amountPaid === null) {
+      return res.status(400).json({
+        success: false,
+        message: 'Amount Paid is required',
+      });
+    }
 
 
-    if(!paymentMethod){
+    if (!paymentMethod) {
       return res.status(400).json({
         success: false,
         message: 'Payment Method is required',
       });
     }
 
-    if(!totalAmount){
+    if (!totalAmount) {
       return res.status(400).json({
         success: false,
         message: 'Total Amount is required',
@@ -131,6 +150,52 @@ if (amountPaid === undefined || amountPaid === null) {
     });
 
     await payment.save();
+
+    // ===============================
+    // 🔔 NOTIFICATIONS + EMAIL
+    // ===============================
+    try {
+      const admins = await User.find({ role: { $in: ['Super Admin', 'Manager'] } })
+        .select('_id email name')
+        .lean();
+
+      const currency = await getCurrencySettings();
+      const sign = currency.currencySign || '$';
+
+      const totalFormatted = `${sign}${Number(totalAmount).toFixed(2)}`;
+      const paidFormatted = `${sign}${Number(amountPaid).toFixed(2)}`;
+      const dueFormatted = `${sign}${Number(calculatedDue).toFixed(2)}`;
+
+      for (const admin of admins) {
+        // 🔔 Notification
+        await createNotification({
+          userId: admin._id,
+          type: 'payment_created',
+          title: 'New Payment Added',
+          message: `Invoice ${invoiceNo} • ${paidFormatted} • ${paymentStatus}`,
+          related: { paymentId: payment._id.toString() }
+        });
+
+        // 📧 Email to admin
+        if (admin.email) {
+          const vars = {
+            invoiceNo,
+            supplierName: supplier.supplierName,
+            totalAmount: totalFormatted,
+            amountPaid: paidFormatted,
+            amountDue: dueFormatted,
+            status: paymentStatus,
+            adminPaymentUrl: `https://al-bready-admin.vercel.app/admin/payments/${payment._id}`
+          };
+
+          await sendTemplatedEmail(admin.email, 'payment_created_admin', vars);
+        }
+      }
+
+    } catch (notifyErr) {
+      console.error('Payment notify/email error:', notifyErr);
+    }
+
 
     // Update supplier's payment history
     await Supplier.findByIdAndUpdate(
