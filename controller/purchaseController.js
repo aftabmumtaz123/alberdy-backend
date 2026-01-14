@@ -3,7 +3,9 @@ const Variant = require('../model/variantProduct');
 const Supplier = require('../model/Supplier');
 const mongoose = require('mongoose');
 const User = require('../model/User')
-const createNotification = require('../utils/createNotification')
+const notificationUtil = require('../utils/createNotification');
+const createNotification = notificationUtil.createNotification;
+
 
 const getCurrencySettings = require('../model/app_configuration')
 const buildPurchaseProductRows = (purchase) => {
