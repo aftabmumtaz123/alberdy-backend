@@ -116,7 +116,7 @@ exports.createPurchase = async (req, res) => {
       await Variant.findByIdAndUpdate(item.variantId, updateFields, { session });
     }
 
-    
+
 
     await session.commitTransaction();
 
@@ -163,7 +163,27 @@ exports.createPurchase = async (req, res) => {
             adminPurchaseUrl: `https://al-bready-admin.vercel.app/admin/purchases/${purchase._id}`
           };
 
-          await sendEmail(admin.email, 'purchase_created_admin', vars);
+          const sendEmail = async (to, templateType, variables = {}) => {
+            const smtp = await getActiveSmtpConfig();
+            if (!smtp) return;
+
+            const template = await getEmailTemplate(templateType);
+            if (!template) return;
+
+            const transporter = createTransporter(smtp);
+            if (!transporter) return;
+
+            const subject = renderTemplate(template.subject, variables);
+            const html = renderTemplate(template.content, variables); // MUST BE STRING
+
+            await transporter.sendMail({
+              from: `${template.fromName} <${template.fromEmail}>`,
+              to,
+              subject,
+              html
+            });
+          };
+
         }
       }
     } catch (notifyErr) {
