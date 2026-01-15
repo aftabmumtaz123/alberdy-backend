@@ -22,7 +22,7 @@ const bannerSchema = mongoose.Schema({
     description: {
         type: String
     },
-    images:
+    image:
     {
         type: String
     },

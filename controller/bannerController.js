@@ -33,7 +33,7 @@ exports.createBanner = async (req, res) => {
         title,
         description,
         links,
-        images: image,
+        image,
         subTitle,
         bannerLayout,
         buttonText,
