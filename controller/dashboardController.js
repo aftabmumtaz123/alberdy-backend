@@ -360,7 +360,10 @@ exports.getRevenueChart = async (req, res) => {
 };
 
 
-
+/**
+ * GET /api/v1/dashboard/sales-trend/year/:year
+ * Returns monthly order volume + YoY % change compared to previous year
+ */
 exports.getSalesTrend = async (req, res) => {
   try {
     const yearStr = req.params.year;
@@ -373,7 +376,8 @@ exports.getSalesTrend = async (req, res) => {
       });
     }
 
-    const agg = await Order.aggregate([
+    // Current year monthly data
+    const currentAgg = await Order.aggregate([
       {
         $match: {
           createdAt: {
@@ -391,15 +395,40 @@ exports.getSalesTrend = async (req, res) => {
       { $sort: { _id: 1 } }
     ]);
 
-    const data = Array(12).fill(0).map((_, i) => ({
-      month: moment().month(i).format('MMM'),
-      sales: agg.find(m => m._id === i + 1)?.sales || 0
-    }));
+    const currentTotal = currentAgg.reduce((sum, item) => sum + item.sales, 0);
+
+    // Previous year total (for YoY)
+    const prevTotal = await Order.countDocuments({
+      createdAt: {
+        $gte: moment({ year: selectedYear - 1 }).startOf('year').toDate(),
+        $lte: moment({ year: selectedYear - 1 }).endOf('year').toDate()
+      }
+    });
+
+    let yoyPercentage = 0;
+    if (prevTotal > 0) {
+      yoyPercentage = ((currentTotal - prevTotal) / prevTotal) * 100;
+    } else if (currentTotal > 0) {
+      yoyPercentage = 100; // from zero to some value
+    }
+
+    const formattedYoY = yoyPercentage >= 0 ? `+${yoyPercentage.toFixed(1)}%` : `${yoyPercentage.toFixed(1)}%`;
+
+    const data = Array(12).fill(0).map((_, i) => {
+      const match = currentAgg.find(m => m._id === i + 1);
+      return {
+        month: moment().month(i).format('MMM'),
+        sales: match ? match.sales : 0
+      };
+    });
 
     res.json({
       success: true,
       data,
-      year: selectedYear
+      year: selectedYear,
+      yoyPercentage: formattedYoY,           // ← "+12.5%" or "-3.8%"
+      currentYearTotalOrders: currentTotal,
+      previousYearTotalOrders: prevTotal
     });
   } catch (error) {
     console.error('getSalesTrend error:', error);
@@ -408,6 +437,10 @@ exports.getSalesTrend = async (req, res) => {
 };
 
 
+/**
+ * GET /api/v1/dashboard/customer-growth/year/:year
+ * Returns monthly new customers + YoY % change compared to previous year
+ */
 exports.getCustomerGrowth = async (req, res) => {
   try {
     const yearStr = req.params.year;
@@ -420,7 +453,8 @@ exports.getCustomerGrowth = async (req, res) => {
       });
     }
 
-    const agg = await User.aggregate([
+    // Current year monthly data
+    const currentAgg = await User.aggregate([
       {
         $match: {
           role: 'Customer',
@@ -439,15 +473,41 @@ exports.getCustomerGrowth = async (req, res) => {
       { $sort: { _id: 1 } }
     ]);
 
-    const data = Array(12).fill(0).map((_, i) => ({
-      month: moment().month(i).format('MMM'),
-      customers: agg.find(m => m._id === i + 1)?.customers || 0
-    }));
+    const currentTotal = currentAgg.reduce((sum, item) => sum + item.customers, 0);
+
+    // Previous year total
+    const prevTotal = await User.countDocuments({
+      role: 'Customer',
+      createdAt: {
+        $gte: moment({ year: selectedYear - 1 }).startOf('year').toDate(),
+        $lte: moment({ year: selectedYear - 1 }).endOf('year').toDate()
+      }
+    });
+
+    let yoyPercentage = 0;
+    if (prevTotal > 0) {
+      yoyPercentage = ((currentTotal - prevTotal) / prevTotal) * 100;
+    } else if (currentTotal > 0) {
+      yoyPercentage = 100;
+    }
+
+    const formattedYoY = yoyPercentage >= 0 ? `+${yoyPercentage.toFixed(1)}%` : `${yoyPercentage.toFixed(1)}%`;
+
+    const data = Array(12).fill(0).map((_, i) => {
+      const match = currentAgg.find(m => m._id === i + 1);
+      return {
+        month: moment().month(i).format('MMM'),
+        customers: match ? match.customers : 0
+      };
+    });
 
     res.json({
       success: true,
       data,
-      year: selectedYear
+      year: selectedYear,
+      yoyPercentage: formattedYoY,           // ← "+18.2%" or "-5.4%"
+      currentYearTotalCustomers: currentTotal,
+      previousYearTotalCustomers: prevTotal
     });
   } catch (error) {
     console.error('getCustomerGrowth error:', error);
