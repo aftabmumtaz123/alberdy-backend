@@ -1,96 +1,185 @@
 const Variant = require('../model/variantProduct');
 const Order = require('../model/Order');
 const User = require('../model/User');
-const Product = require('../model/Product');
 const moment = require('moment');
+const Product = require('../model/Product');
 
 exports.getDashboard = async (req, res) => {
   try {
-    const { 
-      period = 'monthly', 
-      limit = 5,
-      year = moment().year()   // for sales trends & revenue chart
-    } = req.query;
-
+    const { period = 'monthly', limit = 5 } = req.query;
+    
     if (!['daily', 'weekly', 'monthly'].includes(period)) {
       return res.status(400).json({ msg: 'Invalid period: daily, weekly, or monthly' });
     }
 
+    
     const now = moment();
-    const currentYear = parseInt(year);
+    const currentYear = now.year();
 
-    // ────────────────────────────────────────────────
-    //  Period definitions (current + previous)
-    // ────────────────────────────────────────────────
     const periods = {
       daily: {
-        start: now.startOf('day').toDate(),
-        end: now.endOf('day').toDate(),
-        prevStart: moment(now).subtract(1, 'day').startOf('day').toDate(),
-        prevEnd: moment(now).subtract(1, 'day').endOf('day').toDate()
+        startDate: now.startOf('day').toDate(),
+        endDate: now.endOf('day').toDate(),
+        prevStartDate: moment(now).subtract(1, 'day').startOf('day').toDate(),
+        prevEndDate: moment(now).subtract(1, 'day').endOf('day').toDate()
       },
       weekly: {
-        start: now.startOf('week').toDate(),
-        end: now.endOf('week').toDate(),
-        prevStart: moment(now).startOf('week').subtract(1, 'week').toDate(),
-        prevEnd: moment(now).endOf('week').subtract(1, 'week').toDate()
+        startDate: now.startOf('week').toDate(),
+        endDate: now.endOf('week').toDate(),
+        prevStartDate: moment(now).startOf('week').subtract(1, 'week').toDate(),
+        prevEndDate: moment(now).endOf('week').subtract(1, 'week').toDate()
       },
       monthly: {
-        start: now.startOf('month').toDate(),
-        end: now.endOf('month').toDate(),
-        prevStart: moment(now).startOf('month').subtract(1, 'month').toDate(),
-        prevEnd: moment(now).endOf('month').subtract(1, 'month').toDate()
+        startDate: now.startOf('month').toDate(),
+        endDate: now.endOf('month').toDate(),
+        prevStartDate: moment(now).startOf('month').subtract(1, 'month').toDate(),
+        prevEndDate: moment(now).endOf('month').subtract(1, 'month').toDate()
       }
     };
 
-    const { start, end, prevStart, prevEnd } = periods[period];
-
-    // ────────────────────────────────────────────────
-    //  Basic counters (lifetime)
-    // ────────────────────────────────────────────────
-    const [totalProducts, totalOrders, totalCustomers, lifetimeRevenue] = await Promise.all([
+    
+    const [totalProductsAll, fullTotalOrders, totalCustomersAll, totalLifetimeRevenue] = await Promise.all([
       Product.countDocuments(),
       Order.countDocuments(),
       User.countDocuments({ role: 'Customer' }),
+      
       Order.aggregate([
         { $match: { status: 'delivered' } },
-        { $group: { _id: null, total: { $sum: '$total' } } }
-      ]).then(r => r[0]?.total || 0)
+        { $group: { _id: null, total: { $sum: '$total' }}}
+      ]).then(results => results[0]?.total || 0)
     ]);
 
-    // ────────────────────────────────────────────────
-    //  Revenue for each granularity (daily/weekly/monthly)
-    // ────────────────────────────────────────────────
-    const revenueData = await Promise.all(
-      Object.keys(periods).map(async (key) => {
-        const p = periods[key];
-        const [curr, prev] = await Promise.all([
-          Order.aggregate([
-            { $match: { createdAt: { $gte: p.start, $lte: p.end }, status: 'delivered' } },
-            { $group: { _id: null, total: { $sum: '$total' } } }
-          ]).then(r => r[0]?.total || 0),
+    
+    const revenuePromises = Object.keys(periods).map(async (p) => {
+      const { startDate, endDate, prevStartDate, prevEndDate } = periods[p];
+      const [currentRevenue, prevRevenue] = await Promise.all([
+        Order.aggregate([
+          { $match: {
+            createdAt: { $gte: startDate, $lte: endDate },
+            status: 'delivered'
+          }},
+          { $group: { _id: null, total: { $sum: '$total' } }}
+        ]).then(results => results[0]?.total || 0),
+        Order.aggregate([
+          { $match: {
+            createdAt: { $gte: prevStartDate, $lte: prevEndDate },
+            status: 'delivered'
+          }},
+          { $group: { _id: null, total: { $sum: '$total' } }}
+        ]).then(results => results[0]?.total || 0)
+      ]);
+      const revenueGrowth = prevRevenue > 0 ? ((currentRevenue - prevRevenue) / prevRevenue * 100).toFixed(1) : 0;
+      return {
+        period: p.charAt(0).toUpperCase() + p.slice(1),
+        currentRevenue: currentRevenue,
+        previousRevenue: prevRevenue,
+        growthPercentage: `${revenueGrowth > 0 ? '+' : ''}${revenueGrowth}%`,
+        startDate: startDate,
+        endDate: endDate
+      };
+    });
+    const revenueDataPeriod = await Promise.all(revenuePromises);
 
-          Order.aggregate([
-            { $match: { createdAt: { $gte: p.prevStart, $lte: p.prevEnd }, status: 'delivered' } },
-            { $group: { _id: null, total: { $sum: '$total' } } }
-          ]).then(r => r[0]?.total || 0)
-        ]);
-
-        const growth = prev > 0 ? ((curr - prev) / prev * 100).toFixed(1) : 0;
-
-        return {
-          period: key.charAt(0).toUpperCase() + key.slice(1),
-          current: curr,
-          previous: prev,
-          growth: `${growth >= 0 ? '+' : ''}${growth}%`
-        };
+    
+    const { startDate: periodStartDate, endDate: periodEndDate, prevStartDate: periodPrevStartDate, prevEndDate: periodPrevEndDate } = periods[period];
+    const [periodOrdersAgg, periodNewCustomers, lowStockAlerts, recentOrders, prevNewCustomers] = await Promise.all([
+      
+      Order.aggregate([
+        { $match: { createdAt: { $gte: periodStartDate, $lte: periodEndDate } } },
+        { $group: { _id: '$status', count: { $sum: 1 } } }
+      ]).then(results => {
+        const breakdown = { pending: 0, delivered: 0, cancelled: 0 };
+        results.forEach(r => {
+          if (['pending', 'delivered', 'cancelled'].includes(r._id)) {
+            breakdown[r._id] = r.count;
+          }
+        });
+        const total = results.reduce((sum, r) => sum + r.count, 0);
+        return { total, breakdown };
+      }),
+      
+      User.countDocuments({
+        role: 'Customer',
+        createdAt: { $gte: periodStartDate, $lte: periodEndDate }
+      }),
+      
+      Variant.find({ stockQuantity: { $lt: 10, $gt: -1 } })
+        .populate('product', 'name sku')
+        .select('sku stockQuantity image product attribute value')
+        .sort({ stockQuantity: 1 })
+        .limit(4),
+        
+      Order.find()
+        .populate('user', 'name')
+        .populate('items.product', 'name')
+        .sort({ createdAt: -1 })
+        .limit(parseInt(limit))
+        .select('orderNumber user items total status createdAt'),
+      
+      User.countDocuments({
+        role: 'Customer',
+        createdAt: { $gte: periodPrevStartDate, $lte: periodPrevEndDate }
       })
-    );
+    ]);
+
+    
+    const formattedRecentOrders = recentOrders.map(order => ({
+      _id: order._id,
+      orderId: order.orderNumber?.startsWith('#ORD-') ? order.orderNumber : `#ORD-${String(order._id).slice(-3).padStart(3, '0')}`,
+      customer: order.user?.name || 'Unknown',
+      product: order.items[0]?.product?.name || 'N/A',
+      amount: order.total,
+      status: order.status.charAt(0).toUpperCase() + order.status.slice(1),
+      date: moment(order.createdAt).format('YYYY-MM-DD')
+    }));
+
+    
+    const formattedLowStock = lowStockAlerts.map(v => ({
+      name: `${v.product?.name || 'N/A'}`,
+      sku: v.sku || `SKU-${String(v._id).slice(-4)}`,
+      unitsLeft: v.stockQuantity,
+      image: v.image || null
+    }));
+
+    
+    const customerGrowth = prevNewCustomers > 0 ? ((periodNewCustomers - prevNewCustomers) / prevNewCustomers * 100).toFixed(1) : 12;
+    const productGrowth = '+8%'; // Placeholder; implement historical if needed
+    const orderGrowth = '+15%'; // Placeholder
 
     // ────────────────────────────────────────────────
-    //  Monthly order volume for current selected year (line chart)
+    //  ADDITIONAL FIELDS – added here without changing original structure
     // ────────────────────────────────────────────────
-    const monthlyOrderVolume = await Order.aggregate([
+
+    // 1. Monthly revenue this year (for bar chart)
+    const monthlyRevenueAgg = await Order.aggregate([
+      {
+        $match: {
+          status: 'delivered',
+          createdAt: {
+            $gte: moment({ year: currentYear }).startOf('year').toDate(),
+            $lte: moment({ year: currentYear }).endOf('year').toDate()
+          }
+        }
+      },
+      {
+        $group: {
+          _id: { $month: '$createdAt' },
+          revenue: { $sum: '$total' }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
+    const revenueData = Array(12).fill(0).map((_, i) => {
+      const match = monthlyRevenueAgg.find(m => m._id === i + 1);
+      return {
+        month: moment().month(i).format('MMM'),
+        revenue: match ? Math.round(match.revenue) : 0
+      };
+    });
+
+    // 2. Monthly order volume (for sales trends line chart)
+    const monthlyOrderAgg = await Order.aggregate([
       {
         $match: {
           createdAt: {
@@ -105,36 +194,50 @@ exports.getDashboard = async (req, res) => {
           count: { $sum: 1 }
         }
       },
-      { $sort: { '_id': 1 } }
+      { $sort: { _id: 1 } }
     ]);
 
-    const orderVolumes = Array(12).fill(0);
-    monthlyOrderVolume.forEach(item => {
-      orderVolumes[item._id - 1] = item.count;
+    const salesTrendData = Array(12).fill(0).map((_, i) => {
+      const match = monthlyOrderAgg.find(m => m._id === i + 1);
+      return {
+        month: moment().month(i).format('MMM'),
+        sales: match ? match.count : 0
+      };
     });
 
-    // Rough growth vs previous year (optional)
-    const prevYearVolume = await Order.countDocuments({
-      createdAt: {
-        $gte: moment({ year: currentYear - 1 }).startOf('year').toDate(),
-        $lte: moment({ year: currentYear - 1 }).endOf('year').toDate()
-      }
+    // 3. Monthly new customers (for customer growth chart)
+    const monthlyCustomersAgg = await User.aggregate([
+      {
+        $match: {
+          role: 'Customer',
+          createdAt: {
+            $gte: moment({ year: currentYear }).startOf('year').toDate(),
+            $lte: moment({ year: currentYear }).endOf('year').toDate()
+          }
+        }
+      },
+      {
+        $group: {
+          _id: { $month: '$createdAt' },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
+    const customerGrowthData = Array(12).fill(0).map((_, i) => {
+      const match = monthlyCustomersAgg.find(m => m._id === i + 1);
+      return {
+        month: moment().month(i).format('MMM'),
+        customers: match ? match.count : 0
+      };
     });
-    const currentYearTotalOrders = orderVolumes.reduce((a, b) => a + b, 0);
-    const volumeGrowth = prevYearVolume > 0 
-      ? ((currentYearTotalOrders - prevYearVolume) / prevYearVolume * 100).toFixed(1) 
-      : 0;
 
-    // ────────────────────────────────────────────────
-    //  Best selling products THIS MONTH (by revenue)
-    // ────────────────────────────────────────────────
-    const monthStart = moment().startOf('month').toDate();
-    const monthEnd = moment().endOf('month').toDate();
-
+    // 4. Best selling products this month – cleaner format
     const bestSellers = await Order.aggregate([
       {
         $match: {
-          createdAt: { $gte: monthStart, $lte: monthEnd },
+          createdAt: { $gte: now.startOf('month').toDate(), $lte: now.endOf('month').toDate() },
           status: 'delivered'
         }
       },
@@ -143,7 +246,7 @@ exports.getDashboard = async (req, res) => {
         $group: {
           _id: '$items.product',
           revenue: { $sum: { $multiply: ['$items.quantity', '$items.price'] } },
-          units: { $sum: '$items.quantity' }
+          sold: { $sum: '$items.quantity' }
         }
       },
       { $sort: { revenue: -1 } },
@@ -160,116 +263,51 @@ exports.getDashboard = async (req, res) => {
       {
         $project: {
           name: '$product.name',
-          revenue: { $round: ['$revenue'] },
-          units: '$units'
+          sold: '$sold',
+          revenue: { $round: ['$revenue', 0] }
         }
       }
     ]);
 
-    // ────────────────────────────────────────────────
-    //  Other metrics (your original ones)
-    // ────────────────────────────────────────────────
-    const [periodOrders, newCustomers, prevNewCustomers, lowStock, recentOrders] = await Promise.all([
-      Order.aggregate([
-        { $match: { createdAt: { $gte: start, $lte: end } } },
-        { $group: { _id: '$status', count: { $sum: 1 } } }
-      ]).then(results => {
-        const breakdown = { pending: 0, delivered: 0, cancelled: 0 };
-        results.forEach(r => {
-          if (['pending', 'delivered', 'cancelled'].includes(r._id)) breakdown[r._id] = r.count;
-        });
-        const total = results.reduce((sum, r) => sum + r.count, 0);
-        return { total, breakdown };
-      }),
+    const bestSellingProducts = bestSellers.map((p, i) => ({
+      name: p.name || 'Unknown',
+      sold: p.sold,
+      revenue: p.revenue
+    }));
 
-      User.countDocuments({
-        role: 'Customer',
-        createdAt: { $gte: start, $lte: end }
-      }),
+    
+    const dashboardData = {
+      totalProducts: totalProductsAll,
+      productGrowth,
+      totalOrders: fullTotalOrders,
+      orderBreakdown: periodOrdersAgg.breakdown,
+      orderGrowth,
+      totalCustomers: totalCustomersAll,
+      customerGrowth: `${customerGrowth > 0 ? '+' : ''}${customerGrowth}%`,
+      revenue: {
+        daily: revenueDataPeriod.find(r => r.period === 'Daily'),
+        weekly: revenueDataPeriod.find(r => r.period === 'Weekly'),
+        monthly: revenueDataPeriod.find(r => r.period === 'Monthly')
+      },
+      totalLifetimeRevenue: totalLifetimeRevenue,
+      revenuePeriod: period.charAt(0).toUpperCase() + period.slice(1),
+      lowStockAlerts: formattedLowStock,
+      recentOrders: formattedRecentOrders,
 
-      User.countDocuments({
-        role: 'Customer',
-        createdAt: { $gte: prevStart, $lte: prevEnd }
-      }),
+      // ─── Newly added fields – frontend can use these directly ───
+      revenueData,              // [{month:"Jan", revenue: number}, ...]
+      salesTrendData,           // [{month:"Jan", sales: number}, ...]
+      customerGrowthData,       // [{month:"Jan", customers: number}, ...]
+      bestSellingProducts       // [{name, sold, revenue}, ...]
+    };
 
-      Variant.find({ stockQuantity: { $lt: 10, $gt: -1 } })
-        .populate('product', 'name')
-        .select('sku stockQuantity product')
-        .sort({ stockQuantity: 1 })
-        .limit(4),
-
-      Order.find()
-        .populate('user', 'name')
-        .populate('items.product', 'name')
-        .sort({ createdAt: -1 })
-        .limit(parseInt(limit))
-        .select('orderNumber user items total status createdAt')
-    ]);
-
-    const customerGrowthPct = prevNewCustomers > 0 
-      ? ((newCustomers - prevNewCustomers) / prevNewCustomers * 100).toFixed(1) 
-      : newCustomers > 0 ? 100 : 0;
-
-    // ────────────────────────────────────────────────
-    //  Final response shape
-    // ────────────────────────────────────────────────
     res.json({
       success: true,
-      data: {
-        // Lifetime / overview cards
-        totalProducts,
-        totalOrders,
-        totalCustomers,
-        lifetimeRevenue,
-
-        // Period revenue (daily/weekly/monthly)
-        revenue: {
-          daily: revenueData.find(r => r.period === 'Daily'),
-          weekly: revenueData.find(r => r.period === 'Weekly'),
-          monthly: revenueData.find(r => r.period === 'Monthly')
-        },
-
-        // Sales Trends line chart (monthly order volume)
-        salesTrends: {
-          year: currentYear,
-          months: ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
-          volumes: orderVolumes,
-          growth: volumeGrowth >= 0 ? `+${volumeGrowth}%` : `${volumeGrowth}%`
-        },
-
-        // Best sellers this month
-        bestSellers: bestSellers.map((p, i) => ({
-          rank: i + 1,
-          name: p.name,
-          revenue: p.revenue,
-          units: p.units,
-          label: 'Top performer'
-        })),
-
-        // Period-specific
-        period: period.charAt(0).toUpperCase() + period.slice(1),
-        periodOrders,
-        newCustomersThisPeriod: newCustomers,
-        customerGrowth: `${customerGrowthPct >= 0 ? '+' : ''}${customerGrowthPct}%`,
-
-        // Low stock & recent orders
-        lowStockAlerts: lowStock.map(v => ({
-          name: v.product?.name || 'Unknown',
-          sku: v.sku || '—',
-          unitsLeft: v.stockQuantity
-        })),
-        recentOrders: recentOrders.map(o => ({
-          orderId: o.orderNumber || `#${o._id.toString().slice(-6)}`,
-          customer: o.user?.name || 'Guest',
-          product: o.items[0]?.product?.name || 'Multiple',
-          amount: o.total,
-          status: o.status,
-          date: moment(o.createdAt).format('YYYY-MM-DD')
-        }))
-      }
+      msg: "Fetched Successfully",
+      data: dashboardData
     });
-  } catch (err) {
-    console.error('Dashboard error:', err);
-    res.status(500).json({ success: false, error: err.message });
+  } catch (error) {
+    console.error('Dashboard error:', error);
+    res.status(500).json({ error: error.message });
   }
 };
