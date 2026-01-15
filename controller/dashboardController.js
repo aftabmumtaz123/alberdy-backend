@@ -4,9 +4,12 @@ const User = require('../model/User');
 const moment = require('moment');
 const Product = require('../model/Product');
 
+// ────────────────────────────────────────────────────────────────
+// Your original full dashboard endpoint (unchanged)
+// ────────────────────────────────────────────────────────────────
 exports.getDashboard = async (req, res) => {
   try {
-    const { period = 'monthly', limit = 5 } = req.query;
+    const { period = 'monthly', limit = 5, year } = req.query;  
     
     if (!['daily', 'weekly', 'monthly'].includes(period)) {
       return res.status(400).json({ msg: 'Invalid period: daily, weekly, or monthly' });
@@ -14,7 +17,7 @@ exports.getDashboard = async (req, res) => {
 
     
     const now = moment();
-    const currentYear = now.year();
+    const selectedYear = year ? parseInt(year, 10) : now.year();  
 
     const periods = {
       daily: {
@@ -150,14 +153,14 @@ exports.getDashboard = async (req, res) => {
     //  ADDITIONAL FIELDS – added here without changing original structure
     // ────────────────────────────────────────────────
 
-    // 1. Monthly revenue this year (for bar chart)
+    // 1. Monthly revenue – now uses selectedYear
     const monthlyRevenueAgg = await Order.aggregate([
       {
         $match: {
           status: 'delivered',
           createdAt: {
-            $gte: moment({ year: currentYear }).startOf('year').toDate(),
-            $lte: moment({ year: currentYear }).endOf('year').toDate()
+            $gte: moment({ year: selectedYear }).startOf('year').toDate(),
+            $lte: moment({ year: selectedYear }).endOf('year').toDate()
           }
         }
       },
@@ -178,13 +181,13 @@ exports.getDashboard = async (req, res) => {
       };
     });
 
-    // 2. Monthly order volume (for sales trends line chart)
+    // 2. Monthly order volume – now uses selectedYear
     const monthlyOrderAgg = await Order.aggregate([
       {
         $match: {
           createdAt: {
-            $gte: moment({ year: currentYear }).startOf('year').toDate(),
-            $lte: moment({ year: currentYear }).endOf('year').toDate()
+            $gte: moment({ year: selectedYear }).startOf('year').toDate(),
+            $lte: moment({ year: selectedYear }).endOf('year').toDate()
           }
         }
       },
@@ -205,14 +208,14 @@ exports.getDashboard = async (req, res) => {
       };
     });
 
-    // 3. Monthly new customers (for customer growth chart)
+    // 3. Monthly new customers – now uses selectedYear
     const monthlyCustomersAgg = await User.aggregate([
       {
         $match: {
           role: 'Customer',
           createdAt: {
-            $gte: moment({ year: currentYear }).startOf('year').toDate(),
-            $lte: moment({ year: currentYear }).endOf('year').toDate()
+            $gte: moment({ year: selectedYear }).startOf('year').toDate(),
+            $lte: moment({ year: selectedYear }).endOf('year').toDate()
           }
         }
       },
@@ -233,7 +236,7 @@ exports.getDashboard = async (req, res) => {
       };
     });
 
-    // 4. Best selling products this month – cleaner format
+    // 4. Best selling products this month – remains current month only
     const bestSellers = await Order.aggregate([
       {
         $match: {
@@ -292,13 +295,8 @@ exports.getDashboard = async (req, res) => {
       totalLifetimeRevenue: totalLifetimeRevenue,
       revenuePeriod: period.charAt(0).toUpperCase() + period.slice(1),
       lowStockAlerts: formattedLowStock,
-      recentOrders: formattedRecentOrders,
-
-      // ─── Newly added fields – frontend can use these directly ───
-      revenueData,              // [{month:"Jan", revenue: number}, ...]
-      salesTrendData,           // [{month:"Jan", sales: number}, ...]
-      customerGrowthData,       // [{month:"Jan", customers: number}, ...]
-      bestSellingProducts       // [{name, sold, revenue}, ...]
+      recentOrders: formattedRecentOrders,     
+      bestSellingProducts      
     };
 
     res.json({
@@ -309,5 +307,150 @@ exports.getDashboard = async (req, res) => {
   } catch (error) {
     console.error('Dashboard error:', error);
     res.status(500).json({ error: error.message });
+  }
+};
+
+
+
+exports.getRevenueChart = async (req, res) => {
+  try {
+    const yearStr = req.params.year;
+    const selectedYear = yearStr ? parseInt(yearStr, 10) : moment().year();
+
+    if (isNaN(selectedYear) || selectedYear < 2000 || selectedYear > moment().year() + 10) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid year value"
+      });
+    }
+
+    const agg = await Order.aggregate([
+      {
+        $match: {
+          status: 'delivered',
+          createdAt: {
+            $gte: moment({ year: selectedYear }).startOf('year').toDate(),
+            $lte: moment({ year: selectedYear }).endOf('year').toDate()
+          }
+        }
+      },
+      {
+        $group: {
+          _id: { $month: '$createdAt' },
+          revenue: { $sum: '$total' }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
+    const data = Array(12).fill(0).map((_, i) => ({
+      month: moment().month(i).format('MMM'),
+      revenue: agg.find(m => m._id === i + 1)?.revenue || 0
+    }));
+
+    res.json({
+      success: true,
+      data,
+      year: selectedYear
+    });
+  } catch (error) {
+    console.error('getRevenueChart error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+
+
+exports.getSalesTrend = async (req, res) => {
+  try {
+    const yearStr = req.params.year;
+    const selectedYear = yearStr ? parseInt(yearStr, 10) : moment().year();
+
+    if (isNaN(selectedYear) || selectedYear < 2000 || selectedYear > moment().year() + 10) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid year value"
+      });
+    }
+
+    const agg = await Order.aggregate([
+      {
+        $match: {
+          createdAt: {
+            $gte: moment({ year: selectedYear }).startOf('year').toDate(),
+            $lte: moment({ year: selectedYear }).endOf('year').toDate()
+          }
+        }
+      },
+      {
+        $group: {
+          _id: { $month: '$createdAt' },
+          sales: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
+    const data = Array(12).fill(0).map((_, i) => ({
+      month: moment().month(i).format('MMM'),
+      sales: agg.find(m => m._id === i + 1)?.sales || 0
+    }));
+
+    res.json({
+      success: true,
+      data,
+      year: selectedYear
+    });
+  } catch (error) {
+    console.error('getSalesTrend error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+
+exports.getCustomerGrowth = async (req, res) => {
+  try {
+    const yearStr = req.params.year;
+    const selectedYear = yearStr ? parseInt(yearStr, 10) : moment().year();
+
+    if (isNaN(selectedYear) || selectedYear < 2000 || selectedYear > moment().year() + 10) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid year value"
+      });
+    }
+
+    const agg = await User.aggregate([
+      {
+        $match: {
+          role: 'Customer',
+          createdAt: {
+            $gte: moment({ year: selectedYear }).startOf('year').toDate(),
+            $lte: moment({ year: selectedYear }).endOf('year').toDate()
+          }
+        }
+      },
+      {
+        $group: {
+          _id: { $month: '$createdAt' },
+          customers: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
+    const data = Array(12).fill(0).map((_, i) => ({
+      month: moment().month(i).format('MMM'),
+      customers: agg.find(m => m._id === i + 1)?.customers || 0
+    }));
+
+    res.json({
+      success: true,
+      data,
+      year: selectedYear
+    });
+  } catch (error) {
+    console.error('getCustomerGrowth error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };
