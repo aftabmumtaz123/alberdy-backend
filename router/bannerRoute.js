@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 
-const { createBanner, getBanner, updateBanner, deleteBanner } = require('../controller/bannerController');
+const { createBanner, getBanner, updateBanner, deleteBanner, getBannerById } = require('../controller/bannerController');
 
 
 const auth = require('../middleware/auth');
@@ -17,8 +17,9 @@ const Upload = require('../config/multer')
 
 
 
-router.post("/", Upload.array("images"), auth, requireRole(['admin']), createBanner);
+router.post("/", Upload.single("image"), auth, requireRole(['Super Admin']), createBanner);
 router.get("/", getBanner);
-router.put("/:id", Upload.array("images"), auth, requireRole(['admin']), updateBanner);
-router.delete("/:id", auth, requireRole(['admin']), deleteBanner);
+router.get("/:id", getBannerById);
+router.put("/:id", Upload.single("image"), auth, requireRole(['Super Admin']), updateBanner);
+router.delete("/:id", auth, requireRole(['Super Admin']), deleteBanner);
 module.exports = router;

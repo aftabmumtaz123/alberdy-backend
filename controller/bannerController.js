@@ -6,10 +6,8 @@ exports.createBanner = async (req, res) => {
    try {
      const { title, description, links, subTitle, bannerLayout, buttonText, buttonLink, buttonPosition } = req.body;
 
-    const images = req.files?.map(file => ({
-        url: file.path,
-        public_id: file.filename
-    }));
+    const image = req.file ? req.file.path : null;
+
 
     if (!title || !description) {
       return res.status(400).json({
@@ -35,13 +33,13 @@ exports.createBanner = async (req, res) => {
         title,
         description,
         links,
-        images,
+        images: image,
         subTitle,
         bannerLayout,
         buttonText,
         buttonLink,
         buttonPosition,
-        status: true
+        status: 'Active'
     })
 
     await banner.save()
@@ -56,6 +54,28 @@ exports.createBanner = async (req, res) => {
    }
 };
 
+exports.getBannerById = async (req,res)=>{
+    try{
+        const id = req.params.id
+        const banner =  await Banner.findById(id);
+        if(!banner){
+            return res.json({success: false, message: "There's not any banner of this id"})
+        }
+        res.status(200).json({
+            success: true,
+            message: "Banner Fetched Successfully",
+            data: banner
+        })
+    } 
+
+    catch(error){
+        console.log(error)
+        res.status(500).json({
+            success: false,
+            message: "Server Error"
+        })
+    }
+}
 
 exports.getBanner = async (req,res)=>{
     try{

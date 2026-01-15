@@ -22,11 +22,10 @@ const bannerSchema = mongoose.Schema({
     description: {
         type: String
     },
-    images: 
-        {
-            url: { type: String, required: true },
-            public_id: { type: String, required: true }
-        },
+    images:
+    {
+        type: String
+    },
     links: {
         type: [String]
     },
