@@ -13,7 +13,7 @@ const userSchema = new mongoose.Schema({
     state: { type: String, default: '' },
     zip: { type: String, default: '' },
   },
-  petType: { type: String, enum: ['Dog', 'Cat', 'Bird', 'Fish', 'Multiple'] }, // For customers
+  petType: { type: [String], default: [] }, 
   status: { type: String, enum: ['Active', 'Inactive', 'Blocked'], default: 'Active' },
   lastLogin: Date,
   resetPasswordOTP: {
