@@ -28,7 +28,11 @@ exports.createAppConfiguration = async (req, res) => {
       currencyName,
       currencyCode,
       currencySign,
-      tax
+      tax,
+      enableStoreDiscount,
+      discountPercentage,
+      minimumOrderAmount,
+      maxDiscountAmount,
     } = req.body;
     const appLogo = req.file ? req.file.path : ''; 
 
@@ -72,6 +76,40 @@ exports.createAppConfiguration = async (req, res) => {
         success: false,
         message: 'Currency Sign must be 1-5 characters (e.g., $, €, USD)',
       });
+    }
+
+    const discountEnabled = enableStoreDiscount === true || enableStoreDiscount === 'true';
+if (discountEnabled) {
+      const perc = Number(discountPercentage);
+      const minOrder = Number(minimumOrderAmount);
+      const maxDisc = Number(maxDiscountAmount);
+
+      if (isNaN(perc) || perc < 0 || perc > 100) {
+        return res.status(400).json({
+          success: false,
+          message: 'Discount percentage must be 0–100',
+        });
+      }
+      if (isNaN(minOrder) || minOrder < 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Minimum order amount must be ≥ 0',
+        });
+      }
+      if (isNaN(maxDisc) || maxDisc < 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Max discount amount must be ≥ 0',
+        });
+      }
+
+      // Optional business rule: max discount should not be ridiculously small when percentage > 0
+      if (perc > 0 && maxDisc === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please set a reasonable maximum discount amount when discount % > 0',
+        });
+      }
     }
 
     // Validate social fields as URLs if provided
@@ -125,6 +163,10 @@ exports.createAppConfiguration = async (req, res) => {
       currencyCode,
       tax,
       currencySign,
+      enableStoreDiscount: discountEnabled,
+      discountPercentage: discountEnabled ? Number(discountPercentage) : 0,
+      minimumOrderAmount: discountEnabled ? Number(minimumOrderAmount) : 0,
+      maxDiscountAmount: discountEnabled ? Number(maxDiscountAmount) : 0,
       lastUpdated: new Date().toISOString(),
     });
 
@@ -215,7 +257,11 @@ exports.updateAppConfiguration = async (req, res) => {
       currencyName,
       currencyCode,
       currencySign,
-      tax
+      tax,
+      enableStoreDiscount,
+      discountPercentage,
+      minimumOrderAmount,
+      maxDiscountAmount,
     } = req.body;
 
     
@@ -314,6 +360,43 @@ exports.updateAppConfiguration = async (req, res) => {
       }
     }
 
+    // ── Discount logic ──
+    const discountEnabled = enableStoreDiscount !== undefined 
+      ? (enableStoreDiscount === true || enableStoreDiscount === 'true')
+      : existing.enableStoreDiscount;
+
+    let discountUpdate = {};
+    if (discountEnabled) {
+      const perc = discountPercentage !== undefined ? Number(discountPercentage) : existing.discountPercentage;
+      const minOrd = minimumOrderAmount !== undefined ? Number(minimumOrderAmount) : existing.minimumOrderAmount;
+      const maxD = maxDiscountAmount !== undefined ? Number(maxDiscountAmount) : existing.maxDiscountAmount;
+
+      if (perc < 0 || perc > 100) {
+        return res.status(400).json({ success: false, message: 'Discount % must be 0–100' });
+      }
+      if (minOrd < 0) {
+        return res.status(400).json({ success: false, message: 'Min order amount ≥ 0' });
+      }
+      if (maxD < 0) {
+        return res.status(400).json({ success: false, message: 'Max discount ≥ 0' });
+      }
+
+      discountUpdate = {
+        enableStoreDiscount: true,
+        discountPercentage: perc,
+        minimumOrderAmount: minOrd,
+        maxDiscountAmount: maxD,
+      };
+    } else {
+      discountUpdate = {
+        enableStoreDiscount: false,
+        discountPercentage: 0,
+        minimumOrderAmount: 0,
+        maxDiscountAmount: 0,
+      };
+    }
+
+
     // Build update data
     const updateData = {
       appName: appName ?? existingConfig.appName,
@@ -332,6 +415,7 @@ exports.updateAppConfiguration = async (req, res) => {
       currencyCode: currencyCode ?? existingConfig.currencyCode,
       currencySign: currencySign ?? existingConfig.currencySign,
       tax: tax ?? existingConfig.tax,
+      ...discountUpdate,
       lastUpdated: new Date().toISOString(),
     };
 

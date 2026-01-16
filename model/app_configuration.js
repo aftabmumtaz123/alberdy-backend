@@ -11,16 +11,16 @@ const appConfigurationSchema = new mongoose.Schema({
     type: Number,
   },
   appLogo: {
-    type: String, 
+    type: String,
     trim: true,
   },
   primaryColor: {
-    type: String, 
+    type: String,
     required: true,
     trim: true,
   },
   secondaryColor: {
-    type: String, 
+    type: String,
     required: true,
     trim: true,
   },
@@ -31,14 +31,33 @@ const appConfigurationSchema = new mongoose.Schema({
   contactEmails: {
     type: [String],
     trim: true,
-   
+
   },
   supportPhones: {
     type: [String],
     trim: true,
   },
 
-
+  enableStoreDiscount: {
+    type: Boolean,
+    default: false,
+  },
+  discountPercentage: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 100,
+  },
+  minimumOrderAmount: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  maxDiscountAmount: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
 
   street_address: {
     type: String,
@@ -60,15 +79,15 @@ const appConfigurationSchema = new mongoose.Schema({
   currencySign: {
     type: String
   },
-  
+
   facebook: { type: String, trim: true },
   instagram: { type: String, trim: true },
   youtube: { type: String, trim: true },
   linkedin: { type: String, trim: true },
   lastUpdated: {
-    type: String, 
+    type: String,
     default: new Date().toISOString(),
   },
-}, { timestamps: true }); 
+}, { timestamps: true });
 
 module.exports = mongoose.model('AppConfiguration', appConfigurationSchema);
