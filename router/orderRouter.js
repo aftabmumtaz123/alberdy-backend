@@ -20,6 +20,19 @@ const requireRole = roles => (req, res, next) => {
   next();
 };
 
+const calculateStoreDiscount = async (subtotal) => {
+  const config = await AppConfiguration.findOne().lean();
+  if (!config || !config.enableStoreDiscount) return 0;
+
+  if (subtotal < config.minimumOrderAmount) return 0;
+
+  const percentageDiscount = (subtotal * config.discountPercentage) / 100;
+  const finalDiscount = Math.min(percentageDiscount, config.maxDiscountAmount);
+
+  return Number(finalDiscount.toFixed(2));
+};
+
+
 // ────────────────────────────────────────────────
 // Generators
 // ────────────────────────────────────────────────
@@ -165,7 +178,7 @@ const checkAndSendLowStockAlerts = async (variants, adminEmail) => {
 
   // Email (combined list)
   const lowStockItems = enriched
-  .map(v => `${v.name} - ${v.attribute || 'N/A'}: ${v.value || 'N/A'} (Stock: ${v.stockQuantity || "Few"})`)
+    .map(v => `${v.name} - ${v.attribute || 'N/A'}: ${v.value || 'N/A'} (Stock: ${v.stockQuantity || "Few"})`)
 
     .join('<br>');
 
@@ -197,53 +210,80 @@ const checkAndSendLowStockAlerts = async (variants, adminEmail) => {
 // POST /orders - Create order
 // ────────────────────────────────────────────────
 
+
 router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
     const {
-      items, subtotal, tax = 0, discount = 0, total,
-      paymentMethod, shippingAddress, notes, shipping = 5.99,
-      paymentProvider, isPaymentVerified, paymentId, paymentResponse,
+      items,
+      subtotal: clientSubtotal,     // for logging / optional soft check only
+      tax: clientTax = 0,
+      discount: clientDiscount = 0, // ignored for now (future: coupons)
+      total: clientTotal,
+      paymentMethod,
+      shippingAddress,
+      notes,
+      shipping = 5.99,
+      paymentProvider,
+      isPaymentVerified,
+      paymentId,
+      paymentResponse,
       paymentStatus
     } = req.body;
 
-    if (!items?.length) return res.status(400).json({ success: false, msg: 'Order items required' });
-    if (!paymentMethod) return res.status(400).json({ success: false, msg: 'Payment method required' });
-
-    if (!shippingAddress?.street || !shippingAddress?.city || !shippingAddress?.zip ||
-      !shippingAddress?.fullName || !shippingAddress?.phone || !shippingAddress?.email) {
+    // Basic structure validation
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ success: false, msg: 'Order items required' });
+    }
+    if (!paymentMethod) {
+      return res.status(400).json({ success: false, msg: 'Payment method required' });
+    }
+    if (!shippingAddress ||
+      !shippingAddress.street || !shippingAddress.city || !shippingAddress.zip ||
+      !shippingAddress.fullName || !shippingAddress.phone || !shippingAddress.email) {
       return res.status(400).json({ success: false, msg: 'Complete shipping address and email required' });
     }
 
+    // ── Server-authoritative subtotal calculation ────────────────────────
     const orderItems = [];
     let computedSubtotal = 0;
     const variantsToCheck = [];
 
     for (const itm of items) {
-      if (!mongoose.Types.ObjectId.isValid(itm.product))
+      if (!mongoose.Types.ObjectId.isValid(itm.product)) {
         return res.status(400).json({ success: false, msg: `Invalid product ID: ${itm.product}` });
+      }
 
       const product = await Product.findById(itm.product)
         .populate({ path: 'variations', select: 'attribute value sku price discountPrice stockQuantity image product reservedQuantity' });
 
-      if (!product) return res.status(400).json({ success: false, msg: `Product not found: ${itm.product}` });
-      if (!product.variations?.length)
+      if (!product) {
+        return res.status(400).json({ success: false, msg: `Product not found: ${itm.product}` });
+      }
+
+      if (!product.variations?.length) {
         return res.status(400).json({ success: false, msg: `No variations for product ${product.name}` });
+      }
 
       const qty = Number(itm.quantity);
-      if (isNaN(qty) || qty <= 0)
+      if (isNaN(qty) || qty <= 0) {
         return res.status(400).json({ success: false, msg: `Invalid quantity for ${product.name}` });
+      }
 
-      if (!itm.variant)
-        return res.status(400).json({ success: false, msg: `Variant required for ${product.name}` });
-
-      if (!mongoose.Types.ObjectId.isValid(itm.variant))
-        return res.status(400).json({ success: false, msg: `Invalid variant ID: ${itm.variant}` });
+      if (!itm.variant || !mongoose.Types.ObjectId.isValid(itm.variant)) {
+        return res.status(400).json({ success: false, msg: `Valid variant required for ${product.name}` });
+      }
 
       const variant = product.variations.find(v => v._id.toString() === itm.variant);
-      if (!variant) return res.status(400).json({ success: false, msg: `Variant not found` });
+      if (!variant) {
+        return res.status(400).json({ success: false, msg: `Variant not found` });
+      }
 
-      if (variant.stockQuantity < qty)
-        return res.status(400).json({ success: false, msg: `Insufficient stock for ${product.name} (${variant.attribute}: ${variant.value})` });
+      if (variant.stockQuantity < qty) {
+        return res.status(400).json({
+          success: false,
+          msg: `Insufficient stock for ${product.name} (${variant.attribute}: ${variant.value})`
+        });
+      }
 
       const price = variant.discountPrice ?? variant.price;
       const lineTotal = price * qty;
@@ -257,6 +297,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       });
 
       computedSubtotal += lineTotal;
+
       variantsToCheck.push({
         _id: variant._id,
         product: product._id,
@@ -268,10 +309,34 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       });
     }
 
-    const calcTotal = subtotal + tax + shipping - discount;
-    if (Math.abs(calcTotal - total) > 0.001)
-      return res.status(400).json({ success: false, msg: 'Total amount mismatch' });
+    // Optional: log mismatch (can be turned into rejection later)
+    if (Math.abs(computedSubtotal - Number(clientSubtotal)) > 0.05) {
+      console.warn(`[ORDER] Subtotal mismatch - client: ${clientSubtotal}, server: ${computedSubtotal}`);
+      // You can return 400 here if you want strict mode
+    }
 
+    // ── Apply store discount (server decides) ─────────────────────────────
+    const appliedDiscount = await calculateStoreDiscount(computedSubtotal);
+
+    // ── Final server-side totals ──────────────────────────────────────────
+    const config = await AppConfiguration.findOne().lean();
+    const taxRate = config?.tax || 0;
+    const calculatedTax = (computedSubtotal * taxRate) / 100;
+    const calculatedShipping = Number(shipping);
+    const calculatedTotal = computedSubtotal + calculatedTax + calculatedShipping - appliedDiscount;
+
+
+
+
+    // ── Critical security check: client total must match server calculation ──
+    if (Math.abs(calculatedTotal - Number(clientTotal)) > 0.05) {
+      return res.status(400).json({
+        success: false,
+        msg: `Price/discount/total mismatch. Expected total: ${calculatedTotal.toFixed(2)}`
+      });
+    }
+
+    // ── Create order with SERVER values only ──────────────────────────────
     const orderNumber = await generateOrderNumber();
     const trackingNumber = await generateTrackingNumber();
 
@@ -280,17 +345,17 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       orderNumber,
       orderTrackingNumber: trackingNumber,
       items: orderItems,
-      subtotal,
-      tax,
-      discount,
-      shipping,
-      total,
+      subtotal: computedSubtotal,          // ← trusted value
+      tax: calculatedTax,
+      discount: appliedDiscount,           // ← trusted store discount
+      shipping: calculatedShipping,
+      total: calculatedTotal,              // ← trusted final total
       paymentMethod,
       paymentProvider: paymentProvider || null,
       paymentId: paymentId || null,
       paymentResponse: paymentResponse || null,
       isPaymentVerified: isPaymentVerified || false,
-      paymentStatus: paymentStatus || null,
+      paymentStatus: paymentStatus || (paymentMethod === 'COD' ? 'unpaid' : null),
       status: 'pending',
       trackingStatus: 'not shipped',
       shippingAddress,
@@ -299,6 +364,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
 
     await order.save();
 
+    // Populate for emails & response
     await order.populate('items.product', 'name thumbnail images');
     await order.populate({
       path: 'items.variant',
@@ -306,7 +372,12 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
     });
     await order.populate('user', 'name email phone');
 
-    // Web Push (unchanged)
+    // ── Notifications ─────────────────────────────────────────────────────
+    const currency = await getCurrencySettings();
+    const totalFormatted = `${currency.currencySign}${calculatedTotal.toFixed(2)}`;
+
+    // Fix: use calculatedTotal instead of client total
+    // Web Push
     try {
       const PushSubscription = require('../model/PushSubscription');
       const { sendNotification } = require('../utils/sendPushNotification');
@@ -316,9 +387,6 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
       }).select('endpoint keys');
 
       if (adminSubs.length > 0) {
-        const currency = await getCurrencySettings();
-        const totalFormatted = `${currency.currencySign}${total.toFixed(2)}`;
-
         await Promise.allSettled(
           adminSubs.map(sub =>
             sendNotification(
@@ -326,19 +394,16 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
               'New Order Received!',
               `${orderNumber} • ${totalFormatted} • ${paymentMethod.toUpperCase()}`,
               { orderId: order._id.toString(), url: `/admin/orders/${order._id}` }
-            ).catch(err => console.warn('Push failed for one sub:', err.message))
+            ).catch(err => console.warn('Push failed:', err.message))
           )
         );
       }
     } catch (pushErr) {
-      console.error('Push notification error (non-critical):', pushErr);
+      console.error('Push notification error:', pushErr);
     }
 
-    // Email + In-app notifications
+    // Email + In-app (use calculatedTotal)
     try {
-      const currency = await getCurrencySettings();
-      const totalFormatted = `${currency.currencySign}${total.toFixed(2)}`;
-
       const productRows = buildProductRows(order);
 
       const customerVars = {
@@ -353,8 +418,6 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
 
       await sendEmail(order.user.email, 'order_placed', customerVars);
 
-
-      // Admins
       const admins = await User.find({ role: { $in: ['Super Admin', 'Manager'] } })
         .select('_id email name')
         .lean();
@@ -375,17 +438,15 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
           await sendEmail(admin.email, 'order_placed_admin', adminVars);
         }
 
-        // In-app notification
         await createNotification({
           userId: admin._id,
           type: 'order_placed',
           title: 'New Order Received',
           message: `Order ${orderNumber} • ${totalFormatted} • ${paymentMethod.toUpperCase()}`,
           related: { orderId: order._id.toString() }
-        }).catch(err => console.error('Order placed notification failed:', err));
+        }).catch(err => console.error('Notification failed:', err));
       }
 
-      // Low stock check
       if (variantsToCheck.length > 0) {
         await checkAndSendLowStockAlerts(variantsToCheck, admins[0]?.email || null);
       }
@@ -410,7 +471,6 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
     });
   }
 });
-
 
 router.get('/:id', authMiddleware, requireRole(['Super Admin', 'Manager', 'Customer']), async (req, res) => {
   try {
