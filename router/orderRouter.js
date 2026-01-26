@@ -328,13 +328,7 @@ router.post('/', authMiddleware, requireRole(['Super Admin', 'Manager', 'Custome
 
 
 
-    // ── Critical security check: client total must match server calculation ──
-    if (Math.abs(calculatedTotal - Number(clientTotal)) > 0.05) {
-      return res.status(400).json({
-        success: false,
-        msg: `Price/discount/total mismatch. Expected total: ${calculatedTotal.toFixed(2)}`
-      });
-    }
+   
 
     // ── Create order with SERVER values only ──────────────────────────────
     const orderNumber = await generateOrderNumber();
